@@ -812,6 +812,7 @@ async function handleSaveRepo(req, res) {
   cfg.Repos = cfg.Repos || {};
   cfg.Repos[name] = repoPath;
   fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf8');
+  broadcast({ type: 'config-changed' });
   json(res, { ok: true });
 }
 
@@ -990,6 +991,7 @@ async function handleFileSave(req, res) {
 
   try {
     fs.writeFileSync(resolved, content, 'utf8');
+    broadcast({ type: 'ui-action', action: 'file-changed', repo, path: filePath });
     json(res, { ok: true });
   } catch (e) {
     json(res, { error: e.message }, 500);
@@ -1343,6 +1345,7 @@ async function handleSaveNote(req, res) {
   if (!resolved.startsWith(path.resolve(notesDir))) return json(res, { error: 'Invalid path' }, 403);
   fs.mkdirSync(notesDir, { recursive: true });
   fs.writeFileSync(resolved, content || '', 'utf8');
+  broadcast({ type: 'ui-action', action: 'refresh-notes' });
   json(res, { ok: true });
 }
 
@@ -1355,6 +1358,7 @@ async function handleCreateNote(req, res) {
   if (fs.existsSync(filePath)) return json(res, { error: 'Note already exists' }, 409);
   fs.mkdirSync(notesDir, { recursive: true });
   fs.writeFileSync(filePath, `# ${safeName}\n\n`, 'utf8');
+  broadcast({ type: 'ui-action', action: 'refresh-notes' });
   json(res, { ok: true, name: safeName });
 }
 
@@ -1365,6 +1369,7 @@ async function handleDeleteNote(req, res) {
   const resolved = path.resolve(filePath);
   if (!resolved.startsWith(path.resolve(notesDir))) return json(res, { error: 'Invalid path' }, 403);
   if (fs.existsSync(resolved)) fs.unlinkSync(resolved);
+  broadcast({ type: 'ui-action', action: 'refresh-notes' });
   json(res, { ok: true });
 }
 

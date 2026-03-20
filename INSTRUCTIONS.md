@@ -138,6 +138,9 @@ Scripts are in `.\scripts\`. Always prefer these over raw API calls.
 | `Save-Note.ps1` | Save markdown note | `.\scripts\Save-Note.ps1 -Name 'Summary' -Content '# My notes...'` |
 | `Show-Diff.ps1` | Open diff viewer in dashboard | `.\scripts\Show-Diff.ps1` or `.\scripts\Show-Diff.ps1 -Repo "MyRepo" -Path "src/file.tsx"` |
 | `New-PullRequest.ps1` | Create Azure DevOps pull request | `.\scripts\New-PullRequest.ps1 -Repo "MyRepo" -Title "Add feature" -Description "Details..."` |
+| `Get-MyWorkItems.ps1` | My assigned items (grouped by state) | `.\scripts\Get-MyWorkItems.ps1` or `.\scripts\Get-MyWorkItems.ps1 -State Active` |
+| `Commit-Changes.ps1` | Stage, commit, auto-link AB# | `.\scripts\Commit-Changes.ps1 -Message "Fix bug"` (opens diff viewer first) |
+| `Push-AndPR.ps1` | Push + create PR in one shot | `.\scripts\Push-AndPR.ps1 -Repo "MyRepo"` (auto-generates title from branch) |
 
 ## CRITICAL: Showing Changes to the User
 

@@ -64,6 +64,9 @@ You are an AI assistant inside **DevOps Pilot**, an Electron-based Azure DevOps 
 | `Save-Note.ps1` | Save a markdown note | `.\scripts\Save-Note.ps1 -Name 'Note' -Content '...'` |
 | `Show-Diff.ps1` | **Open diff viewer** (NOT `git diff`) | `.\scripts\Show-Diff.ps1` |
 | `New-PullRequest.ps1` | **Create ADO pull request** (NOT `gh`) | `.\scripts\New-PullRequest.ps1 -Repo "MyRepo" -Title "..."` |
+| `Get-MyWorkItems.ps1` | My assigned items (grouped by state) | `.\scripts\Get-MyWorkItems.ps1` |
+| `Commit-Changes.ps1` | Stage, commit, auto-link AB# | `.\scripts\Commit-Changes.ps1 -Message "Fix bug"` |
+| `Push-AndPR.ps1` | Push + create PR in one shot | `.\scripts\Push-AndPR.ps1 -Repo "MyRepo"` |
 
 ## Common Tasks — Quick Reference
 

@@ -3089,7 +3089,17 @@ function handleUiAction(msg) {
   if (msg.action === 'switch-tab') switchTab(msg.tab);
   if (msg.action === 'view-workitem' && msg.id) viewWorkItem(msg.id);
   if (msg.action === 'view-note' && msg.name) { switchTab('notes'); setTimeout(() => { openNote(msg.name).then(() => setNoteMode('preview')); }, 200); }
-  if (msg.action === 'refresh-workitems') loadWorkItems(true);
+  if (msg.action === 'refresh-workitems') {
+    loadWorkItems(true);
+    // Also refresh the currently open work item detail if any
+    if (currentWiDetail) viewWorkItem(currentWiDetail.id);
+  }
+  if (msg.action === 'refresh-notes') loadNotesList();
+  if (msg.action === 'file-changed') {
+    // Refresh git status and diff tab when files change
+    const repo = msg.repo || activeRepo || filesCurrentRepo;
+    if (repo) loadGitStatusForDiffTab(repo);
+  }
   if (msg.action === 'view-file' && msg.repo && msg.path) {
     filesCurrentRepo = msg.repo;
     activeRepo = msg.repo;
@@ -4040,6 +4050,30 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     document.querySelectorAll('.modal-overlay.open').forEach(m => m.classList.remove('open'));
+  }
+
+  // Don't intercept when typing in inputs/textareas (unless it's a specific shortcut)
+  const inInput = document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA' || document.activeElement?.tagName === 'SELECT';
+
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey) {
+    // Ctrl+B → Board
+    if (e.key === 'b' && !inInput) { e.preventDefault(); switchTab('board'); }
+    // Ctrl+T → Terminal
+    if (e.key === 't' && !inInput) { e.preventDefault(); switchTab('terminal'); }
+    // Ctrl+D → Diff viewer (if visible)
+    if (e.key === 'd' && !inInput) {
+      if (document.getElementById('diffviewTabBtn').style.display !== 'none') {
+        e.preventDefault(); switchTab('diffview');
+      }
+    }
+    // Ctrl+R → Refresh work items
+    if (e.key === 'r' && !inInput) { e.preventDefault(); loadWorkItems(true); toast('Refreshed', 'success'); }
+  }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+    // Ctrl+Shift+N → Create new work item
+    if (e.key === 'N') { e.preventDefault(); openCreateModal(); }
+    // Ctrl+Shift+F → Find work items
+    if (e.key === 'F' && !inInput) { e.preventDefault(); switchTab('backlog'); setTimeout(() => document.getElementById('backlogSearch')?.focus(), 100); }
   }
 });
 
