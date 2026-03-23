@@ -826,11 +826,24 @@ async function handleStartWorking(req, res) {
     if (!fs.existsSync(repoPath)) return json(res, { error: `Path does not exist: ${repoPath}` }, 400);
 
     // Fetch work item for branch name
-    const wi = await adoRequest('GET', `/wit/workitems/${workItemId}?fields=System.Title,System.WorkItemType&api-version=7.1`);
+    const wi = await adoRequest('GET', `/wit/workitems/${workItemId}?fields=System.Title,System.WorkItemType,System.Description&api-version=7.1`);
     const title = wi.fields['System.Title'] || 'work';
+    const description = (wi.fields['System.Description'] || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
     const wiType = wi.fields['System.WorkItemType'] || 'feature';
     const prefix = wiType.toLowerCase() === 'bug' ? 'bugfix' : 'feature';
-    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+
+    // Use AI to generate a concise branch slug from the work item context
+    let slug;
+    try {
+      const prompt = `Generate a short git branch slug (2-5 words, lowercase, hyphen-separated, no special chars) that clearly describes this work item. Reply with ONLY the slug, nothing else.\n\nTitle: ${title}\nType: ${wiType}${description ? `\nDescription: ${description}` : ''}`;
+      slug = execSync(`claude --print "${prompt.replace(/"/g, '\\"')}"`, {
+        encoding: 'utf8', timeout: 15000, windowsHide: true,
+      }).trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+    } catch (_) {
+      // Fallback to simple slugification if AI is unavailable
+      slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+    }
+    if (!slug) slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
     const branchName = `${prefix}/AB#${workItemId}-${slug}`;
 
     // Move work item to Active
