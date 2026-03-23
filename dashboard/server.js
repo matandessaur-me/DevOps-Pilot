@@ -129,6 +129,10 @@ const server = http.createServer(async (req, res) => {
     // ── Project Scripts (package.json) ──────────────────────────────────────
     if (url.pathname === '/api/project/scripts' && req.method === 'GET') return handleProjectScripts(url, res);
 
+    // ── File Search ────────────────────────────────────────────────────────
+    if (url.pathname === '/api/files/search' && req.method === 'GET') return handleFileSearch(url, res);
+    if (url.pathname === '/api/files/grep' && req.method === 'GET')   return handleFileGrep(url, res);
+
     // ── Serve repo files (images, etc.) ────────────────────────────────────
     if (url.pathname === '/api/files/serve' && req.method === 'GET') return handleServeFile(url, res);
 
@@ -439,7 +443,7 @@ async function handleWorkItems(url, res) {
     }
 
     const details = await adoRequest('GET',
-      `/wit/workitems?ids=${ids.join(',')}&fields=System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.Tags,System.ChangedDate,Microsoft.VSTS.Common.Priority,System.IterationPath,Microsoft.VSTS.Scheduling.StoryPoints,Microsoft.VSTS.Scheduling.Effort&api-version=7.1`
+      `/wit/workitems?ids=${ids.join(',')}&fields=System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.Tags,System.CreatedDate,System.ChangedDate,Microsoft.VSTS.Common.Priority,System.IterationPath,Microsoft.VSTS.Scheduling.StoryPoints,Microsoft.VSTS.Scheduling.Effort,System.Parent&api-version=7.1`
     );
 
     const result = (details.value || []).map(wi => {
@@ -455,6 +459,8 @@ async function handleWorkItems(url, res) {
         priority: f['Microsoft.VSTS.Common.Priority'] || 0,
         iterationPath: f['System.IterationPath'] || '',
         storyPoints: f['Microsoft.VSTS.Scheduling.StoryPoints'] || f['Microsoft.VSTS.Scheduling.Effort'] || '',
+        createdDate: f['System.CreatedDate'] || '',
+        parentId: f['System.Parent'] || null,
       };
     });
 
@@ -957,6 +963,93 @@ function handleFileTree(url, res) {
   } catch (e) {
     json(res, { error: e.message }, 500);
   }
+}
+
+// ── File name search (recursive, returns matching paths) ──────────────────
+function handleFileSearch(url, res) {
+  const repoName = url.searchParams.get('repo');
+  const query = (url.searchParams.get('q') || '').toLowerCase();
+  const repoPath = getRepoPath(repoName);
+  if (!repoPath) return json(res, { error: 'Repo not found' }, 400);
+  if (!query) return json(res, { results: [] });
+
+  const SKIP = new Set(['.git', 'node_modules', '__pycache__', 'dist', 'build', '.next', '.nuxt', 'coverage', '.cache', 'bin', 'obj']);
+  const BINARY_EXTS = new Set(['png','jpg','jpeg','gif','webp','ico','bmp','mp4','webm','ogg','mov','avi','zip','tar','gz','exe','dll','woff','woff2','ttf','eot','pdf','lock']);
+  const results = [];
+  const MAX = 80;
+
+  function walk(dir, rel) {
+    if (results.length >= MAX) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    for (const e of entries) {
+      if (results.length >= MAX) return;
+      if (e.name.startsWith('.') || SKIP.has(e.name)) continue;
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        walk(path.join(dir, e.name), childRel);
+      } else {
+        const ext = path.extname(e.name).slice(1).toLowerCase();
+        if (BINARY_EXTS.has(ext)) continue;
+        if (e.name.toLowerCase().includes(query)) {
+          results.push({ path: childRel, name: e.name, isDir: false });
+        }
+      }
+    }
+  }
+  walk(repoPath, '');
+  json(res, { results });
+}
+
+// ── Content grep (search inside files, returns matches with line numbers) ──
+function handleFileGrep(url, res) {
+  const repoName = url.searchParams.get('repo');
+  const query = url.searchParams.get('q') || '';
+  const repoPath = getRepoPath(repoName);
+  if (!repoPath) return json(res, { error: 'Repo not found' }, 400);
+  if (!query || query.length < 2) return json(res, { results: [] });
+
+  const SKIP = new Set(['.git', 'node_modules', '__pycache__', 'dist', 'build', '.next', '.nuxt', 'coverage', '.cache', 'bin', 'obj']);
+  const BINARY_EXTS = new Set(['png','jpg','jpeg','gif','webp','ico','bmp','mp4','webm','ogg','mov','avi','zip','tar','gz','exe','dll','woff','woff2','ttf','eot','pdf','lock','map']);
+  const results = [];
+  const MAX_FILES = 50;
+  const MAX_MATCHES = 150;
+  let fileCount = 0;
+  const queryLower = query.toLowerCase();
+
+  function walk(dir, rel) {
+    if (results.length >= MAX_MATCHES) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    for (const e of entries) {
+      if (results.length >= MAX_MATCHES) return;
+      if (e.name.startsWith('.') || SKIP.has(e.name)) continue;
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        walk(path.join(dir, e.name), childRel);
+      } else {
+        const ext = path.extname(e.name).slice(1).toLowerCase();
+        if (BINARY_EXTS.has(ext)) continue;
+        if (fileCount >= MAX_FILES && results.length > 0) return;
+        try {
+          const fullPath = path.join(dir, e.name);
+          const stat = fs.statSync(fullPath);
+          if (stat.size > 512 * 1024) continue; // skip files > 512KB
+          const content = fs.readFileSync(fullPath, 'utf8');
+          const lines = content.split('\n');
+          fileCount++;
+          for (let i = 0; i < lines.length; i++) {
+            if (results.length >= MAX_MATCHES) break;
+            if (lines[i].toLowerCase().includes(queryLower)) {
+              results.push({ path: childRel, name: e.name, line: i + 1, text: lines[i].substring(0, 200) });
+            }
+          }
+        } catch (_) {}
+      }
+    }
+  }
+  walk(repoPath, '');
+  json(res, { results });
 }
 
 function handleFileRead(url, res) {

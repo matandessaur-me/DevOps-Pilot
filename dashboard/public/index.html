@@ -302,10 +302,41 @@
       cursor: grab; transition: all 0.12s;
     }
     .board-card:hover { border-color: var(--accent); background: var(--base); }
+    .board-card.on-hold { border-color: var(--red); border-width: 2px; }
+    .board-card.on-hold:hover { border-color: var(--red); }
     .board-card.dragging { opacity: 0.4; cursor: grabbing; }
-    .board-card-id { font-size: 10px; color: var(--subtext0); font-family: var(--font-mono); }
+    .board-card-id { font-size: 10px; color: var(--subtext0); font-family: var(--font-mono); display: flex; justify-content: space-between; align-items: center; }
+    .on-hold-label { font-size: 9px; font-weight: 600; color: var(--red); opacity: 0.7; text-transform: uppercase; letter-spacing: 0.5px; }
     .board-card-title { font-size: 12px; color: var(--text); margin: 3px 0; line-height: 1.35; }
     .board-card-meta { font-size: 10px; color: var(--subtext0); display: flex; align-items: center; gap: 6px; }
+    /* ── Parent-child grouping ──────────────────────────────────────────── */
+    .board-parent-group { margin-bottom: 8px; border: 1px solid var(--surface1); border-radius: var(--radius); overflow: hidden; }
+    .board-parent-group > .board-card { margin-bottom: 0; border-radius: 0; border: none; border-bottom: 1px solid var(--surface1); }
+    .board-parent-group > .board-card:last-child { border-bottom: none; }
+    .board-parent-group > .board-card.parent-card { background: var(--surface0); }
+    .board-parent-group > .board-card.child-card { padding-left: 22px; background: var(--mantle); font-size: 11px; }
+    .board-parent-group > .board-card.child-card .board-card-id::before { content: '└ '; color: var(--overlay1); }
+    .board-parent-group.collapsed > .board-card.child-card { display: none; }
+    /* Expand/collapse toggle */
+    .board-card.parent-card { position: relative; }
+    .parent-toggle { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: 1px solid var(--surface2); background: var(--surface1); color: var(--subtext0); cursor: pointer; padding: 0; font-size: 10px; border-radius: 4px; flex-shrink: 0; position: absolute; top: 6px; right: 6px; z-index: 2; }
+    .parent-toggle:hover { background: var(--surface2); color: var(--text); border-color: var(--overlay0); }
+    .parent-toggle svg { width: 12px; height: 12px; transition: transform 0.15s; }
+    .collapsed .parent-toggle svg { transform: rotate(-90deg); }
+    /* Child status rollup on parent card */
+    .child-rollup { display: flex; align-items: center; gap: 3px; margin-top: 4px; }
+    .child-rollup-bar { display: flex; height: 4px; border-radius: 2px; overflow: hidden; flex: 1; background: var(--surface1); }
+    .child-rollup-bar > span { display: block; height: 100%; }
+    .child-rollup-label { font-size: 9px; color: var(--subtext0); white-space: nowrap; }
+    .child-rollup-complete { color: var(--green) !important; font-weight: 600; }
+    /* Child cards in other columns — parent reference */
+    .child-parent-ref { font-size: 9px; color: var(--overlay1); margin-bottom: 2px; display: flex; align-items: center; gap: 3px; }
+    .child-parent-ref span { cursor: pointer; }
+    .child-parent-ref span:hover { color: var(--accent); }
+    .board-card.has-parent { border-left: 2px solid var(--overlay1); }
+    /* Highlight linked cards on hover */
+    .board-card.family-highlight { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .board-parent-group.family-highlight { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
     /* ── Unified view toolbar (Board + Backlog) ──────────────────────────── */
     .view-toolbar {
       display: flex; align-items: center; gap: 8px;
@@ -403,6 +434,20 @@
     .backlog-table tbody tr:hover { background: var(--surface0); }
     .backlog-table .wi-id { font-family: var(--font-mono); font-size: 11px; color: var(--subtext0); }
     .backlog-table .wi-title { color: var(--text); max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Backlog parent-child hierarchy */
+    .backlog-table tr.backlog-parent td { background: var(--surface0); font-weight: 600; }
+    .backlog-table tr.backlog-child td:first-child { padding-left: 28px; }
+    .backlog-table tr.backlog-child td:first-child::before { content: '└ '; color: var(--overlay1); }
+    .backlog-table tr.backlog-child-hidden { display: none; }
+    .backlog-table tr.on-hold td { background: rgba(243, 139, 168, 0.08); }
+    .backlog-parent-toggle { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 1px solid var(--surface2); background: var(--surface1); color: var(--subtext0); cursor: pointer; padding: 0; margin-right: 4px; border-radius: 4px; vertical-align: middle; }
+    .backlog-parent-toggle:hover { background: var(--surface2); color: var(--text); border-color: var(--overlay0); }
+    .backlog-parent-toggle svg { width: 10px; height: 10px; transition: transform 0.15s; }
+    .backlog-parent-toggle.collapsed svg { transform: rotate(-90deg); }
+    .backlog-child-rollup { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; }
+    .backlog-child-rollup .child-rollup-bar { width: 40px; height: 3px; display: inline-flex; border-radius: 2px; overflow: hidden; background: var(--surface1); }
+    .backlog-child-rollup .child-rollup-bar > span { display: block; height: 100%; }
+    .backlog-child-rollup .child-rollup-label { font-size: 9px; color: var(--subtext0); font-weight: 400; }
     .state-badge {
       display: inline-block; padding: 2px 8px; border-radius: 99px;
       font-size: 10px; font-weight: 600;
@@ -460,6 +505,42 @@
       display: flex; align-items: center; padding: 0 8px; height: 38px;
       border-bottom: 1px solid var(--surface0); flex-shrink: 0;
     }
+    .files-search-bar {
+      display: flex; align-items: stretch; padding: 6px 8px; border-bottom: 1px solid var(--surface0); flex-shrink: 0; gap: 0;
+    }
+    .files-search-bar input {
+      flex: 1; padding: 0 8px; border: 1px solid var(--surface2); border-radius: var(--radius) 0 0 var(--radius);
+      background: var(--mantle); color: var(--text); font-size: 12px; outline: none; min-width: 0;
+      height: 28px; box-sizing: border-box;
+    }
+    .files-search-bar input:focus { border-color: var(--accent); }
+    .files-search-mode-toggle {
+      display: flex; flex-shrink: 0;
+    }
+    .files-search-mode-toggle button {
+      padding: 0 8px; border: 1px solid var(--surface2); border-left: none; background: var(--surface0);
+      color: var(--subtext0); font-size: 10px; cursor: pointer; font-weight: 600; transition: all 0.12s;
+      letter-spacing: 0.3px; height: 28px; box-sizing: border-box;
+    }
+    .files-search-mode-toggle button:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+    .files-search-mode-toggle button.active { background: var(--accent); color: var(--base); border-color: var(--accent); }
+    .files-search-mode-toggle button:hover:not(.active) { background: var(--surface1); color: var(--text); }
+    .files-search-results {
+      flex: 1; overflow-y: auto; min-height: 0;
+    }
+    .files-search-results .search-result {
+      display: flex; align-items: flex-start; gap: 6px; padding: 5px 10px; cursor: pointer;
+      font-size: 11px; border-bottom: 1px solid var(--surface0); transition: background 0.1s;
+    }
+    .files-search-results .search-result:hover { background: var(--surface0); }
+    .search-result-icon { color: var(--subtext0); flex-shrink: 0; margin-top: 1px; }
+    .search-result-path { color: var(--subtext0); font-family: var(--font-mono); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .search-result-name { color: var(--text); font-weight: 500; }
+    .search-result-line { color: var(--overlay1); font-family: var(--font-mono); font-size: 10px; }
+    .search-result-text { color: var(--subtext1); font-family: var(--font-mono); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .search-result-text mark { background: rgba(249, 226, 175, 0.25); color: var(--yellow); border-radius: 2px; padding: 0 1px; }
+    .monaco-highlight-line { background: rgba(249, 226, 175, 0.12) !important; }
+    .monaco-highlight-match { background: rgba(249, 226, 175, 0.35) !important; border-radius: 2px; outline: 1px solid rgba(249, 226, 175, 0.5); }
     .files-sidebar-tabs {
       display: flex; border-bottom: 1px solid var(--surface0); flex-shrink: 0;
     }
@@ -1116,6 +1197,14 @@
               <option value="">Select repo...</option>
             </select>
           </div>
+          <div class="files-search-bar">
+            <input type="text" id="filesSearchInput" placeholder="Search files..." oninput="onFilesSearchInput()" onkeydown="if(event.key==='Escape'){this.value='';onFilesSearchInput();}" />
+            <div class="files-search-mode-toggle">
+              <button class="active" id="filesSearchModeFile" onclick="setFilesSearchMode('file')">File</button>
+              <button id="filesSearchModeContent" onclick="setFilesSearchMode('content')">Content</button>
+            </div>
+          </div>
+          <div class="files-search-results" id="filesSearchResults" style="display:none;"></div>
           <div class="files-git-bar" id="filesGitBar" style="display:none;">
             <span class="files-branch" id="filesBranch"></span>
             <span class="files-git-status" id="filesGitStatus"></span>
@@ -1221,6 +1310,7 @@
 
     <!-- Team Panel -->
     <div class="intel-panel" id="ipanel-team">
+      <input type="text" id="teamSearch" placeholder="Search name or email..." oninput="filterTeamMembers()" style="width:100%;padding:6px 10px;margin-bottom:8px;border:1px solid var(--surface2);border-radius:var(--radius);background:var(--mantle);color:var(--text);font-size:12px;outline:none;box-sizing:border-box;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--surface2)'" />
       <div id="teamList" style="color:var(--subtext0);font-size:12px;">Loading team...</div>
     </div>
 
@@ -1845,10 +1935,131 @@ function fileIcon(name) {
   return icons[ext] || 'file';
 }
 
+// ── Files Search ──────────────────────────────────────────────────────
+let _filesSearchMode = 'file'; // 'file' or 'content'
+let _filesSearchTimer = null;
+
+function setFilesSearchMode(mode) {
+  _filesSearchMode = mode;
+  document.getElementById('filesSearchModeFile').classList.toggle('active', mode === 'file');
+  document.getElementById('filesSearchModeContent').classList.toggle('active', mode === 'content');
+  document.getElementById('filesSearchInput').placeholder = mode === 'file' ? 'Search files...' : 'Search in files...';
+  const q = document.getElementById('filesSearchInput').value.trim();
+  if (q) onFilesSearchInput();
+}
+
+function onFilesSearchInput() {
+  clearTimeout(_filesSearchTimer);
+  const q = document.getElementById('filesSearchInput').value.trim();
+  const resultsEl = document.getElementById('filesSearchResults');
+  const treeEl = document.getElementById('filesTree');
+  const bcEl = document.getElementById('filesBreadcrumb');
+  const changedBar = document.getElementById('filesChangedBar');
+  const gitBar = document.getElementById('filesGitBar');
+  const scriptsBar = document.getElementById('filesScriptsBar');
+
+  if (!q) {
+    resultsEl.style.display = 'none';
+    resultsEl.innerHTML = '';
+    treeEl.style.display = '';
+    bcEl.style.display = '';
+    // Restore bars only if they were populated
+    if (gitBar && gitBar.dataset.wasVisible) gitBar.style.display = '';
+    if (changedBar && changedBar.dataset.wasVisible) changedBar.style.display = '';
+    if (scriptsBar && scriptsBar.dataset.wasVisible) scriptsBar.style.display = '';
+    return;
+  }
+
+  // Remember which bars were visible before hiding
+  if (gitBar && gitBar.style.display !== 'none') gitBar.dataset.wasVisible = '1';
+  if (changedBar && changedBar.style.display !== 'none') changedBar.dataset.wasVisible = '1';
+  if (scriptsBar && scriptsBar.style.display !== 'none') scriptsBar.dataset.wasVisible = '1';
+
+  // Hide tree and bars, show results
+  treeEl.style.display = 'none';
+  bcEl.style.display = 'none';
+  if (gitBar) gitBar.style.display = 'none';
+  if (changedBar) changedBar.style.display = 'none';
+  if (scriptsBar) scriptsBar.style.display = 'none';
+  resultsEl.style.display = '';
+  resultsEl.innerHTML = '<div style="padding:12px;text-align:center;"><div class="spinner" style="margin:0 auto;"></div></div>';
+
+  const delay = _filesSearchMode === 'content' ? 400 : 250;
+  _filesSearchTimer = setTimeout(() => runFilesSearch(q), delay);
+}
+
+async function runFilesSearch(query) {
+  const resultsEl = document.getElementById('filesSearchResults');
+  if (!filesCurrentRepo) {
+    resultsEl.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--subtext0);text-align:center;">Select a repository first</div>';
+    return;
+  }
+
+  const endpoint = _filesSearchMode === 'file' ? '/api/files/search' : '/api/files/grep';
+  try {
+    const res = await fetch(`${endpoint}?repo=${encodeURIComponent(filesCurrentRepo)}&q=${encodeURIComponent(query)}`);
+    const data = await res.json();
+    if (data.error) { resultsEl.innerHTML = `<div style="padding:12px;font-size:11px;color:var(--red);">${esc(data.error)}</div>`; return; }
+
+    if (data.results.length === 0) {
+      resultsEl.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--subtext0);text-align:center;">No results found</div>';
+      return;
+    }
+
+    if (_filesSearchMode === 'file') {
+      resultsEl.innerHTML = data.results.map(r => {
+        const dir = r.path.includes('/') ? r.path.substring(0, r.path.lastIndexOf('/')) : '';
+        return `<div class="search-result" onclick="viewFile('${esc(r.path)}', 1)">
+          <i data-lucide="file" class="search-result-icon" style="width:14px;height:14px;"></i>
+          <div style="overflow:hidden;">
+            <div class="search-result-name">${esc(r.name)}</div>
+            ${dir ? `<div class="search-result-path">${esc(dir)}</div>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+    } else {
+      // Group by file
+      const grouped = new Map();
+      for (const r of data.results) {
+        if (!grouped.has(r.path)) grouped.set(r.path, []);
+        grouped.get(r.path).push(r);
+      }
+      const qLower = query.toLowerCase();
+      const qEscaped = query.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      let html = '';
+      for (const [filePath, matches] of grouped) {
+        const name = filePath.includes('/') ? filePath.substring(filePath.lastIndexOf('/') + 1) : filePath;
+        html += `<div style="padding:4px 10px;font-size:10px;font-weight:600;color:var(--overlay1);background:var(--surface0);border-bottom:1px solid var(--surface0);display:flex;align-items:center;gap:4px;cursor:pointer;" onclick="viewFile('${esc(filePath)}', ${matches[0].line}, '${qEscaped}')">
+          <i data-lucide="file" style="width:11px;height:11px;"></i>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(filePath)}</span>
+          <span style="margin-left:auto;color:var(--subtext0);font-weight:400;">${matches.length}</span>
+        </div>`;
+        for (const m of matches.slice(0, 5)) {
+          const highlighted = esc(m.text.trimStart()).replace(new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), match => `<mark>${match}</mark>`);
+          html += `<div class="search-result" onclick="viewFile('${esc(filePath)}', ${m.line}, '${qEscaped}')">
+            <span class="search-result-line">L${m.line}</span>
+            <div class="search-result-text">${highlighted}</div>
+          </div>`;
+        }
+        if (matches.length > 5) {
+          html += `<div style="padding:2px 10px 4px 34px;font-size:9px;color:var(--subtext0);">+${matches.length - 5} more matches</div>`;
+        }
+      }
+      resultsEl.innerHTML = html;
+    }
+    try { lucide.createIcons(); } catch (_) {}
+  } catch (e) {
+    resultsEl.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--red);">Search failed</div>';
+  }
+}
+
 const IMAGE_EXTS = ['png','jpg','jpeg','gif','svg','webp','ico','bmp'];
 const VIDEO_EXTS = ['mp4','webm','ogg','mov','avi'];
 
-async function viewFile(filePath) {
+let _pendingGoToLine = null; // { line, query } — set before file loads, consumed by Monaco
+
+async function viewFile(filePath, goToLine, highlightQuery) {
+  _pendingGoToLine = goToLine ? { line: goToLine, query: highlightQuery || null } : null;
   const ext = filePath.split('.').pop().toLowerCase();
 
   // Handle images and videos — show preview, not code
@@ -1945,6 +2156,40 @@ function createOrUpdateMonaco(content, ext, readOnly) {
     monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       if (!monacoEditor.getOption(monaco.editor.EditorOption.readOnly)) saveFilesEdit();
     });
+  }
+
+  // Go to line and highlight if pending
+  if (_pendingGoToLine && monacoEditor) {
+    const { line, query } = _pendingGoToLine;
+    _pendingGoToLine = null;
+    setTimeout(() => {
+      monacoEditor.revealLineInCenter(line);
+      monacoEditor.setPosition({ lineNumber: line, column: 1 });
+
+      // Highlight the line
+      const decorations = [{ range: new monaco.Range(line, 1, line, 1), options: { isWholeLine: true, className: 'monaco-highlight-line', overviewRuler: { color: '#f9e2af80', position: monaco.editor.OverviewRulerLane.Full } } }];
+
+      // Also highlight query matches on that line if we have a query
+      if (query) {
+        const model = monacoEditor.getModel();
+        const lineContent = model.getLineContent(line);
+        const qLower = query.toLowerCase();
+        let idx = 0;
+        while (idx < lineContent.length) {
+          const pos = lineContent.toLowerCase().indexOf(qLower, idx);
+          if (pos === -1) break;
+          decorations.push({
+            range: new monaco.Range(line, pos + 1, line, pos + 1 + query.length),
+            options: { inlineClassName: 'monaco-highlight-match' }
+          });
+          idx = pos + 1;
+        }
+      }
+
+      // Apply decorations (auto-clear after 5 seconds)
+      const ids = monacoEditor.deltaDecorations([], decorations);
+      setTimeout(() => { if (monacoEditor) monacoEditor.deltaDecorations(ids, []); }, 5000);
+    }, 50);
   }
 }
 
@@ -3284,6 +3529,35 @@ document.addEventListener('click', (e) => {
 
 const HIDDEN_TYPES = ['Test Case', 'Test Suite'];
 
+// Check if a work item has an "on hold", "hold", or "pending" tag (case-insensitive, with or without dash/space)
+function isOnHold(wi) {
+  if (!wi.tags) return false;
+  return wi.tags.split(';').some(t => {
+    const tag = t.trim().toLowerCase();
+    return /^on[\s-]?hold$/.test(tag) || tag === 'hold' || tag === 'pending';
+  });
+}
+
+// Track expanded parents across renders (default: collapsed; persisted in localStorage)
+const _expandedParents = new Set(JSON.parse(localStorage.getItem('devops-pilot-expanded-parents') || '[]'));
+function toggleParentCollapse(parentId, event) {
+  event.stopPropagation();
+  if (_expandedParents.has(parentId)) _expandedParents.delete(parentId);
+  else _expandedParents.add(parentId);
+  localStorage.setItem('devops-pilot-expanded-parents', JSON.stringify([..._expandedParents]));
+  renderBoard();
+}
+
+// Highlight all family members (parent + children) on hover
+function highlightFamily(parentId, on) {
+  document.querySelectorAll(`[data-family="${parentId}"]`).forEach(el => {
+    el.classList.toggle('family-highlight', on);
+  });
+}
+
+// State colors for rollup bar
+const STATE_COLORS = { New: 'var(--blue)', Active: 'var(--green)', Resolved: 'var(--mauve)', Closed: 'var(--subtext0)', Done: 'var(--subtext0)' };
+
 function renderBoard() {
   const search = (document.getElementById('boardSearch')?.value || '').toLowerCase();
   const typeFilters = getMultiSelectValues('boardType');
@@ -3302,6 +3576,19 @@ function renderBoard() {
     wi.title.toLowerCase().includes(search) || String(wi.id).includes(search) || wi.assignedTo.toLowerCase().includes(search)
   );
 
+  // Build global parent-child index across ALL columns
+  const allItemMap = new Map(filtered.map(wi => [wi.id, wi]));
+  const childrenOf = new Map();   // parentId -> [all child items across all states]
+  const parentOf = new Map();     // childId -> parent item
+
+  for (const wi of filtered) {
+    if (wi.parentId && allItemMap.has(wi.parentId)) {
+      parentOf.set(wi.id, allItemMap.get(wi.parentId));
+      if (!childrenOf.has(wi.parentId)) childrenOf.set(wi.parentId, []);
+      childrenOf.get(wi.parentId).push(wi);
+    }
+  }
+
   const buckets = { New: [], Active: [], Resolved: [], Closed: [] };
   for (const wi of filtered) {
     const state = wi.state;
@@ -3310,23 +3597,112 @@ function renderBoard() {
     else buckets.New.push(wi); // fallback
   }
 
-  for (const [state, items] of Object.entries(buckets)) {
-    const container = document.getElementById(`board${state}`);
-    const count = document.getElementById(`boardCount${state}`);
-    if (!container) continue;
-    count.textContent = items.length;
-    container.innerHTML = items.map(wi => `
-      <div class="board-card" draggable="true" data-wi-id="${wi.id}" onclick="viewWorkItem(${wi.id})"
-           ondragstart="onCardDragStart(event, ${wi.id})" ondragend="onCardDragEnd(event)">
-        <div class="board-card-id">#${wi.id}</div>
+  // Build child rollup HTML for a parent card (only if it actually has children)
+  function childRollupHtml(parentId) {
+    const children = childrenOf.get(parentId);
+    if (!children || children.length === 0) return ''; // no children = no bar
+    const total = children.length;
+    const closedCount = children.filter(c => c.state === 'Closed' || c.state === 'Done').length;
+    const allDone = closedCount === total;
+    const pct = (closedCount / total * 100).toFixed(1);
+    return `
+      <div class="child-rollup">
+        <div class="child-rollup-bar"><span style="width:${pct}%;background:var(--green)"></span></div>
+        <span class="child-rollup-label ${allDone ? 'child-rollup-complete' : ''}">${closedCount}/${total} closed</span>
+      </div>`;
+  }
+
+  // Render a single board card
+  function boardCardHtml(wi, extraClass = '', opts = {}) {
+    const familyId = opts.familyId || '';
+    const parentRef = opts.parentRef || null;
+    const isParent = opts.isParent || false;
+    const childCount = isParent ? (childrenOf.get(wi.id) || []).length : 0;
+    const collapsed = !_expandedParents.has(wi.id);
+
+    let toggleBtn = '';
+    if (isParent && childCount > 0) {
+      // Only show toggle if there are same-column children
+      const sameColChildren = (childrenOf.get(wi.id) || []).filter(c => {
+        const cs = c.state === 'Done' ? 'Closed' : c.state;
+        const ws = wi.state === 'Done' ? 'Closed' : wi.state;
+        return cs === ws;
+      });
+      if (sameColChildren.length > 0) {
+        toggleBtn = `<button class="parent-toggle" onclick="toggleParentCollapse(${wi.id}, event)" title="${collapsed ? 'Expand' : 'Collapse'} children"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>`;
+      }
+    }
+
+    let parentRefHtml = '';
+    if (parentRef) {
+      parentRefHtml = `<div class="child-parent-ref"><span onclick="event.stopPropagation();viewWorkItem(${parentRef.id})" title="${esc(parentRef.title)}">↑ #${parentRef.id} ${esc(parentRef.title.substring(0, 30))}${parentRef.title.length > 30 ? '…' : ''}</span></div>`;
+    }
+
+    return `
+      <div class="board-card ${extraClass} ${parentRef ? 'has-parent' : ''} ${isOnHold(wi) ? 'on-hold' : ''}" draggable="true" data-wi-id="${wi.id}"
+           ${familyId ? `data-family="${familyId}"` : ''}
+           onclick="viewWorkItem(${wi.id})"
+           ondragstart="onCardDragStart(event, ${wi.id})" ondragend="onCardDragEnd(event)"
+           ${familyId ? `onmouseenter="highlightFamily(${familyId}, true)" onmouseleave="highlightFamily(${familyId}, false)"` : ''}>
+        ${parentRefHtml}
+        ${toggleBtn}
+        <div class="board-card-id"><span>#${wi.id}</span>${isOnHold(wi) ? '<span class="on-hold-label">On Hold</span>' : ''}</div>
         <div class="board-card-title">${esc(wi.title)}</div>
         <div class="board-card-meta">
           <span class="board-card-type type-${wi.type.toLowerCase().replace(/\s+/g, '-')}">${wi.type}</span>
           ${wi.assignedTo ? `<span>${esc(wi.assignedTo.split(' ')[0])}</span>` : ''}
           ${wi.storyPoints ? `<span>${wi.storyPoints} pts</span>` : ''}
         </div>
-      </div>
-    `).join('');
+        ${isParent ? childRollupHtml(wi.id) : ''}
+      </div>`;
+  }
+
+  for (const [state, items] of Object.entries(buckets)) {
+    const container = document.getElementById(`board${state}`);
+    const count = document.getElementById(`boardCount${state}`);
+    if (!container) continue;
+    count.textContent = items.length;
+
+    // Identify same-column children (parent is in this same column)
+    const colItemMap = new Map(items.map(wi => [wi.id, wi]));
+    const sameColChildIds = new Set();
+
+    for (const wi of items) {
+      if (wi.parentId && colItemMap.has(wi.parentId)) {
+        sameColChildIds.add(wi.id);
+      }
+    }
+
+    let html = '';
+    for (const wi of items) {
+      if (sameColChildIds.has(wi.id)) continue; // rendered under parent group
+
+      const sameColChildren = (childrenOf.get(wi.id) || []).filter(c => colItemMap.has(c.id));
+      const hasAnyChildren = childrenOf.has(wi.id);
+
+      if (sameColChildren.length > 0) {
+        // Parent with children in same column — group them
+        const collapsed = !_expandedParents.has(wi.id);
+        html += `<div class="board-parent-group ${collapsed ? 'collapsed' : ''}" data-family="${wi.id}"
+                      onmouseenter="highlightFamily(${wi.id}, true)" onmouseleave="highlightFamily(${wi.id}, false)">`;
+        html += boardCardHtml(wi, 'parent-card', { isParent: true, familyId: wi.id });
+        for (const child of sameColChildren) {
+          html += boardCardHtml(child, 'child-card', { familyId: wi.id });
+        }
+        html += `</div>`;
+      } else if (hasAnyChildren) {
+        // Parent but all children are in other columns — show as standalone with rollup
+        html += boardCardHtml(wi, '', { isParent: true, familyId: wi.id });
+      } else if (parentOf.has(wi.id)) {
+        // Child whose parent is in a different column — show parent reference
+        const parent = parentOf.get(wi.id);
+        html += boardCardHtml(wi, '', { parentRef: parent, familyId: parent.id });
+      } else {
+        // Regular standalone item
+        html += boardCardHtml(wi);
+      }
+    }
+    container.innerHTML = html;
 
     // Add drop handlers to column
     container.ondragover = (e) => { e.preventDefault(); container.classList.add('drag-over'); };
@@ -3336,25 +3712,101 @@ function renderBoard() {
 }
 
 // ── Backlog Rendering ───────────────────────────────────────────────────
+const _collapsedBacklogParents = new Set(JSON.parse(localStorage.getItem('devops-pilot-collapsed-backlog') || '[]'));
+function toggleBacklogParent(parentId, event) {
+  event.stopPropagation();
+  if (_collapsedBacklogParents.has(parentId)) _collapsedBacklogParents.delete(parentId);
+  else _collapsedBacklogParents.add(parentId);
+  localStorage.setItem('devops-pilot-collapsed-backlog', JSON.stringify([..._collapsedBacklogParents]));
+  // Toggle child row visibility
+  document.querySelectorAll(`tr[data-backlog-parent="${parentId}"]`).forEach(row => {
+    row.classList.toggle('backlog-child-hidden', _collapsedBacklogParents.has(parentId));
+  });
+  // Toggle button icon
+  const btn = document.querySelector(`button[data-backlog-toggle="${parentId}"]`);
+  if (btn) btn.classList.toggle('collapsed', _collapsedBacklogParents.has(parentId));
+}
+
 function renderBacklog() {
   const body = document.getElementById('backlogBody');
-  body.innerHTML = workItems.map(wi => `
-    <tr onclick="viewWorkItem(${wi.id})">
-      <td class="wi-id">${wi.id}</td>
-      <td><span class="board-card-type type-${wi.type.toLowerCase().replace(/\s+/g, '-')}">${wi.type}</span></td>
-      <td class="wi-title">${esc(wi.title)}</td>
-      <td><span class="state-badge state-${wi.state.toLowerCase()}">${wi.state}</span></td>
-      <td>${esc(wi.assignedTo)}</td>
-      <td class="priority-${wi.priority}">P${wi.priority}</td>
-      <td>${wi.storyPoints || '-'}</td>
-    </tr>
-  `).join('');
+
+  // Build parent-child index
+  const allMap = new Map(workItems.map(wi => [wi.id, wi]));
+  const childrenOf = new Map();
+  const childIds = new Set();
+
+  for (const wi of workItems) {
+    if (wi.parentId && allMap.has(wi.parentId)) {
+      childIds.add(wi.id);
+      if (!childrenOf.has(wi.parentId)) childrenOf.set(wi.parentId, []);
+      childrenOf.get(wi.parentId).push(wi);
+    }
+  }
+
+  // Build rollup HTML for backlog
+  function backlogRollupHtml(parentId) {
+    const children = childrenOf.get(parentId);
+    if (!children || children.length === 0) return '';
+    const total = children.length;
+    const closedCount = children.filter(c => c.state === 'Closed' || c.state === 'Done').length;
+    const pct = (closedCount / total * 100).toFixed(1);
+    return `<span class="backlog-child-rollup"><span class="child-rollup-bar"><span style="width:${pct}%;background:var(--green)"></span></span><span class="child-rollup-label">${closedCount}/${total}</span></span>`;
+  }
+
+  // Render rows: parents first, then their children indented
+  let html = '';
+  for (const wi of workItems) {
+    if (childIds.has(wi.id)) continue; // rendered under parent
+
+    const children = childrenOf.get(wi.id);
+    const isParent = children && children.length > 0;
+    const collapsed = _collapsedBacklogParents.has(wi.id);
+
+    if (isParent) {
+      const toggleBtn = `<button class="backlog-parent-toggle ${collapsed ? 'collapsed' : ''}" data-backlog-toggle="${wi.id}" onclick="toggleBacklogParent(${wi.id}, event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>`;
+      html += `
+        <tr class="backlog-parent ${isOnHold(wi) ? 'on-hold' : ''}" onclick="viewWorkItem(${wi.id})">
+          <td class="wi-id">${toggleBtn}${wi.id}</td>
+          <td><span class="board-card-type type-${wi.type.toLowerCase().replace(/\s+/g, '-')}">${wi.type}</span></td>
+          <td class="wi-title">${esc(wi.title)}${backlogRollupHtml(wi.id)}</td>
+          <td><span class="state-badge state-${wi.state.toLowerCase()}">${wi.state}</span></td>
+          <td>${esc(wi.assignedTo)}</td>
+          <td class="priority-${wi.priority}">P${wi.priority}</td>
+          <td>${wi.storyPoints || '-'}</td>
+        </tr>`;
+      for (const child of children) {
+        html += `
+          <tr class="backlog-child ${collapsed ? 'backlog-child-hidden' : ''} ${isOnHold(child) ? 'on-hold' : ''}" data-backlog-parent="${wi.id}" onclick="viewWorkItem(${child.id})">
+            <td class="wi-id">${child.id}</td>
+            <td><span class="board-card-type type-${child.type.toLowerCase().replace(/\s+/g, '-')}">${child.type}</span></td>
+            <td class="wi-title">${esc(child.title)}</td>
+            <td><span class="state-badge state-${child.state.toLowerCase()}">${child.state}</span></td>
+            <td>${esc(child.assignedTo)}</td>
+            <td class="priority-${child.priority}">P${child.priority}</td>
+            <td>${child.storyPoints || '-'}</td>
+          </tr>`;
+      }
+    } else {
+      html += `
+        <tr class="${isOnHold(wi) ? 'on-hold' : ''}" onclick="viewWorkItem(${wi.id})">
+          <td class="wi-id">${wi.id}</td>
+          <td><span class="board-card-type type-${wi.type.toLowerCase().replace(/\s+/g, '-')}">${wi.type}</span></td>
+          <td class="wi-title">${esc(wi.title)}</td>
+          <td><span class="state-badge state-${wi.state.toLowerCase()}">${wi.state}</span></td>
+          <td>${esc(wi.assignedTo)}</td>
+          <td class="priority-${wi.priority}">P${wi.priority}</td>
+          <td>${wi.storyPoints || '-'}</td>
+        </tr>`;
+    }
+  }
+  body.innerHTML = html;
 }
 
 // ── Kanban Drag & Drop ──────────────────────────────────────────────────
 let draggedWiId = null;
 
 function onCardDragStart(e, wiId) {
+  e.stopPropagation(); // prevent child drag from bubbling to parent group
   draggedWiId = wiId;
   e.dataTransfer.effectAllowed = 'move';
   e.target.classList.add('dragging');
@@ -3397,16 +3849,54 @@ function filterBacklog() {
   const typeFilters = getMultiSelectValues('backlogType');
   const stateFilters = getMultiSelectValues('backlogState');
   const tagFilters = getMultiSelectValues('backlogTag');
-  const rows = document.querySelectorAll('#backlogBody tr');
-  let idx = 0;
-  for (const wi of workItems) {
-    if (!rows[idx]) break;
+  const hasFilters = search || typeFilters.length || stateFilters.length || tagFilters.length;
+
+  function matchesFilter(wi) {
     const matchSearch = !search || wi.title.toLowerCase().includes(search) || wi.assignedTo.toLowerCase().includes(search) || String(wi.id).includes(search);
     const matchType = typeFilters.length > 0 ? typeFilters.includes(wi.type) : !HIDDEN_TYPES.includes(wi.type);
     const matchState = stateFilters.length === 0 || stateFilters.includes(wi.state);
     const matchTag = tagFilters.length === 0 || (wi.tags && tagFilters.some(tf => wi.tags.split(';').map(t => t.trim()).includes(tf)));
-    rows[idx].style.display = (matchSearch && matchType && matchState && matchTag) ? '' : 'none';
-    idx++;
+    return matchSearch && matchType && matchState && matchTag;
+  }
+
+  // Build parent-child map for filter logic
+  const allMap = new Map(workItems.map(wi => [wi.id, wi]));
+  const childrenOf = new Map();
+  for (const wi of workItems) {
+    if (wi.parentId && allMap.has(wi.parentId)) {
+      if (!childrenOf.has(wi.parentId)) childrenOf.set(wi.parentId, []);
+      childrenOf.get(wi.parentId).push(wi);
+    }
+  }
+
+  const rows = document.querySelectorAll('#backlogBody tr');
+  let rowIdx = 0;
+
+  for (const wi of workItems) {
+    // Skip children in the flat loop — they're handled under their parent
+    if (wi.parentId && allMap.has(wi.parentId)) continue;
+
+    const children = childrenOf.get(wi.id) || [];
+    const isParent = children.length > 0;
+
+    if (isParent) {
+      const parentMatch = matchesFilter(wi);
+      const anyChildMatch = children.some(c => matchesFilter(c));
+      const showParent = !hasFilters || parentMatch || anyChildMatch;
+
+      if (rows[rowIdx]) rows[rowIdx].style.display = showParent ? '' : 'none';
+      rowIdx++;
+
+      for (const child of children) {
+        const childMatch = !hasFilters || matchesFilter(child);
+        const collapsed = _collapsedBacklogParents.has(wi.id);
+        if (rows[rowIdx]) rows[rowIdx].style.display = (showParent && childMatch && !collapsed) ? '' : 'none';
+        rowIdx++;
+      }
+    } else {
+      if (rows[rowIdx]) rows[rowIdx].style.display = matchesFilter(wi) ? '' : 'none';
+      rowIdx++;
+    }
   }
 }
 
@@ -3778,6 +4268,15 @@ async function loadTeamMembers() {
   }
 }
 
+function filterTeamMembers() {
+  const q = document.getElementById('teamSearch').value.toLowerCase();
+  document.querySelectorAll('#teamList .team-member').forEach(el => {
+    const name = el.querySelector('.team-name')?.textContent.toLowerCase() || '';
+    const email = el.querySelector('.team-email')?.textContent.toLowerCase() || '';
+    el.style.display = (name.includes(q) || email.includes(q)) ? '' : 'none';
+  });
+}
+
 // ── Activity Feed ───────────────────────────────────────────────────────
 function updateActivityFeed() {
   const container = document.getElementById('activityFeed');
@@ -3794,12 +4293,18 @@ function updateActivityFeed() {
   function activityLabel(wi) {
     const state = wi.state;
     const changed = new Date(wi.changedDate);
+    const created = wi.createdDate ? new Date(wi.createdDate) : null;
     const hoursSince = (Date.now() - changed) / 3600000;
 
     if (state === 'Closed' || state === 'Done') return { text: 'Closed', color: 'var(--subtext0)', icon: 'check-circle' };
     if (state === 'Resolved') return { text: 'Resolved', color: 'var(--mauve)', icon: 'check' };
     if (state === 'Active') return { text: 'In Progress', color: 'var(--green)', icon: 'play' };
-    if (state === 'New' && hoursSince < 48) return { text: 'Created', color: 'var(--blue)', icon: 'plus-circle' };
+    if (state === 'New' && hoursSince < 48) {
+      // Only say "Created" if changedDate is within 2 minutes of createdDate (truly new)
+      const isRealCreation = created && Math.abs(changed - created) < 120000;
+      if (isRealCreation) return { text: 'Created', color: 'var(--blue)', icon: 'plus-circle' };
+      return { text: 'Updated', color: 'var(--sapphire)', icon: 'edit' };
+    }
     return { text: state, color: 'var(--subtext0)', icon: 'circle' };
   }
 
