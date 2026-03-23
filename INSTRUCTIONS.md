@@ -185,13 +185,35 @@ $velocity = Invoke-RestMethod http://127.0.0.1:3800/api/velocity
 Invoke-RestMethod http://127.0.0.1:3800/api/ui/tab -Method POST -ContentType 'application/json' -Body '{"tab":"board"}'
 ```
 
+## CRITICAL: Work Item Creation & Management
+
+### Creating Work Items
+When creating work items, ALWAYS include:
+1. **Title** — clear, concise, descriptive
+2. **Description** — detailed enough to understand the full scope. Include context, what needs to happen, and why.
+3. **Story Points** — always estimate story points (1, 2, 3, 5, 8, 13). Use your best judgment based on complexity.
+4. **Priority** — default to 2 (Normal) unless specified
+5. **Acceptance Criteria** — add when the work item is non-trivial (features, user stories). Skip for small bugs or simple tasks.
+
+### Changing Work Item State
+When moving a work item to **Active** or **Resolved**:
+1. First, fetch the team members from `/api/team-members`
+2. Look up the `DefaultUser` from `/api/config`
+3. If the user is found in the team members list, assign the work item to them
+4. If not found, leave it unassigned
+
+### State Transitions
+- **New → Active**: Assign to the user, work is starting
+- **Active → Resolved**: Assign to the user, work is complete and ready for review
+- **Resolved → Closed**: Work has been verified
+
 ## Workflow Guidelines
 
-1. **When asked about sprint status**: Fetch iterations, find current sprint, get work items and burndown data, summarize progress.
-2. **When asked to create work items**: Gather title, description, type. Use reasonable defaults for priority (2) and ask for story points if not provided.
-3. **When doing standup summaries**: Fetch current sprint items, group by state, highlight recently changed items.
+1. **When asked about iteration status**: Fetch iterations, find current iteration, get work items and burndown data, summarize progress.
+2. **When asked to create work items**: Follow the creation guidelines above. Always include story points and a descriptive description.
+3. **When doing standup summaries**: Fetch current iteration items, group by state, highlight recently changed items.
 4. **When starting work on an item**: Use the `/api/start-working` endpoint which creates a git branch and sets the item to Active.
-5. **When asked "where are we at?"**: Combine sprint burndown, item states, and velocity to give a comprehensive status.
+5. **When asked "where are we at?"**: Combine iteration burndown, item states, and velocity to give a comprehensive status.
 
 ## CRITICAL: Git Branch Workflow
 

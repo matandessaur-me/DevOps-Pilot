@@ -1029,7 +1029,7 @@
   <aside class="sidebar">
     <div class="sidebar-fixed">
       <div class="field-group">
-        <label class="field-label">Sprint</label>
+        <label class="field-label">Iteration</label>
         <select class="field-select" id="sprintSelect" onchange="onSprintChange()">
           <option value="">Loading...</option>
         </select>
@@ -1044,7 +1044,7 @@
       <div class="divider"></div>
       <div class="section-title">AI Actions</div>
       <button class="btn" onclick="runScript('standup')"><i data-lucide="message-square"></i> Standup Summary</button>
-      <button class="btn" onclick="runScript('status')"><i data-lucide="bar-chart-2"></i> Sprint Status</button>
+      <button class="btn" onclick="runScript('status')"><i data-lucide="bar-chart-2"></i> Iteration Status</button>
       <button class="btn" onclick="runScript('retro')"><i data-lucide="rotate-ccw"></i> Retrospective</button>
       <div class="divider"></div>
       <div class="section-title">Git</div>
@@ -3465,7 +3465,7 @@ function runScript(action) {
   const sprint = document.getElementById('sprintSelect').value;
   const sprintName = document.getElementById('sprintSelect').selectedOptions[0]?.textContent || '';
   if (!sprint && action !== 'retro') {
-    toast('Select a sprint first', 'info');
+    toast('Select an iteration first', 'info');
     return;
   }
 
@@ -3573,7 +3573,7 @@ async function loadIterations() {
     const data = await res.json();
     if (data.error) { toast(data.error, 'error'); return; }
     const select = document.getElementById('sprintSelect');
-    select.innerHTML = '<option value="">All Sprints</option>';
+    select.innerHTML = '<option value="">All Iterations</option>';
     let currentPath = '';
     for (const it of data) {
       const opt = document.createElement('option');
@@ -4278,7 +4278,7 @@ async function loadVelocity() {
     const data = await res.json();
     if (data.error) { info.textContent = data.error; return; }
 
-    info.innerHTML = `<div class="stat-row"><span class="stat-label">Average Velocity</span><span class="stat-value">${data.averageVelocity} pts/sprint</span></div>`;
+    info.innerHTML = `<div class="stat-row"><span class="stat-label">Average Velocity</span><span class="stat-value">${data.averageVelocity} pts/iteration</span></div>`;
     drawVelocityChart(data.velocity, data.averageVelocity);
   } catch (e) {
     info.textContent = 'Failed to load velocity';
