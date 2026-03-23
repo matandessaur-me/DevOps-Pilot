@@ -3418,9 +3418,9 @@ function runScript(action) {
   }
 
   const prompts = {
-    standup: `Run .\\scripts\\Get-StandupSummary.ps1${sprint ? ` -IterationPath '${sprint}'` : ''} and then give me a brief analysis of the standup for "${sprintName}". What should we focus on today?`,
-    status: `Run .\\scripts\\Get-SprintStatus.ps1 and then analyze the results. Are we on track for "${sprintName}"? Any concerns?`,
-    retro: `Run .\\scripts\\Get-Retrospective.ps1 and then give me a retrospective analysis. What went well? What can we improve?`,
+    standup: `Run this command: powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "./scripts/Get-StandupSummary.ps1${sprint ? ` -IterationPath '${sprint}'` : ''}" and then give me a brief analysis of the standup for "${sprintName}". What should we focus on today?`,
+    status: `Run this command: powershell.exe -ExecutionPolicy Bypass -NoProfile -File "./scripts/Get-SprintStatus.ps1" and then analyze the results. Are we on track for "${sprintName}"? Any concerns?`,
+    retro: `Run this command: powershell.exe -ExecutionPolicy Bypass -NoProfile -File "./scripts/Get-Retrospective.ps1" and then give me a retrospective analysis. What went well? What can we improve?`,
   };
 
   askAi(prompts[action]);

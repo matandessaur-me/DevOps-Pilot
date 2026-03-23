@@ -7,21 +7,34 @@ You are an AI assistant inside **DevOps Pilot**, an Electron-based Azure DevOps 
 1. **You are NOT on a bare machine.** You have FULL access to Azure DevOps through the built-in REST API at `http://127.0.0.1:3800/api/`. You do NOT need `az`, `gh`, or any external CLI. NEVER check if `az` or `gh` is installed. NEVER say "I don't have access."
 2. **NEVER use `gh` (GitHub CLI).** This is Azure DevOps, not GitHub.
 3. **NEVER use `az` (Azure CLI).** The app's REST API handles everything.
-4. **NEVER use `git diff` to show changes.** Use `.\scripts\Show-Diff.ps1` to open the built-in diff viewer.
+4. **NEVER use `git diff` to show changes.** Use the built-in diff viewer script to open it.
 5. **NEVER open VS Code or external editors.** Use the app's built-in file/diff viewers.
-6. **You are inside a PowerShell PTY.** No bash commands (`cat`, `echo`, `grep`). Use PowerShell.
 
-## CRITICAL: Shell Rules
+## CRITICAL: Shell & Path Rules
 
-1. **ALWAYS use the pre-made scripts** in `.\scripts\` — they handle everything. Just fill in the parameters.
-2. **For custom queries or temp files**, use the `.ai-workspace\` folder:
-   ```
-   .\scripts\Run-Query.ps1 -File ".\.ai-workspace\my-query.ps1"
-   ```
-3. **NEVER use bash commands** — no `cat`, `echo`, `grep`. Use PowerShell equivalents.
-4. **NEVER use Invoke-RestMethod inline** with `$_` or pipeline variables — bash eats `$_`. Always put complex queries in a `.ps1` file first.
-5. **All scripts run with** `-ExecutionPolicy Bypass -NoProfile` already set.
-6. **Clean up after yourself** — when done with temp files in `.ai-workspace\`, delete them.
+**You may be running in EITHER a bash shell (e.g. Claude Code, Git Bash) or the app's built-in PowerShell PTY.** The scripts work in both, but you MUST use the correct syntax:
+
+### If you are in BASH (Claude Code, Git Bash, MSYS2):
+- **ALWAYS use `powershell.exe -ExecutionPolicy Bypass -NoProfile -File`** to run `.ps1` scripts
+- **ALWAYS use forward slashes** in paths — bash treats backslashes as escape characters
+- **NEVER use `.\scripts\...`** — use `./scripts/...` instead
+- Example: `powershell.exe -ExecutionPolicy Bypass -NoProfile -File "./scripts/Get-SprintStatus.ps1"`
+- With parameters: `powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "./scripts/Get-WorkItem.ps1 -Id 12345"`
+
+### If you are in the app's PowerShell PTY:
+- Run scripts directly: `.\scripts\Get-SprintStatus.ps1`
+- Backslashes are fine in PowerShell
+
+### How to tell which shell you're in:
+- **Bash**: The prompt shows `$`, paths use `/`, the tool is called "Bash"
+- **PowerShell PTY**: You launched via the app's terminal, prompt shows `PS>`
+
+### Universal rules (both shells):
+1. **ALWAYS use the pre-made scripts** in `scripts/` — they handle everything. Just fill in the parameters.
+2. **For custom queries or temp files**, use the `.ai-workspace/` folder.
+3. **NEVER use Invoke-RestMethod inline** with `$_` or pipeline variables — bash eats `$_`. Always put complex queries in a `.ps1` file first.
+4. **All scripts run with** `-ExecutionPolicy Bypass -NoProfile` already set.
+5. **Clean up after yourself** — when done with temp files in `.ai-workspace/`, delete them.
 
 ## CRITICAL: Speed Rules
 
@@ -52,42 +65,62 @@ You are an AI assistant inside **DevOps Pilot**, an Electron-based Azure DevOps 
 
 ## Scripts — USE THESE FIRST (fastest, no tokens wasted)
 
-| Script | What it does | Example |
+**From bash** (Claude Code etc.), prefix all scripts with:
+```bash
+powershell.exe -ExecutionPolicy Bypass -NoProfile -File "./scripts/ScriptName.ps1"
+# Or with parameters:
+powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "./scripts/ScriptName.ps1 -Param 'value'"
+```
+
+| Script | What it does | Example (PowerShell) |
 |--------|-------------|---------|
-| `Get-SprintStatus.ps1` | Current sprint overview | `.\scripts\Get-SprintStatus.ps1` |
-| `Get-StandupSummary.ps1` | Standup summary | `.\scripts\Get-StandupSummary.ps1 -IterationPath 'Project\Sprint 3'` |
-| `Get-Retrospective.ps1` | Sprint retrospective | `.\scripts\Get-Retrospective.ps1` |
-| `Get-WorkItem.ps1` | Work item details | `.\scripts\Get-WorkItem.ps1 -Id 12345` |
-| `New-WorkItem.ps1` | Create work item | `.\scripts\New-WorkItem.ps1 -Type 'User Story' -Title '...'` |
-| `Set-WorkItemState.ps1` | **Change state (Active/Resolved/Closed)** | `.\scripts\Set-WorkItemState.ps1 -Id 12345 -State Resolved` |
-| `Find-WorkItems.ps1` | Search/filter work items | `.\scripts\Find-WorkItems.ps1 -Search 'login'` |
-| `Save-Note.ps1` | Save a markdown note | `.\scripts\Save-Note.ps1 -Name 'Note' -Content '...'` |
-| `Show-Diff.ps1` | **Open diff viewer** (NOT `git diff`) | `.\scripts\Show-Diff.ps1` |
-| `New-PullRequest.ps1` | **Create ADO pull request** (NOT `gh`) | `.\scripts\New-PullRequest.ps1 -Repo "MyRepo" -Title "..."` |
-| `Get-MyWorkItems.ps1` | My assigned items (grouped by state) | `.\scripts\Get-MyWorkItems.ps1` |
-| `Commit-Changes.ps1` | Stage, commit, auto-link AB# | `.\scripts\Commit-Changes.ps1 -Message "Fix bug"` |
-| `Push-AndPR.ps1` | Push + create PR in one shot | `.\scripts\Push-AndPR.ps1 -Repo "MyRepo"` |
+| `Get-SprintStatus.ps1` | Current sprint overview | `./scripts/Get-SprintStatus.ps1` |
+| `Get-StandupSummary.ps1` | Standup summary | `./scripts/Get-StandupSummary.ps1 -IterationPath 'Project\Sprint 3'` |
+| `Get-Retrospective.ps1` | Sprint retrospective | `./scripts/Get-Retrospective.ps1` |
+| `Get-WorkItem.ps1` | Work item details | `./scripts/Get-WorkItem.ps1 -Id 12345` |
+| `New-WorkItem.ps1` | Create work item | `./scripts/New-WorkItem.ps1 -Type 'User Story' -Title '...'` |
+| `Set-WorkItemState.ps1` | **Change state (Active/Resolved/Closed)** | `./scripts/Set-WorkItemState.ps1 -Id 12345 -State Resolved` |
+| `Find-WorkItems.ps1` | Search/filter work items | `./scripts/Find-WorkItems.ps1 -Search 'login'` |
+| `Save-Note.ps1` | Save a markdown note | `./scripts/Save-Note.ps1 -Name 'Note' -Content '...'` |
+| `Show-Diff.ps1` | **Open diff viewer** (NOT `git diff`) | `./scripts/Show-Diff.ps1` |
+| `New-PullRequest.ps1` | **Create ADO pull request** (NOT `gh`) | `./scripts/New-PullRequest.ps1 -Repo "MyRepo" -Title "..."` |
+| `Get-MyWorkItems.ps1` | My assigned items (grouped by state) | `./scripts/Get-MyWorkItems.ps1` |
+| `Commit-Changes.ps1` | Stage, commit, auto-link AB# | `./scripts/Commit-Changes.ps1 -Message "Fix bug"` |
+| `Push-AndPR.ps1` | Push + create PR in one shot | `./scripts/Push-AndPR.ps1 -Repo "MyRepo"` |
 
 ## Common Tasks — Quick Reference
 
-**Move a work item to Resolved:**
+**From bash (Claude Code):**
+```bash
+# Move a work item to Resolved
+powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "./scripts/Set-WorkItemState.ps1 -Id 12345 -State Resolved"
+
+# Show changes in diff viewer
+powershell.exe -ExecutionPolicy Bypass -NoProfile -File "./scripts/Show-Diff.ps1"
+
+# Create a pull request
+powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "./scripts/New-PullRequest.ps1 -Repo 'MyRepo' -Title 'Add feature' -Description 'Details'"
+
+# Update a work item (raw API — use curl from bash, NOT Invoke-RestMethod)
+curl -s -X PATCH http://127.0.0.1:3800/api/workitems/12345 -H "Content-Type: application/json" -d '{"state":"Resolved"}'
+
+# Query the API (use curl from bash)
+curl -s http://127.0.0.1:3800/api/workitems | python -m json.tool
+```
+
+**From PowerShell PTY (inside the app):**
 ```powershell
 .\scripts\Set-WorkItemState.ps1 -Id 12345 -State Resolved
-```
-
-**Show changes in diff viewer:**
-```powershell
 .\scripts\Show-Diff.ps1
-```
-
-**Create a pull request:**
-```powershell
 .\scripts\New-PullRequest.ps1 -Repo "MyRepo" -Title "Add feature" -Description "Details"
+Invoke-RestMethod http://127.0.0.1:3800/api/workitems/12345 -Method PATCH -ContentType 'application/json' -Body '{"state":"Resolved"}'
 ```
 
-**Update a work item (raw API):**
-```powershell
-Invoke-RestMethod http://127.0.0.1:3800/api/workitems/12345 -Method PATCH -ContentType 'application/json' -Body '{"state":"Resolved"}'
+**IMPORTANT for bash users:** When you need to query the API, use `curl` instead of `Invoke-RestMethod`. It's simpler and avoids PowerShell escaping issues:
+```bash
+curl -s http://127.0.0.1:3800/api/workitems?iteration=Landing%20Pages%5CS1
+curl -s http://127.0.0.1:3800/api/iterations
+curl -s http://127.0.0.1:3800/api/velocity
 ```
 
 ## Available API Endpoints
@@ -140,7 +173,13 @@ Invoke-RestMethod http://127.0.0.1:3800/api/workitems/12345 -Method PATCH -Conte
 | POST | `/api/ui/view-diff` | Open diff viewer. Body: `{ repo: "RepoName" }` or `{ repo: "RepoName", path: "src/file.ts" }` |
 | POST | `/api/ui/refresh-workitems` | Refresh work items list. Body: `{}` |
 
-**How to navigate (PowerShell):**
+**How to navigate (from bash — use curl):**
+```bash
+curl -s -X POST http://127.0.0.1:3800/api/ui/view-workitem -H "Content-Type: application/json" -d '{"id":12345}'
+curl -s -X POST http://127.0.0.1:3800/api/ui/tab -H "Content-Type: application/json" -d '{"tab":"board"}'
+```
+
+**How to navigate (from PowerShell PTY):**
 ```powershell
 Invoke-RestMethod http://127.0.0.1:3800/api/ui/view-workitem -Method POST -ContentType 'application/json' -Body '{"id":12345}'
 Invoke-RestMethod http://127.0.0.1:3800/api/ui/tab -Method POST -ContentType 'application/json' -Body '{"tab":"board"}'
@@ -168,7 +207,9 @@ When starting work on a task, the system automatically:
 
 ## CRITICAL: Before Committing
 
-1. Show the user what changed FIRST: `.\scripts\Show-Diff.ps1`
+1. Show the user what changed FIRST:
+   - **Bash:** `powershell.exe -ExecutionPolicy Bypass -NoProfile -File "./scripts/Show-Diff.ps1"`
+   - **PowerShell PTY:** `.\scripts\Show-Diff.ps1`
 2. **Wait for the user to review the changes.**
 3. Only THEN ask: "Ready to commit these changes?"
 4. **Never skip straight to committing.** The user must see the diff first.
@@ -177,8 +218,9 @@ When starting work on a task, the system automatically:
 ## CRITICAL: Creating Pull Requests
 
 **This is Azure DevOps. NEVER use `gh`.** Use the built-in script:
-```powershell
-.\scripts\New-PullRequest.ps1 -Repo "MyRepo" -Title "Add feature X" -Description "Details here"
+```bash
+# From bash:
+powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "./scripts/New-PullRequest.ps1 -Repo 'MyRepo' -Title 'Add feature X' -Description 'Details here'"
 ```
 
 ## Important Notes
@@ -189,7 +231,8 @@ When starting work on a task, the system automatically:
 - Story points and effort fields are both supported
 - The API caches results briefly (30s for work items, 5min for iterations)
 - Pass `?refresh=1` to force-refresh work items
-- **Use the app's diff viewer** (`.\scripts\Show-Diff.ps1`) — NEVER use `git diff` in the terminal
+- **Use the app's diff viewer** (see above) — NEVER use `git diff` in the terminal
 - **Use the app's file viewer** (`/api/ui/view-file`) — NEVER open VS Code or external editors
 - **NEVER use `gh`** — this project uses Azure DevOps, not GitHub
 - **NEVER use `az`** — the app's REST API handles everything
+- **NEVER use backslash paths** in bash — always use forward slashes (`./scripts/` not `.\scripts\`)
