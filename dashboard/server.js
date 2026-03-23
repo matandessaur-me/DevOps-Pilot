@@ -1197,12 +1197,12 @@ function handleGitDiff(url, res) {
 
   let diff = '';
   if (filePath) {
-    // Try staged + unstaged diff against HEAD
-    diff = gitExec(repoPath, `diff HEAD -- "${filePath}"`);
+    // Try staged + unstaged diff against HEAD (ignore CRLF differences on Windows)
+    diff = gitExec(repoPath, `diff --ignore-cr-at-eol HEAD -- "${filePath}"`);
     // Try unstaged only
-    if (!diff) diff = gitExec(repoPath, `diff -- "${filePath}"`);
+    if (!diff) diff = gitExec(repoPath, `diff --ignore-cr-at-eol -- "${filePath}"`);
     // Try staged only
-    if (!diff) diff = gitExec(repoPath, `diff --cached -- "${filePath}"`);
+    if (!diff) diff = gitExec(repoPath, `diff --ignore-cr-at-eol --cached -- "${filePath}"`);
     // For untracked/new files, show entire content as additions
     if (!diff) {
       const fullPath = path.join(repoPath, filePath);
@@ -1216,8 +1216,8 @@ function handleGitDiff(url, res) {
       }
     }
   } else {
-    diff = gitExec(repoPath, 'diff HEAD');
-    if (!diff) diff = gitExec(repoPath, 'diff');
+    diff = gitExec(repoPath, 'diff --ignore-cr-at-eol HEAD');
+    if (!diff) diff = gitExec(repoPath, 'diff --ignore-cr-at-eol');
   }
 
   json(res, { diff: diff || 'No changes', filePath });
@@ -1253,12 +1253,14 @@ function handleGitLog(url, res) {
 function handleCommitDiff(url, res) {
   const repoName = url.searchParams.get('repo');
   const hash = url.searchParams.get('hash');
+  const filePath = url.searchParams.get('path') || '';
   const repoPath = getRepoPath(repoName);
   if (!repoPath) return json(res, { error: 'Repo not found' }, 400);
   if (!hash) return json(res, { error: 'hash required' }, 400);
 
-  const diff = gitExec(repoPath, `diff ${hash}~1 ${hash}`);
-  const stat = gitExec(repoPath, `diff --stat ${hash}~1 ${hash}`);
+  const pathArg = filePath ? ` -- "${filePath}"` : '';
+  const diff = gitExec(repoPath, `diff --ignore-cr-at-eol ${hash}~1 ${hash}${pathArg}`);
+  const stat = gitExec(repoPath, `diff --ignore-cr-at-eol --stat=999 ${hash}~1 ${hash}`);
   const msg = gitExec(repoPath, `log -1 --pretty=format:"%s" ${hash}`);
 
   json(res, { diff: diff || 'No changes', stat, message: msg, hash });

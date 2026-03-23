@@ -2395,8 +2395,17 @@ async function viewCommitDiff(hash) {
     const diffLines = (statData.diff || '').split('\n');
     let currentFile = null;
     for (const line of diffLines) {
-      const m = line.match(/^diff --git a\/(.+) b\/(.+)/);
-      if (m) { currentFile = m[2]; files.push({ file: currentFile, status: 'M' }); }
+      // Parse "diff --git a/path b/path" — the two paths are always identical, so split on " b/" from the middle
+      const m = line.match(/^diff --git a\/(.+)/);
+      if (m) {
+        const rest = m[1];
+        // The path appears twice separated by " b/" — find the midpoint
+        const mid = rest.lastIndexOf(' b/');
+        const filePath = mid > 0 ? rest.substring(mid + 3) : rest;
+        if (!files.find(f => f.file === filePath)) {
+          files.push({ file: filePath, status: 'M' });
+        }
+      }
     }
     // Also parse from stat
     if (statData.stat) {
@@ -2452,14 +2461,57 @@ async function renderDiffForFile(idx) {
 
   const repo = diffViewCommit.repo;
 
-  try {
-    // Fetch the git diff for this specific file
-    const res = await fetch(`/api/git/diff?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(file.file)}`);
-    const data = await res.json();
-    renderInlineDiff(container, data.diff);
-  } catch (_) {
-    container.innerHTML = '<div class="empty-state" style="padding:20px;"><div class="empty-state-text">Failed to load diff</div></div>';
+  if (diffViewCommit.hash && diffViewCommit.hash !== 'working') {
+    // Viewing a commit — extract this file's diff from the full commit diff
+    const fileDiff = extractFileDiff(diffViewCommit.diff, file.file);
+    if (fileDiff) {
+      renderInlineDiff(container, fileDiff);
+    } else {
+      // Fallback: fetch from commit-diff endpoint for just this file
+      try {
+        const res = await fetch(`/api/git/commit-diff?repo=${encodeURIComponent(repo)}&hash=${encodeURIComponent(diffViewCommit.hash)}&path=${encodeURIComponent(file.file)}`);
+        const data = await res.json();
+        renderInlineDiff(container, data.diff);
+      } catch (_) {
+        container.innerHTML = '<div class="empty-state" style="padding:20px;"><div class="empty-state-text">Failed to load diff</div></div>';
+      }
+    }
+  } else {
+    // Working tree — fetch live diff
+    try {
+      const res = await fetch(`/api/git/diff?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(file.file)}`);
+      const data = await res.json();
+      renderInlineDiff(container, data.diff);
+    } catch (_) {
+      container.innerHTML = '<div class="empty-state" style="padding:20px;"><div class="empty-state-text">Failed to load diff</div></div>';
+    }
   }
+}
+
+// Extract the diff chunk for a specific file from a full multi-file diff
+function extractFileDiff(fullDiff, filePath) {
+  if (!fullDiff) return null;
+  const lines = fullDiff.split('\n');
+  let capturing = false;
+  let result = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith('diff --git ')) {
+      if (capturing) break; // hit the next file, stop
+      // Check if this is the file we want
+      const m = line.match(/^diff --git a\/(.+)/);
+      if (m) {
+        const rest = m[1];
+        const mid = rest.lastIndexOf(' b/');
+        const diffFile = mid > 0 ? rest.substring(mid + 3) : rest;
+        if (diffFile === filePath) capturing = true;
+      }
+    }
+    if (capturing) result.push(line);
+  }
+
+  return result.length > 0 ? result.join('\n') : null;
 }
 
 function renderInlineDiff(container, diffText) {
