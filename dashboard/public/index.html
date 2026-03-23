@@ -430,9 +430,14 @@
     .wi-detail-section { margin-bottom: 20px; }
     .wi-detail-section-title { font-size: 12px; font-weight: 600; color: var(--subtext1); margin-bottom: 8px; }
     .wi-detail-html { font-size: 13px; color: var(--subtext1); line-height: 1.6; }
-    .wi-detail-html a { color: var(--accent); text-decoration: none; }
+    .wi-detail-html * { color: inherit !important; background-color: transparent !important; }
+    .wi-detail-html a, .wi-detail-html a * { color: var(--accent) !important; text-decoration: none; }
     .wi-detail-html a:hover { text-decoration: underline; }
+    .wi-detail-html mark, .wi-detail-html *[style*="background"] { background-color: rgba(var(--accent-rgb, 137,180,250), 0.2) !important; }
     .wi-detail-html img { max-width: 100%; border-radius: var(--radius); margin: 8px 0; display: block; }
+    .wi-detail-html table, .wi-detail-html td, .wi-detail-html th { border-color: var(--surface1) !important; }
+    .wi-comment-body * { color: inherit !important; background-color: transparent !important; }
+    .wi-comment-body a, .wi-comment-body a * { color: var(--accent) !important; }
     .wi-comment-body a { color: var(--accent); }
     .wi-comment { padding: 10px; margin-bottom: 8px; background: var(--surface0); border-radius: var(--radius); }
     .wi-comment-author { font-size: 11px; font-weight: 600; color: var(--accent); }
