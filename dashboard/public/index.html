@@ -1012,6 +1012,13 @@
             <div class="multi-select-item" data-value="Test Suite" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Test Suites</div>
           </div>
         </div>
+        <div class="multi-select" data-id="boardTag" data-onchange="renderBoard">
+          <div class="multi-select-btn" onclick="toggleMultiSelect(this.parentElement)">
+            <span class="multi-select-label">Tags</span>
+            <span class="multi-select-arrow">&#9662;</span>
+          </div>
+          <div class="multi-select-panel" id="boardTagPanel"></div>
+        </div>
       </div>
       <div class="board" id="boardView">
         <div class="board-column">
@@ -1063,6 +1070,13 @@
             <div class="multi-select-item" data-value="Test Case" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Test Cases</div>
             <div class="multi-select-item" data-value="Test Suite" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Test Suites</div>
           </div>
+        </div>
+        <div class="multi-select" data-id="backlogTag" data-onchange="filterBacklog">
+          <div class="multi-select-btn" onclick="toggleMultiSelect(this.parentElement)">
+            <span class="multi-select-label">Tags</span>
+            <span class="multi-select-arrow">&#9662;</span>
+          </div>
+          <div class="multi-select-panel" id="backlogTagPanel"></div>
         </div>
       </div>
       <div class="backlog" id="backlogContainer">
@@ -3190,12 +3204,28 @@ async function loadWorkItems(refresh = false) {
     const data = await res.json();
     if (data.error) { toast(data.error, 'error'); return; }
     workItems = data;
+    populateTagFilters();
     renderBoard();
     renderBacklog();
     updateActivityFeed();
   } catch (e) {
     toast('Failed to load work items', 'error');
   }
+}
+
+function populateTagFilters() {
+  const tags = new Set();
+  workItems.forEach(wi => {
+    if (wi.tags) wi.tags.split(';').forEach(t => { const trimmed = t.trim(); if (trimmed) tags.add(trimmed); });
+  });
+  const sorted = [...tags].sort((a, b) => a.localeCompare(b));
+  const html = sorted.map(tag =>
+    `<div class="multi-select-item" data-value="${esc(tag)}" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> ${esc(tag)}</div>`
+  ).join('');
+  const boardPanel = document.getElementById('boardTagPanel');
+  const backlogPanel = document.getElementById('backlogTagPanel');
+  if (boardPanel) boardPanel.innerHTML = html;
+  if (backlogPanel) backlogPanel.innerHTML = html;
 }
 
 function filterMyItems() {
@@ -3258,11 +3288,16 @@ function renderBoard() {
   const search = (document.getElementById('boardSearch')?.value || '').toLowerCase();
   const typeFilters = getMultiSelectValues('boardType');
   const stateFilters = getMultiSelectValues('boardState');
+  const tagFilters = getMultiSelectValues('boardTag');
   let filtered = workItems;
   // Hide test types by default; show them only if explicitly selected
   if (typeFilters.length) filtered = filtered.filter(wi => typeFilters.includes(wi.type));
   else filtered = filtered.filter(wi => !HIDDEN_TYPES.includes(wi.type));
   if (stateFilters.length) filtered = filtered.filter(wi => stateFilters.includes(wi.state));
+  if (tagFilters.length) filtered = filtered.filter(wi => {
+    const wiTags = wi.tags ? wi.tags.split(';').map(t => t.trim()) : [];
+    return tagFilters.some(tf => wiTags.includes(tf));
+  });
   if (search) filtered = filtered.filter(wi =>
     wi.title.toLowerCase().includes(search) || String(wi.id).includes(search) || wi.assignedTo.toLowerCase().includes(search)
   );
@@ -3361,6 +3396,7 @@ function filterBacklog() {
   const search = document.getElementById('backlogSearch').value.toLowerCase();
   const typeFilters = getMultiSelectValues('backlogType');
   const stateFilters = getMultiSelectValues('backlogState');
+  const tagFilters = getMultiSelectValues('backlogTag');
   const rows = document.querySelectorAll('#backlogBody tr');
   let idx = 0;
   for (const wi of workItems) {
@@ -3368,7 +3404,8 @@ function filterBacklog() {
     const matchSearch = !search || wi.title.toLowerCase().includes(search) || wi.assignedTo.toLowerCase().includes(search) || String(wi.id).includes(search);
     const matchType = typeFilters.length > 0 ? typeFilters.includes(wi.type) : !HIDDEN_TYPES.includes(wi.type);
     const matchState = stateFilters.length === 0 || stateFilters.includes(wi.state);
-    rows[idx].style.display = (matchSearch && matchType && matchState) ? '' : 'none';
+    const matchTag = tagFilters.length === 0 || (wi.tags && tagFilters.some(tf => wi.tags.split(';').map(t => t.trim()).includes(tf)));
+    rows[idx].style.display = (matchSearch && matchType && matchState && matchTag) ? '' : 'none';
     idx++;
   }
 }
