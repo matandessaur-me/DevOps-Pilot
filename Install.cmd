@@ -20,10 +20,6 @@ echo Installing dependencies...
 call npm install
 
 echo.
-echo Generating icon...
-node dashboard\generate-icon.js
-
-echo.
 echo Creating desktop shortcut...
 powershell -NoProfile -ExecutionPolicy Bypass -File dashboard\create-shortcut.ps1
 

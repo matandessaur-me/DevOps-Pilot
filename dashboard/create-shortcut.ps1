@@ -2,12 +2,12 @@ param(
     [string]$RepoDir = (Split-Path $PSScriptRoot -Parent)
 )
 
-$electronPath = Join-Path $RepoDir "node_modules\.bin\electron.cmd"
+$electronExe = Join-Path $RepoDir "node_modules\electron\dist\electron.exe"
 $iconPath = Join-Path $RepoDir "dashboard\public\icon.ico"
 $desktopPath = [Environment]::GetFolderPath("Desktop")
 $shortcutPath = Join-Path $desktopPath "DevOps Pilot.lnk"
 
-# Generate .ico from PNG if needed
+# Generate .ico from PNG if ico doesn't exist
 if (-not (Test-Path $iconPath)) {
     $pngPath = Join-Path $RepoDir "dashboard\public\icon.png"
     if (Test-Path $pngPath) {
@@ -23,17 +23,20 @@ if (-not (Test-Path $iconPath)) {
         [BitConverter]::GetBytes([uint32]22).CopyTo($hdr, 18)
         $ico = $hdr + $png
         [System.IO.File]::WriteAllBytes($iconPath, $ico)
-        Write-Host "  [OK] icon.ico generated"
+        Write-Host "  [OK] icon.ico generated from icon.png"
     }
 }
 
-# Create shortcut
+# Remove old shortcut
+Remove-Item $shortcutPath -Force -ErrorAction SilentlyContinue
+
+# Create shortcut pointing to electron.exe directly (not .cmd — fixes icon display)
 $ws = New-Object -ComObject WScript.Shell
 $shortcut = $ws.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = $electronPath
+$shortcut.TargetPath = $electronExe
 $shortcut.Arguments = "."
 $shortcut.WorkingDirectory = $RepoDir
-$shortcut.IconLocation = $iconPath
+$shortcut.IconLocation = "$iconPath,0"
 $shortcut.Description = "DevOps Pilot - AI-powered Azure DevOps workstation"
 $shortcut.Save()
 
