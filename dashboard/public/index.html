@@ -4084,7 +4084,7 @@ function handleUiAction(msg) {
     filesCurrentRepo = msg.repo;
     activeRepo = msg.repo;
     switchTab('files');
-    setTimeout(() => viewFile(msg.path), 300);
+    setTimeout(() => viewFile(msg.path, msg.line || undefined, msg.highlight || undefined), 300);
   }
   if (msg.action === 'view-diff') {
     const diffRepo = msg.repo || activeRepo || filesCurrentRepo;

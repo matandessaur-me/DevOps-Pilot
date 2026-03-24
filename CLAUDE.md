@@ -148,7 +148,7 @@ You can control the dashboard UI. **Use these intelligently based on context** â
 | POST | `/api/ui/tab` | Switch tab. Body: `{ tab: "terminal"\|"board"\|"backlog"\|"workitem"\|"files"\|"notes" }` |
 | POST | `/api/ui/view-workitem` | Open work item detail. Body: `{ id: 12345 }` |
 | POST | `/api/ui/view-note` | Open a note in preview. Body: `{ name: "My Note" }` |
-| POST | `/api/ui/view-file` | Open a file in the code viewer. Body: `{ repo: "RepoName", path: "src/index.ts" }` |
+| POST | `/api/ui/view-file` | Open a file in the code viewer. Body: `{ repo: "RepoName", path: "src/index.ts", line: 132 }` (line is optional â€” scrolls to and highlights that line) |
 | POST | `/api/ui/view-diff` | Open split diff for a file. Body: `{ repo: "RepoName", path: "src/index.ts", base: "HEAD" }` |
 | POST | `/api/ui/refresh-workitems` | Refresh work items list. Body: `{}` |
 | GET | `/api/ui/context` | Get current dashboard state: selected iteration, active repo |
