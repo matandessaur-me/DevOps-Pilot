@@ -255,7 +255,7 @@ When moving a work item to **Active** or **Resolved**:
 1. **When asked about iteration status**: Fetch iterations, find current iteration, get work items and burndown data, summarize progress.
 2. **When asked to create work items**: Follow the creation guidelines above. Always include story points and a descriptive description.
 3. **When doing standup summaries**: Fetch current iteration items, group by state, highlight recently changed items.
-4. **When starting work on an item**: Use the `/api/start-working` endpoint which creates a git branch and sets the item to Active.
+4. **When starting work on an item**: Use the `/api/start-working` endpoint which creates a git branch and sets the item to **Active**. If you created the work item yourself and then start working on it, make sure its state moves to Active.
 5. **When asked "where are we at?"**: Combine iteration burndown, item states, and velocity to give a comprehensive status.
 
 ## CRITICAL: Git Branch Workflow
@@ -291,6 +291,23 @@ When starting work on a task, the system automatically:
    ```
    git commit -m "Fix login timeout issue AB#12345"
    ```
+
+6. **After committing**, ask the user: "Want me to move AB#12345 to **Resolved**?"
+   - Only move to Resolved if the user confirms.
+   - Do NOT auto-resolve without asking.
+
+## CRITICAL: Work Item Lifecycle During Development
+
+Follow this sequence when working on a task tied to a work item:
+
+1. **Start working** → Work item moves to **Active** (automatic via `/api/start-working`, or do it manually via the API)
+2. **Write code** → Work item stays Active
+3. **Show diff** → Let the user review changes
+4. **Commit** → Ask "Ready to commit?"
+5. **After commit** → Ask "Want me to move AB#12345 to Resolved?"
+6. **Push / Create PR** → Only when the user asks
+
+The AI should guide the user through this flow naturally. Don't skip steps.
 
 ## CRITICAL: Creating Pull Requests
 
