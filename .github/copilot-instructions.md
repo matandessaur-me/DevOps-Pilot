@@ -230,8 +230,10 @@ This returns `{ selectedIteration, selectedIterationName, activeRepo }`.
 - **NEVER assume the current sprint.** Always respect the user's selection.
 
 ### Creating Work Items
+**Use only plain ASCII characters in titles and descriptions.** No emojis, no smart quotes, no special Unicode symbols. These show up as corrupted characters (�) in Azure DevOps.
+
 When creating work items, ALWAYS include:
-1. **Title** — clear, concise, descriptive
+1. **Title** — clear, concise, descriptive (plain text only, no special characters)
 2. **Description** — detailed enough to understand the full scope. Include context, what needs to happen, and why.
 3. **Story Points** — always estimate story points (1, 2, 3, 5, 8, 13). Use your best judgment based on complexity.
 4. **Priority** — default to 2 (Normal) unless specified

@@ -610,9 +610,11 @@ async function handleUpdateWorkItem(id, req, res) {
       acceptanceCriteria: '/fields/Microsoft.VSTS.Common.AcceptanceCriteria',
     };
 
+    const textFields = ['title', 'description', 'tags', 'acceptanceCriteria'];
     for (const [key, path] of Object.entries(fieldMap)) {
       if (body[key] !== undefined) {
-        patchDoc.push({ op: 'replace', path, value: body[key] });
+        const val = textFields.includes(key) ? sanitizeText(body[key]) : body[key];
+        patchDoc.push({ op: 'replace', path, value: val });
       }
     }
 
@@ -647,21 +649,32 @@ async function handleWorkItemState(id, req, res) {
 }
 
 // ── Create Work Item ────────────────────────────────────────────────────────
+// Strip non-ASCII control chars and replacement characters (U+FFFD, etc.)
+// Keeps standard printable ASCII, common Unicode letters/symbols, and whitespace.
+function sanitizeText(str) {
+  if (!str) return str;
+  return str
+    .replace(/[\uFFFD\uFFFE\uFFFF]/g, '')       // replacement/noncharacters
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '') // control chars (keep \t \n \r)
+    .replace(/[\uD800-\uDFFF]/g, '')              // lone surrogates
+    .trim();
+}
+
 async function handleCreateWorkItem(req, res) {
   try {
     const { type, title, description, priority, tags, assignedTo, iterationPath, storyPoints, acceptanceCriteria } = await readBody(req);
     if (!type || !title) return json(res, { error: 'type and title are required' }, 400);
 
     const patchDoc = [
-      { op: 'add', path: '/fields/System.Title', value: title },
+      { op: 'add', path: '/fields/System.Title', value: sanitizeText(title) },
     ];
-    if (description)       patchDoc.push({ op: 'add', path: '/fields/System.Description', value: description });
+    if (description)       patchDoc.push({ op: 'add', path: '/fields/System.Description', value: sanitizeText(description) });
     if (priority)          patchDoc.push({ op: 'add', path: '/fields/Microsoft.VSTS.Common.Priority', value: parseInt(priority, 10) || 2 });
-    if (tags)              patchDoc.push({ op: 'add', path: '/fields/System.Tags', value: tags });
+    if (tags)              patchDoc.push({ op: 'add', path: '/fields/System.Tags', value: sanitizeText(tags) });
     if (assignedTo)        patchDoc.push({ op: 'add', path: '/fields/System.AssignedTo', value: assignedTo });
     if (iterationPath)     patchDoc.push({ op: 'add', path: '/fields/System.IterationPath', value: iterationPath });
     if (storyPoints)       patchDoc.push({ op: 'add', path: '/fields/Microsoft.VSTS.Scheduling.StoryPoints', value: parseFloat(storyPoints) });
-    if (acceptanceCriteria) patchDoc.push({ op: 'add', path: '/fields/Microsoft.VSTS.Common.AcceptanceCriteria', value: acceptanceCriteria });
+    if (acceptanceCriteria) patchDoc.push({ op: 'add', path: '/fields/Microsoft.VSTS.Common.AcceptanceCriteria', value: sanitizeText(acceptanceCriteria) });
 
     const wiType = encodeURIComponent(type);
     const result = await adoRequest('POST', `/wit/workitems/$${wiType}?api-version=7.1`, patchDoc, 'application/json-patch+json');
