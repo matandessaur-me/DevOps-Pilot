@@ -38,50 +38,26 @@ DevOps Pilot is a desktop application that brings together Azure DevOps project 
 
 ### Installation
 
-```bash
-# Clone the repository
-git clone https://github.com/M8N-MatanDessaur/DevOps-Pilot.git
-cd DevOps-Pilot
-
-# Install dependencies
-npm install
-
-# Or use the automated installer (Windows)
-Install.cmd
-```
-
-### Configuration
-
-1. Copy the template:
+1. Clone the repository:
    ```bash
-   cp config/config.template.json config/config.json
+   git clone https://github.com/M8N-MatanDessaur/DevOps-Pilot.git
+   cd DevOps-Pilot
    ```
 
-2. Edit `config/config.json` with your Azure DevOps details:
-   ```json
-   {
-     "AzureDevOpsOrg": "your-organization",
-     "AzureDevOpsProject": "Your Project",
-     "AzureDevOpsPAT": "your-personal-access-token",
-     "DefaultTeam": "Your Project Team",
-     "DefaultUser": "Your Display Name",
-     "Repos": {
-       "MyRepo": "C:\\Code\\path-to-your-repo"
-     }
-   }
+2. Run the installer:
+   ```
+   Install.cmd
+   ```
+   This handles everything — checks for Node.js, installs dependencies, sets up PowerShell execution policy, and generates the app icon.
+
+3. Launch the app:
+   ```bash
+   npm run electron
    ```
 
-3. Your PAT needs these scopes: **Work Items (Read & Write)**, **Code (Read & Write)**, **Project and Team (Read)**.
+4. **Follow the onboarding.** The app will walk you through connecting your Azure DevOps organization, adding your PAT, and configuring your repositories.
 
-### Running
-
-```bash
-# Start the Electron app
-npm run electron
-
-# Or run just the server (accessible at http://localhost:3800)
-npm start
-```
+That's it. If you need to change anything later, click the **Settings** button in the bottom-left corner of the app.
 
 ### Building a Portable Executable
 
