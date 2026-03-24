@@ -824,6 +824,7 @@
     .intel-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
     .intel-panel { display: none; flex: 1; overflow-y: auto; padding: 12px; }
     .intel-panel.active { display: block; }
+    #ipanel-activity.active { display: flex; }
 
     /* ── Sprint card ──────────────────────────────────────────────────────── */
     .card {
@@ -1248,7 +1249,6 @@
       <button class="btn btn-primary" onclick="openCreateModal()"><i data-lucide="plus"></i> New Work Item</button>
       <button class="btn" onclick="filterMyItems()"><i data-lucide="user"></i> My Items</button>
       <button class="btn" onclick="loadWorkItems(true)"><i data-lucide="refresh-cw"></i> Refresh</button>
-      <button class="btn" onclick="openActivityTimeline()"><i data-lucide="activity"></i> Activity Timeline</button>
 
       <div class="divider"></div>
       <div class="section-title">AI Actions</div>
@@ -1575,8 +1575,11 @@
     </div>
 
     <!-- Activity Panel -->
-    <div class="intel-panel active" id="ipanel-activity">
-      <div id="activityFeed" style="color:var(--subtext0);font-size:12px;">Loading recent activity...</div>
+    <div class="intel-panel active" id="ipanel-activity" style="display:flex;flex-direction:column;padding:0;">
+      <div id="activityFeed" style="color:var(--subtext0);font-size:12px;flex:1;overflow-y:auto;padding:12px;">Loading recent activity...</div>
+      <div style="padding:8px 12px;border-top:1px solid var(--surface0);flex-shrink:0;">
+        <button class="btn btn-sm" onclick="openActivityTimeline()" style="width:100%;justify-content:center;gap:6px;"><i data-lucide="activity" style="width:13px;height:13px;"></i> Open Full Timeline</button>
+      </div>
     </div>
 
     <!-- Team Panel -->
