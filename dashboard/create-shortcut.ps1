@@ -36,7 +36,8 @@ $shortcut = $ws.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $electronExe
 $shortcut.Arguments = "."
 $shortcut.WorkingDirectory = $RepoDir
-$shortcut.IconLocation = "$iconPath,0"
+# Point icon to electron.exe itself (stamped by rcedit during install) — Windows trusts exe-embedded icons
+$shortcut.IconLocation = "$electronExe,0"
 $shortcut.Description = "DevOps Pilot - AI-powered Azure DevOps workstation"
 $shortcut.Save()
 
