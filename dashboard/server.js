@@ -157,7 +157,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/ui/refresh-workitems' && req.method === 'POST') return handleUiAction(req, res, 'refresh-workitems');
     if (url.pathname === '/api/ui/view-file' && req.method === 'POST')       return handleUiAction(req, res, 'view-file');
     if (url.pathname === '/api/ui/view-diff' && req.method === 'POST')       return handleUiAction(req, res, 'view-diff');
-    if (url.pathname === '/api/ui/context' && req.method === 'GET')         return json(res, _uiContext);
+    if (url.pathname === '/api/ui/context' && req.method === 'GET')         return json(res, getUiContextWithPath());
     if (url.pathname === '/api/ui/context' && req.method === 'POST')        return handleUiContextUpdate(req, res);
 
     // ── Static files ──────────────────────────────────────────────────────
@@ -1541,12 +1541,22 @@ function handleImageProxy(url, res) {
 }
 
 // ── UI Context (tracks what's selected in the dashboard) ────────────────────
-let _uiContext = { selectedIteration: null, selectedIterationName: 'All Iterations', activeRepo: null };
+let _uiContext = { selectedIteration: null, selectedIterationName: 'All Iterations', activeRepo: null, activeRepoPath: null };
+
+function getUiContextWithPath() {
+  // Always resolve the repo path from config so it's up to date
+  const ctx = { ..._uiContext };
+  if (ctx.activeRepo) {
+    const cfg = getConfig();
+    ctx.activeRepoPath = (cfg.Repos || {})[ctx.activeRepo] || null;
+  }
+  return ctx;
+}
 
 async function handleUiContextUpdate(req, res) {
   const data = await readBody(req);
   Object.assign(_uiContext, data);
-  json(res, { ok: true, context: _uiContext });
+  json(res, { ok: true, context: getUiContextWithPath() });
 }
 
 async function handleUiAction(req, res, action) {

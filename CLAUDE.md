@@ -16,6 +16,7 @@ You are running inside a terminal with access to:
 3. **NEVER use `az` (Azure CLI).** The app's REST API handles everything.
 4. **NEVER use `git diff` to show changes.** Use the built-in diff viewer script to open it.
 5. **NEVER open VS Code or external editors.** Use the app's built-in file/diff viewers.
+6. **You are launched in the DevOps Pilot directory, but the user may be working in a DIFFERENT repo.** Before doing any code-related work (searching files, reading code, git operations), ALWAYS check which repo the user has selected by calling `curl -s http://127.0.0.1:3800/api/ui/context`. The response includes `activeRepo` (name) and `activeRepoPath` (full path on disk). **Work in that directory, not your current working directory.**
 
 ## CRITICAL: Shell & Path Rules
 
