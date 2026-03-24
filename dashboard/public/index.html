@@ -1177,6 +1177,31 @@
     .timeline-entry-meta { font-size: 11px; color: var(--subtext0); margin-top: 2px; }
     .timeline-entry-id { font-family: var(--font-mono); font-size: 11px; color: var(--accent); font-weight: 600; }
 
+    /* ── Timeline filter & charts ─────────────────────────────────────────── */
+    .tl-filter-bar { display: flex; gap: 2px; background: var(--surface0); border-radius: var(--radius); padding: 2px; }
+    .tl-filter-btn {
+      padding: 4px 10px; border: none; background: transparent; color: var(--subtext0);
+      font: 11px var(--font-ui); cursor: pointer; border-radius: 4px; transition: all 0.12s;
+    }
+    .tl-filter-btn:hover { color: var(--text); }
+    .tl-filter-btn.active { background: var(--accent); color: #fff; font-weight: 600; }
+    .tl-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+    .tl-chart-card {
+      background: var(--mantle); border: 1px solid var(--surface0); border-radius: var(--radius);
+      padding: 14px 16px;
+    }
+    .tl-chart-title { font-size: 11px; font-weight: 600; color: var(--subtext0); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+    .tl-stat-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .tl-stat-row:last-child { margin-bottom: 0; }
+    .tl-stat-label { font-size: 12px; color: var(--text); width: 80px; flex-shrink: 0; }
+    .tl-stat-bar-bg { flex: 1; height: 8px; background: var(--surface0); border-radius: 99px; overflow: hidden; }
+    .tl-stat-bar { height: 100%; border-radius: 99px; transition: width 0.4s ease; min-width: 2px; }
+    .tl-stat-count { font-size: 11px; font-weight: 600; color: var(--text); width: 28px; text-align: right; flex-shrink: 0; font-family: var(--font-mono); }
+    .tl-daily-chart { display: flex; align-items: flex-end; gap: 3px; height: 80px; padding-top: 4px; }
+    .tl-daily-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; height: 100%; justify-content: flex-end; }
+    .tl-daily-bar { width: 100%; border-radius: 3px 3px 0 0; transition: height 0.4s ease; min-height: 2px; }
+    .tl-daily-label { font-size: 9px; color: var(--subtext0); white-space: nowrap; }
+
     /* ── Toast notifications ──────────────────────────────────────────────── */
     .toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 300; display: flex; flex-direction: column; gap: 8px; }
     .toast {
@@ -1454,10 +1479,16 @@
             <div style="font-size:12px;color:var(--subtext0);margin-bottom:4px;">Overview</div>
             <div class="timeline-title">Activity Timeline</div>
           </div>
-          <div class="wi-detail-actions">
+          <div class="wi-detail-actions" style="gap:6px;align-items:center;">
+            <div class="tl-filter-bar" id="tlFilterBar">
+              <button class="tl-filter-btn active" onclick="setTimelineRange(5, this)">5 days</button>
+              <button class="tl-filter-btn" onclick="setTimelineRange(14, this)">14 days</button>
+              <button class="tl-filter-btn" onclick="setTimelineRange(30, this)">30 days</button>
+            </div>
             <button class="btn btn-sm" onclick="closeActivityTimeline()" style="color:var(--subtext0);"><i data-lucide="x"></i> Close</button>
           </div>
         </div>
+        <div id="timelineCharts"></div>
         <div id="timelineContent">
           <div class="empty-state"><div class="empty-state-text">Loading activity...</div></div>
         </div>
@@ -5798,6 +5829,8 @@ function executeCmdPalette(idx) {
 }
 
 // ── Activity Timeline ───────────────────────────────────────────────────
+let _tlRangeDays = 5;
+
 function openActivityTimeline() {
   document.getElementById('activityTabBtn').style.display = '';
   switchTab('activity');
@@ -5810,20 +5843,109 @@ function closeActivityTimeline() {
   switchTab('board');
 }
 
-function renderTimeline() {
-  const container = document.getElementById('timelineContent');
-  const recent = [...workItems]
-    .sort((a, b) => new Date(b.changedDate) - new Date(a.changedDate))
-    .slice(0, 50);
+function setTimelineRange(days, btn) {
+  _tlRangeDays = days;
+  document.querySelectorAll('.tl-filter-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderTimeline();
+}
 
-  if (recent.length === 0) {
-    container.innerHTML = '<div class="cmd-palette-empty">No activity found</div>';
+function getTimelineItems() {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - _tlRangeDays);
+  return [...workItems]
+    .filter(wi => new Date(wi.changedDate) >= cutoff)
+    .sort((a, b) => new Date(b.changedDate) - new Date(a.changedDate));
+}
+
+function entryMeta(wi) {
+  const state = wi.state;
+  if (state === 'Closed' || state === 'Done') return { text: 'Closed', color: 'var(--subtext0)', bg: 'var(--surface0)', icon: 'check-circle' };
+  if (state === 'Resolved') return { text: 'Resolved', color: 'var(--mauve)', bg: 'rgba(203,166,247,0.1)', icon: 'check' };
+  if (state === 'Active') return { text: 'In Progress', color: 'var(--green)', bg: 'rgba(166,227,161,0.1)', icon: 'play' };
+  if (state === 'New') {
+    const created = wi.createdDate ? new Date(wi.createdDate) : null;
+    const changed = new Date(wi.changedDate);
+    if (created && Math.abs(changed - created) < 120000) return { text: 'Created', color: 'var(--blue)', bg: 'rgba(137,180,250,0.1)', icon: 'plus-circle' };
+    return { text: 'Updated', color: 'var(--sapphire)', bg: 'rgba(116,199,236,0.1)', icon: 'edit' };
+  }
+  return { text: state, color: 'var(--subtext0)', bg: 'var(--surface0)', icon: 'circle' };
+}
+
+function renderTimelineCharts(items) {
+  const charts = document.getElementById('timelineCharts');
+
+  // Count by current state
+  const stateCounts = { 'In Progress': 0, 'Resolved': 0, 'Created': 0, 'Closed': 0, 'Updated': 0 };
+  for (const wi of items) {
+    const m = entryMeta(wi);
+    if (stateCounts[m.text] !== undefined) stateCounts[m.text]++;
+  }
+  const maxState = Math.max(1, ...Object.values(stateCounts));
+
+  const stateColors = {
+    'In Progress': 'var(--green)', 'Resolved': 'var(--mauve)',
+    'Created': 'var(--blue)', 'Closed': 'var(--subtext0)', 'Updated': 'var(--sapphire)'
+  };
+
+  // Daily activity counts (one bar per day)
+  const dailyCounts = {};
+  for (let i = _tlRangeDays - 1; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    dailyCounts[d.toDateString()] = { label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), count: 0 };
+  }
+  for (const wi of items) {
+    const key = new Date(wi.changedDate).toDateString();
+    if (dailyCounts[key]) dailyCounts[key].count++;
+  }
+  const maxDaily = Math.max(1, ...Object.values(dailyCounts).map(d => d.count));
+
+  let html = '<div class="tl-charts">';
+
+  // Card 1: Status breakdown (horizontal bars)
+  html += '<div class="tl-chart-card">';
+  html += '<div class="tl-chart-title">Activity by Status</div>';
+  for (const [label, count] of Object.entries(stateCounts)) {
+    if (count === 0) continue;
+    const pct = (count / maxState) * 100;
+    html += `<div class="tl-stat-row">
+      <span class="tl-stat-label">${label}</span>
+      <div class="tl-stat-bar-bg"><div class="tl-stat-bar" style="width:${pct}%;background:${stateColors[label] || 'var(--accent)'}"></div></div>
+      <span class="tl-stat-count">${count}</span>
+    </div>`;
+  }
+  html += '</div>';
+
+  // Card 2: Daily activity (vertical bars)
+  html += '<div class="tl-chart-card">';
+  html += '<div class="tl-chart-title">Daily Activity</div>';
+  html += '<div class="tl-daily-chart">';
+  for (const [, day] of Object.entries(dailyCounts)) {
+    const pct = (day.count / maxDaily) * 100;
+    html += `<div class="tl-daily-col">
+      <div class="tl-daily-bar" style="height:${Math.max(3, pct)}%;background:var(--accent);"></div>
+      <div class="tl-daily-label">${day.label}</div>
+    </div>`;
+  }
+  html += '</div></div>';
+
+  html += '</div>';
+  charts.innerHTML = html;
+}
+
+function renderTimeline() {
+  const items = getTimelineItems();
+  renderTimelineCharts(items);
+
+  const container = document.getElementById('timelineContent');
+  if (items.length === 0) {
+    container.innerHTML = '<div class="cmd-palette-empty">No activity in the last ' + _tlRangeDays + ' days</div>';
     return;
   }
 
   // Group by day
   const groups = {};
-  for (const wi of recent) {
+  for (const wi of items) {
     const d = new Date(wi.changedDate);
     const today = new Date();
     const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
@@ -5835,25 +5957,11 @@ function renderTimeline() {
     groups[dayKey].push(wi);
   }
 
-  function entryMeta(wi) {
-    const state = wi.state;
-    if (state === 'Closed' || state === 'Done') return { text: 'Closed', color: 'var(--subtext0)', bg: 'var(--surface0)', icon: 'check-circle' };
-    if (state === 'Resolved') return { text: 'Resolved', color: 'var(--mauve)', bg: 'rgba(203,166,247,0.1)', icon: 'check' };
-    if (state === 'Active') return { text: 'In Progress', color: 'var(--green)', bg: 'rgba(166,227,161,0.1)', icon: 'play' };
-    if (state === 'New') {
-      const created = wi.createdDate ? new Date(wi.createdDate) : null;
-      const changed = new Date(wi.changedDate);
-      if (created && Math.abs(changed - created) < 120000) return { text: 'Created', color: 'var(--blue)', bg: 'rgba(137,180,250,0.1)', icon: 'plus-circle' };
-      return { text: 'Updated', color: 'var(--sapphire)', bg: 'rgba(116,199,236,0.1)', icon: 'edit' };
-    }
-    return { text: state, color: 'var(--subtext0)', bg: 'var(--surface0)', icon: 'circle' };
-  }
-
   let html = '';
-  for (const [day, items] of Object.entries(groups)) {
+  for (const [day, dayItems] of Object.entries(groups)) {
     html += `<div class="timeline-day">`;
-    html += `<div class="timeline-day-label">${day}</div>`;
-    for (const wi of items) {
+    html += `<div class="timeline-day-label">${day} <span style="font-weight:400;color:var(--overlay0);">(${dayItems.length})</span></div>`;
+    for (const wi of dayItems) {
       const m = entryMeta(wi);
       const time = new Date(wi.changedDate).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
       html += `
