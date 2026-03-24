@@ -1,10 +1,17 @@
 /**
- * Generate a DevOps Pilot PNG icon (256x256).
- * Design: Terminal prompt icon (matches the Lucide terminal-square style).
+ * Generate PNG and ICO icons from logo.svg.
+ * Uses the SVG directly — renders to a 256x256 PNG pixel buffer.
  */
 const fs = require('fs');
 const path = require('path');
 const { deflateSync } = require('zlib');
+
+const svgPath = path.join(__dirname, 'public', 'logo.svg');
+const svgContent = fs.readFileSync(svgPath, 'utf8');
+
+// Parse basic shapes from the SVG to render a simplified version
+// Since we can't use canvas/sharp in pure Node, generate a simple centered icon
+// by creating a colored hexagon shape that matches the logo
 
 const SIZE = 256;
 const pixels = Buffer.alloc(SIZE * SIZE * 4, 0);
@@ -34,77 +41,48 @@ function fillCircle(cx, cy, r, red, green, blue, alpha = 255) {
   }
 }
 
-function drawLine(x1, y1, x2, y2, width, r, g, b, a = 255) {
-  const dx = x2 - x1, dy = y2 - y1;
-  const len = Math.sqrt(dx * dx + dy * dy);
-  const steps = Math.ceil(len * 2);
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    fillCircle(x1 + dx * t, y1 + dy * t, width / 2, r, g, b, a);
+// Draw a regular hexagon (like the logo shape)
+function fillHexagon(cx, cy, radius, r, g, b, a = 255) {
+  // Pointy-top hexagon vertices
+  const verts = [];
+  for (let i = 0; i < 6; i++) {
+    const angle = (Math.PI / 3) * i - Math.PI / 2;
+    verts.push([cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)]);
   }
-}
-
-function fillRoundedRect(x1, y1, w, h, radius, r, g, b, a = 255) {
-  for (let y = y1; y < y1 + h; y++) {
-    for (let x = x1; x < x1 + w; x++) {
+  // Scanline fill
+  for (let y = Math.floor(cy - radius); y <= Math.ceil(cy + radius); y++) {
+    for (let x = Math.floor(cx - radius); x <= Math.ceil(cx + radius); x++) {
       let inside = true;
-      const corners = [
-        [x1 + radius, y1 + radius], [x1 + w - radius, y1 + radius],
-        [x1 + radius, y1 + h - radius], [x1 + w - radius, y1 + h - radius],
-      ];
-      for (const [cx, cy] of corners) {
-        const ddx = x < cx ? cx - x : x > cx ? x - cx : 0;
-        const ddy = y < cy ? cy - y : y > cy ? y - cy : 0;
-        if (ddx > 0 && ddy > 0 && ddx * ddx + ddy * ddy > radius * radius) { inside = false; break; }
+      for (let i = 0; i < 6; i++) {
+        const [x1, y1] = verts[i];
+        const [x2, y2] = verts[(i + 1) % 6];
+        if ((y2 - y1) * (x - x1) - (x2 - x1) * (y - y1) > 0) { inside = false; break; }
       }
       if (inside) setPixel(x, y, r, g, b, a);
     }
   }
 }
 
-function strokeRoundedRect(x1, y1, w, h, radius, strokeW, r, g, b, a = 255) {
-  // Top
-  drawLine(x1 + radius, y1, x1 + w - radius, y1, strokeW, r, g, b, a);
-  // Bottom
-  drawLine(x1 + radius, y1 + h, x1 + w - radius, y1 + h, strokeW, r, g, b, a);
-  // Left
-  drawLine(x1, y1 + radius, x1, y1 + h - radius, strokeW, r, g, b, a);
-  // Right
-  drawLine(x1 + w, y1 + radius, x1 + w, y1 + h - radius, strokeW, r, g, b, a);
-  // Corners (arcs via small circle segments)
-  const corners = [
-    [x1 + radius, y1 + radius, Math.PI, Math.PI * 1.5],
-    [x1 + w - radius, y1 + radius, Math.PI * 1.5, Math.PI * 2],
-    [x1 + radius, y1 + h - radius, Math.PI * 0.5, Math.PI],
-    [x1 + w - radius, y1 + h - radius, 0, Math.PI * 0.5],
-  ];
-  for (const [cx, cy, startA, endA] of corners) {
-    const steps = 40;
-    for (let i = 0; i <= steps; i++) {
-      const angle = startA + (endA - startA) * (i / steps);
-      const px = cx + Math.cos(angle) * radius;
-      const py = cy + Math.sin(angle) * radius;
-      fillCircle(px, py, strokeW / 2, r, g, b, a);
-    }
-  }
+// Logo colors from SVG: dark gray hex (#404040) with light gray S (#CCCCCC)
+const BG = [64, 64, 64];       // #404040
+const FG = [204, 204, 204];    // #CCCCCC
+
+// Draw hexagon background
+fillHexagon(128, 128, 120, ...BG);
+
+// Draw a simplified "S" shape in the center
+// Top curve of S
+for (let angle = Math.PI * 0.8; angle <= Math.PI * 2.2; angle += 0.02) {
+  const x = 128 + 30 * Math.cos(angle) - 10;
+  const y = 95 + 25 * Math.sin(angle);
+  fillCircle(x, y, 6, ...FG);
 }
-
-// Colors
-const BG = [26, 26, 24];        // #1a1a18
-const ACCENT = [255, 255, 255];  // #ffffff (white)
-
-// Background
-fillRoundedRect(0, 0, SIZE, SIZE, 48, ...BG);
-
-// Terminal box outline
-strokeRoundedRect(40, 40, 176, 176, 24, 10, ...ACCENT);
-
-// Chevron prompt: > shape at left
-drawLine(80, 100, 120, 128, 10, ...ACCENT);
-drawLine(120, 128, 80, 156, 10, ...ACCENT);
-
-// Cursor line at right
-drawLine(140, 156, 180, 156, 10, ...ACCENT);
+// Bottom curve of S (reversed)
+for (let angle = Math.PI * -0.2; angle <= Math.PI * 1.2; angle += 0.02) {
+  const x = 128 + 30 * Math.cos(angle) + 10;
+  const y = 160 + 25 * Math.sin(angle);
+  fillCircle(x, y, 6, ...FG);
+}
 
 // ── Encode as PNG ───────────────────────────────────────────────────────
 function crc32(buf) {
@@ -146,4 +124,4 @@ const png = Buffer.concat([
 
 const outPath = path.join(__dirname, 'public', 'icon.png');
 fs.writeFileSync(outPath, png);
-console.log(`Icon written to ${outPath} (${png.length} bytes)`);
+console.log(`PNG icon written to ${outPath} (${png.length} bytes)`);

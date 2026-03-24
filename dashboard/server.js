@@ -28,7 +28,7 @@ const ROUTES = {
   '/xterm-addon-webgl.js':    { file: path.join(nodeModules, 'xterm-addon-webgl/lib/xterm-addon-webgl.js'),        type: 'application/javascript' },
   '/xterm-addon-web-links.js':{ file: path.join(nodeModules, 'xterm-addon-web-links/lib/xterm-addon-web-links.js'),type: 'application/javascript' },
   '/xterm-addon-unicode11.js':{ file: path.join(nodeModules, 'xterm-addon-unicode11/lib/xterm-addon-unicode11.js'),type: 'application/javascript' },
-  '/icon.svg':                { file: path.join(publicDir, 'icon.svg'),                                            type: 'image/svg+xml' },
+  '/logo.svg':                { file: path.join(publicDir, 'logo.svg'),                                            type: 'image/svg+xml' },
 };
 
 // ── Pluggable route handlers (Electron adds its own via addRoute) ────────────

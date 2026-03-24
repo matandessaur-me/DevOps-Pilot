@@ -3,6 +3,7 @@
  */
 const { app, BrowserWindow, nativeImage, dialog, screen, shell } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 process.env.ELECTRON = '1';
 
@@ -78,7 +79,11 @@ if (!gotLock) {
         autoHideMenuBar: true,
         backgroundColor: '#1a1a18',
         title: 'DevOps Pilot',
-        icon: nativeImage.createFromPath(path.join(__dirname, 'public', 'icon.ico')),
+        icon: nativeImage.createFromPath(
+          fs.existsSync(path.join(__dirname, 'public', 'icon.ico'))
+            ? path.join(__dirname, 'public', 'icon.ico')
+            : path.join(__dirname, 'public', 'icon.png')
+        ),
         titleBarStyle: 'hidden',
         titleBarOverlay: {
           color: '#1a1a18',
