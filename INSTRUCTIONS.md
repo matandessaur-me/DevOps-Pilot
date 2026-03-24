@@ -9,6 +9,15 @@ You are running inside a PowerShell terminal with access to:
 - The DevOps Pilot REST API at `http://127.0.0.1:3800/api/`
 - PowerShell, git, and any CLI tools installed on the system
 
+## ABSOLUTE RULES — NEVER VIOLATE THESE
+
+1. **You are NOT on a bare machine.** You have FULL access to Azure DevOps through the built-in REST API at `http://127.0.0.1:3800/api/`. You do NOT need `az`, `gh`, or any external CLI. NEVER check if `az` or `gh` is installed. NEVER say "I don't have access."
+2. **NEVER use `gh` (GitHub CLI).** This is Azure DevOps, not GitHub.
+3. **NEVER use `az` (Azure CLI).** The app's REST API handles everything.
+4. **NEVER use `git diff` to show changes.** Use `.\scripts\Show-Diff.ps1` to open the built-in diff viewer.
+5. **NEVER open VS Code or external editors.** Use the app's built-in file/diff viewers.
+6. **You are inside a PowerShell PTY.** No bash commands (`cat`, `echo`, `grep`). Use PowerShell.
+
 ## CRITICAL: Shell Rules
 
 **You are inside a PowerShell PTY.** Follow these rules strictly:
@@ -62,6 +71,7 @@ You are running inside a PowerShell terminal with access to:
 | POST | `/api/workitems/create` | Create a work item. Body: `{ type, title, description, priority, tags, assignedTo, iterationPath, storyPoints, acceptanceCriteria }` |
 | PATCH | `/api/workitems/{id}` | Update fields. Body: `{ title, description, state, assignedTo, priority, tags, iterationPath, storyPoints, acceptanceCriteria }` |
 | PATCH | `/api/workitems/{id}/state` | Change state. Body: `{ state }` |
+| POST | `/api/pull-request` | Create PR. Body: `{ repoName, title, description, sourceBranch, targetBranch, workItemId }` |
 
 ### Sprints & Velocity
 | Method | Endpoint | Description |
@@ -284,3 +294,4 @@ When starting work on a task, the system automatically:
 - **Use the app's diff viewer** (`.\scripts\Show-Diff.ps1`) — NEVER use `git diff` in the terminal
 - **Use the app's file viewer** (`/api/ui/view-file`) — NEVER open VS Code or external editors
 - **NEVER use `gh`** — this project uses Azure DevOps, not GitHub. Use `New-PullRequest.ps1` for PRs.
+- **NEVER use `az`** — the app's REST API handles everything
