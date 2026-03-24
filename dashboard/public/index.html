@@ -1161,7 +1161,7 @@
       <div class="field-group">
         <label class="field-label">Iteration</label>
         <select class="field-select" id="sprintSelect" onchange="onSprintChange()">
-          <option value="">Loading...</option>
+          <option value="">All Iterations</option>
         </select>
       </div>
     </div>
@@ -4140,9 +4140,9 @@ async function loadIterations() {
       opt.value = it.path;
       opt.textContent = it.name + (it.isCurrent ? ' (current)' : '');
       select.appendChild(opt);
-      if (it.isCurrent) { currentPath = it.path; opt.selected = true; }
+      if (it.isCurrent) currentPath = it.path;
     }
-    // Always load work items — use current sprint if available, otherwise all
+    // Default to "All Iterations" — do NOT auto-select current sprint
     loadWorkItems();
     if (currentPath) {
       loadBurndown(currentPath);
