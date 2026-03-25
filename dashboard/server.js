@@ -195,6 +195,10 @@ async function handleSaveConfig(req, res) {
   const config = { ...template, ...existing, ...incoming };
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+  // Immediately clear all caches so the next request uses the new config
+  teamAreasCache = { data: null, team: null, ts: 0 };
+  iterationsCache = { data: null, ts: 0 };
+  workItemsCache = { data: null, key: null, ts: 0 };
   json(res, { ok: true });
 }
 
@@ -299,7 +303,7 @@ function handleCliInstall(req, res) {
 }
 
 // ── Azure DevOps API Helper ─────────────────────────────────────────────────
-function adoRequest(method, apiPath, body, contentType) {
+function adoRequest(method, apiPath, body, contentType, _skipTeam) {
   return new Promise((resolve, reject) => {
     const cfg = getConfig();
     const org = cfg.AzureDevOpsOrg;
@@ -311,7 +315,8 @@ function adoRequest(method, apiPath, body, contentType) {
     }
 
     // Only /work/ endpoints are team-scoped in ADO. /wit/ endpoints are project-scoped.
-    const teamSegment = team && apiPath.startsWith('/work/') ? `/${encodeURIComponent(team)}` : '';
+    const useTeam = !_skipTeam && team && apiPath.startsWith('/work/');
+    const teamSegment = useTeam ? `/${encodeURIComponent(team)}` : '';
     const url = new URL(`https://dev.azure.com/${encodeURIComponent(org)}/${encodeURIComponent(project)}${teamSegment}/_apis${apiPath}`);
     const payload = body ? JSON.stringify(body) : null;
     const options = {
@@ -332,6 +337,9 @@ function adoRequest(method, apiPath, body, contentType) {
       resp.on('end', () => {
         if (resp.statusCode >= 200 && resp.statusCode < 300) {
           try { resolve(JSON.parse(data)); } catch (_) { resolve(data); }
+        } else if (resp.statusCode === 404 && useTeam && !_skipTeam) {
+          // Team not found in this project — retry without team segment
+          adoRequest(method, apiPath, body, contentType, true).then(resolve, reject);
         } else {
           const msg = resp.statusCode === 401
             ? 'Authentication failed — PAT may be expired or invalid'

@@ -402,18 +402,6 @@
     .multi-select-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .multi-select-arrow { font-size: 10px; color: var(--overlay1); transition: transform 0.15s; }
     .multi-select.open .multi-select-arrow { transform: rotate(180deg); }
-    .multi-select-chips {
-      display: flex; gap: 3px; flex-wrap: wrap; max-width: 160px;
-    }
-    .multi-chip {
-      display: inline-flex; align-items: center; gap: 3px;
-      padding: 1px 6px; border-radius: 99px; font-size: 10px; font-weight: 600;
-      background: rgba(217,119,87,0.15); color: var(--accent);
-    }
-    .multi-chip-x {
-      cursor: pointer; font-size: 12px; line-height: 1; opacity: 0.6;
-    }
-    .multi-chip-x:hover { opacity: 1; }
     .multi-select-panel {
       display: none; position: absolute; top: calc(100% + 4px); right: 0;
       min-width: 160px; background: var(--mantle);
@@ -427,20 +415,38 @@
       font: 12px var(--font-ui); color: var(--subtext1); transition: all 0.1s;
     }
     .multi-select-item:hover { background: var(--surface0); color: var(--text); }
-    .multi-select-check {
-      width: 14px; height: 14px; border-radius: 3px;
-      border: 1.5px solid var(--overlay0); display: flex;
-      align-items: center; justify-content: center; flex-shrink: 0;
-      transition: all 0.1s;
+    .multi-select-toggle {
+      width: 26px; height: 14px; border-radius: 7px;
+      background: var(--surface1); position: relative;
+      flex-shrink: 0; transition: background 0.15s;
     }
-    .multi-select-item.selected .multi-select-check {
-      background: var(--accent); border-color: var(--accent);
+    .multi-select-toggle::after {
+      content: ''; position: absolute; top: 2px; left: 2px;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--overlay0); transition: all 0.15s;
     }
-    .multi-select-item.selected .multi-select-check::after {
-      content: ''; width: 6px; height: 3px;
-      border-left: 1.5px solid #fff; border-bottom: 1.5px solid #fff;
-      transform: rotate(-45deg) translateY(-1px);
+    .multi-select-item.selected .multi-select-toggle {
+      background: var(--accent);
     }
+    .multi-select-item.selected .multi-select-toggle::after {
+      left: 14px; background: #fff;
+    }
+    .multi-select-toggle-all {
+      display: flex; align-items: center; justify-content: center;
+      padding: 5px 10px; border-bottom: 1px solid var(--surface0);
+      margin-bottom: 2px; cursor: pointer;
+      font: 11px var(--font-ui); color: var(--overlay1); font-weight: 600;
+      border-radius: var(--radius); background: var(--surface0); opacity: 0.7;
+    }
+    .multi-select-toggle-all:hover { opacity: 1; color: var(--text); }
+    .multi-select-count {
+      background: var(--surface1); color: var(--subtext0);
+      font-size: 9px; font-weight: 700;
+      min-width: 14px; height: 14px; border-radius: 7px;
+      display: none; align-items: center; justify-content: center;
+      padding: 0 3px; margin-left: auto;
+    }
+    .multi-select-count.visible { display: flex; }
     .board-card-type {
       padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 600;
       text-transform: uppercase; letter-spacing: 0.3px;
@@ -974,6 +980,29 @@
     .repo-item-name { font-size: 12px; font-weight: 600; color: var(--accent); min-width: 100px; }
     .repo-item-path { font-size: 11px; color: var(--subtext0); font-family: var(--font-mono); flex: 1; overflow: hidden; text-overflow: ellipsis; }
     .repo-item-del { background: none; border: none; color: var(--red); cursor: pointer; padding: 2px; font-size: 14px; }
+    .project-item {
+      display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+      border-radius: var(--radius); cursor: pointer; transition: all 0.1s;
+      border: 1px solid transparent;
+    }
+    .project-item:hover { background: var(--surface0); }
+    .project-item.active { background: var(--surface0); border-color: var(--accent); }
+    .project-item-radio {
+      width: 14px; height: 14px; border-radius: 50%;
+      border: 2px solid var(--overlay0); flex-shrink: 0; transition: all 0.15s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .project-item.active .project-item-radio {
+      border-color: var(--accent);
+    }
+    .project-item.active .project-item-radio::after {
+      content: ''; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent);
+    }
+    .project-item-name { font-size: 12px; font-weight: 500; color: var(--text); flex: 1; }
+    .project-item.active .project-item-name { font-weight: 600; color: var(--accent); }
+    .project-item-del { background: none; border: none; color: var(--red); cursor: pointer; padding: 2px; font-size: 14px; opacity: 0; transition: opacity 0.1s; }
+    .project-item:hover .project-item-del { opacity: 1; }
 
     /* ── Git modal (same size as settings) ────────────────────────────────── */
     .modal-git { width: 820px; height: 60vh; display: flex; flex-direction: column; }
@@ -1238,9 +1267,60 @@
     /* ── Loading spinner ──────────────────────────────────────────────────── */
     .spinner { width: 20px; height: 20px; border: 2px solid var(--surface1); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Full-screen loading overlay ─────────────────────────────────────── */
+    .loading-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      background: var(--base);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 0; opacity: 0; pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+    .loading-overlay.visible { opacity: 1; pointer-events: all; }
+    .loading-overlay-bar {
+      width: 160px; height: 3px; border-radius: 2px;
+      background: var(--surface1); overflow: hidden;
+    }
+    .loading-overlay-bar-fill {
+      width: 40%; height: 100%; border-radius: 2px;
+      background: var(--accent);
+      animation: loading-slide 1.2s ease-in-out infinite;
+    }
+    @keyframes loading-slide {
+      0%   { transform: translateX(-100%); }
+      50%  { transform: translateX(300%); }
+      100% { transform: translateX(-100%); }
+    }
+    .loading-overlay-label {
+      font: 14px/1 var(--font-ui); font-weight: 600; color: var(--subtext1);
+      letter-spacing: 0.5px; text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+    .loading-overlay-quote {
+      margin-top: 28px; text-align: center; max-width: 360px;
+      opacity: 0; transition: opacity 0.4s ease;
+    }
+    .loading-overlay-quote.visible { opacity: 1; }
+    .loading-overlay-quote-text {
+      font: 14px/1.6 var(--font-ui); color: var(--subtext0);
+      font-style: italic;
+    }
+    .loading-overlay-quote-author {
+      font: 12px var(--font-ui); color: var(--overlay1);
+      margin-top: 8px;
+    }
   </style>
 </head>
 <body>
+
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loading-overlay-label" id="loadingLabel">Loading</div>
+  <div class="loading-overlay-bar"><div class="loading-overlay-bar-fill"></div></div>
+  <div class="loading-overlay-quote" id="loadingQuote">
+    <div class="loading-overlay-quote-text" id="loadingQuoteText"></div>
+    <div class="loading-overlay-quote-author" id="loadingQuoteAuthor"></div>
+  </div>
+</div>
 
 <!-- ═══ Header ═══════════════════════════════════════════════════════════ -->
 <header class="header">
@@ -1290,7 +1370,7 @@
       <div class="section-title">Actions</div>
       <button class="btn btn-primary" onclick="openCreateModal()"><i data-lucide="plus"></i> New Work Item</button>
       <button class="btn" onclick="filterMyItems()"><i data-lucide="user"></i> My Items</button>
-      <button class="btn" onclick="loadWorkItems(true)"><i data-lucide="refresh-cw"></i> Refresh</button>
+      <button class="btn" onclick="refreshAll()"><i data-lucide="refresh-cw"></i> Refresh</button>
 
       <div class="divider"></div>
       <div class="section-title">AI Actions</div>
@@ -1367,35 +1447,40 @@
         <div style="flex:1"></div>
         <input class="view-search" id="boardSearch" type="text" placeholder="Search..." oninput="renderBoard()">
         <div class="multi-select" data-id="boardState" data-onchange="renderBoard">
-          <div class="multi-select-btn" onclick="toggleMultiSelect(this.parentElement)">
+          <div class="multi-select-btn" data-label="State" onclick="toggleMultiSelect(this.parentElement)">
             <span class="multi-select-label">State</span>
+            <span class="multi-select-count"></span>
             <span class="multi-select-arrow">&#9662;</span>
           </div>
           <div class="multi-select-panel">
-            <div class="multi-select-item" data-value="New" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> New</div>
-            <div class="multi-select-item" data-value="Active" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Active</div>
-            <div class="multi-select-item" data-value="Resolved" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Resolved</div>
-            <div class="multi-select-item" data-value="Closed" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Closed</div>
+            <div class="multi-select-toggle-all selected" onclick="toggleAllMultiItems(this)">Toggle All</div>
+            <div class="multi-select-item selected" data-value="New" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> New</div>
+            <div class="multi-select-item selected" data-value="Active" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Active</div>
+            <div class="multi-select-item selected" data-value="Resolved" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Resolved</div>
+            <div class="multi-select-item selected" data-value="Closed" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Closed</div>
           </div>
         </div>
         <div class="multi-select" data-id="boardType" data-onchange="renderBoard">
-          <div class="multi-select-btn" onclick="toggleMultiSelect(this.parentElement)">
+          <div class="multi-select-btn" data-label="Type" onclick="toggleMultiSelect(this.parentElement)">
             <span class="multi-select-label">Type</span>
+            <span class="multi-select-count"></span>
             <span class="multi-select-arrow">&#9662;</span>
           </div>
           <div class="multi-select-panel">
-            <div class="multi-select-item" data-value="User Story" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Stories</div>
-            <div class="multi-select-item" data-value="Bug" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Bugs</div>
-            <div class="multi-select-item" data-value="Task" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Tasks</div>
-            <div class="multi-select-item" data-value="Feature" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Features</div>
-            <div class="multi-select-item" data-value="Epic" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Epics</div>
-            <div class="multi-select-item" data-value="Test Case" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Test Cases</div>
-            <div class="multi-select-item" data-value="Test Suite" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Test Suites</div>
+            <div class="multi-select-toggle-all selected" onclick="toggleAllMultiItems(this)">Toggle All</div>
+            <div class="multi-select-item selected" data-value="User Story" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Stories</div>
+            <div class="multi-select-item selected" data-value="Bug" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Bugs</div>
+            <div class="multi-select-item selected" data-value="Task" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Tasks</div>
+            <div class="multi-select-item selected" data-value="Feature" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Features</div>
+            <div class="multi-select-item selected" data-value="Epic" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Epics</div>
+            <div class="multi-select-item selected" data-value="Test Case" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Test Cases</div>
+            <div class="multi-select-item selected" data-value="Test Suite" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Test Suites</div>
           </div>
         </div>
         <div class="multi-select" data-id="boardTag" data-onchange="renderBoard">
-          <div class="multi-select-btn" onclick="toggleMultiSelect(this.parentElement)">
+          <div class="multi-select-btn" data-label="Tags" onclick="toggleMultiSelect(this.parentElement)">
             <span class="multi-select-label">Tags</span>
+            <span class="multi-select-count"></span>
             <span class="multi-select-arrow">&#9662;</span>
           </div>
           <div class="multi-select-panel" id="boardTagPanel"></div>
@@ -1426,35 +1511,40 @@
       <div class="view-toolbar">
         <input class="view-search" id="backlogSearch" type="text" placeholder="Search..." oninput="filterBacklog()">
         <div class="multi-select" data-id="backlogState" data-onchange="filterBacklog">
-          <div class="multi-select-btn" onclick="toggleMultiSelect(this.parentElement)">
+          <div class="multi-select-btn" data-label="State" onclick="toggleMultiSelect(this.parentElement)">
             <span class="multi-select-label">State</span>
+            <span class="multi-select-count"></span>
             <span class="multi-select-arrow">&#9662;</span>
           </div>
           <div class="multi-select-panel">
-            <div class="multi-select-item" data-value="New" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> New</div>
-            <div class="multi-select-item" data-value="Active" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Active</div>
-            <div class="multi-select-item" data-value="Resolved" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Resolved</div>
-            <div class="multi-select-item" data-value="Closed" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Closed</div>
+            <div class="multi-select-toggle-all selected" onclick="toggleAllMultiItems(this)">Toggle All</div>
+            <div class="multi-select-item selected" data-value="New" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> New</div>
+            <div class="multi-select-item selected" data-value="Active" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Active</div>
+            <div class="multi-select-item selected" data-value="Resolved" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Resolved</div>
+            <div class="multi-select-item selected" data-value="Closed" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Closed</div>
           </div>
         </div>
         <div class="multi-select" data-id="backlogType" data-onchange="filterBacklog">
-          <div class="multi-select-btn" onclick="toggleMultiSelect(this.parentElement)">
+          <div class="multi-select-btn" data-label="Type" onclick="toggleMultiSelect(this.parentElement)">
             <span class="multi-select-label">Type</span>
+            <span class="multi-select-count"></span>
             <span class="multi-select-arrow">&#9662;</span>
           </div>
           <div class="multi-select-panel">
-            <div class="multi-select-item" data-value="User Story" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Stories</div>
-            <div class="multi-select-item" data-value="Bug" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Bugs</div>
-            <div class="multi-select-item" data-value="Task" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Tasks</div>
-            <div class="multi-select-item" data-value="Feature" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Features</div>
-            <div class="multi-select-item" data-value="Epic" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Epics</div>
-            <div class="multi-select-item" data-value="Test Case" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Test Cases</div>
-            <div class="multi-select-item" data-value="Test Suite" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> Test Suites</div>
+            <div class="multi-select-toggle-all selected" onclick="toggleAllMultiItems(this)">Toggle All</div>
+            <div class="multi-select-item selected" data-value="User Story" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Stories</div>
+            <div class="multi-select-item selected" data-value="Bug" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Bugs</div>
+            <div class="multi-select-item selected" data-value="Task" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Tasks</div>
+            <div class="multi-select-item selected" data-value="Feature" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Features</div>
+            <div class="multi-select-item selected" data-value="Epic" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Epics</div>
+            <div class="multi-select-item selected" data-value="Test Case" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Test Cases</div>
+            <div class="multi-select-item selected" data-value="Test Suite" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> Test Suites</div>
           </div>
         </div>
         <div class="multi-select" data-id="backlogTag" data-onchange="filterBacklog">
-          <div class="multi-select-btn" onclick="toggleMultiSelect(this.parentElement)">
+          <div class="multi-select-btn" data-label="Tags" onclick="toggleMultiSelect(this.parentElement)">
             <span class="multi-select-label">Tags</span>
+            <span class="multi-select-count"></span>
             <span class="multi-select-arrow">&#9662;</span>
           </div>
           <div class="multi-select-panel" id="backlogTagPanel"></div>
@@ -1734,8 +1824,12 @@
               <input id="settingsOrg" type="text" placeholder="e.g. my-org">
             </div>
             <div class="modal-field">
-              <label>Project</label>
-              <input id="settingsProject" type="text" placeholder="e.g. My Project">
+              <label>Projects</label>
+              <div id="settingsProjectList" style="margin-bottom:6px;"></div>
+              <div style="display:flex;gap:8px;">
+                <input id="settingsProjectInput" type="text" placeholder="e.g. My Project" style="flex:1;padding:6px 8px;background:var(--surface0);border:1px solid var(--surface1);border-radius:var(--radius);color:var(--text);font-size:12px;outline:none;" onkeydown="if(event.key==='Enter')addProjectFromSettings()">
+                <button class="modal-btn" onclick="addProjectFromSettings()" style="padding:6px 12px;font-size:11px;">Add</button>
+              </div>
             </div>
             <div class="modal-field">
               <label>Personal Access Token</label>
@@ -4320,7 +4414,7 @@ function handleUiAction(msg) {
 
 // ── Config ──────────────────────────────────────────────────────────────
 let _configLoaded = false;
-async function loadConfig() {
+async function loadConfig(autoSelectSprint) {
   try {
     const res = await fetch('/api/config');
     configData = await res.json();
@@ -4328,7 +4422,7 @@ async function loadConfig() {
     document.getElementById('projectLabel').textContent = label;
     if (configData.AzureDevOpsOrg && configData.AzureDevOpsProject && configData.AzureDevOpsPAT) {
       loadTeams();
-      loadIterations();
+      await loadIterations(autoSelectSprint);
       loadRepoList();
       loadTeamMembers();
     }
@@ -4342,7 +4436,7 @@ async function loadConfig() {
 }
 
 // ── Iterations ──────────────────────────────────────────────────────────
-async function loadIterations() {
+async function loadIterations(autoSelectCurrent) {
   try {
     const res = await fetch('/api/iterations');
     const data = await res.json();
@@ -4350,15 +4444,20 @@ async function loadIterations() {
     const select = document.getElementById('sprintSelect');
     select.innerHTML = '<option value="">All Iterations</option>';
     let currentPath = '';
+    let firstPath = '';
     for (const it of data) {
       const opt = document.createElement('option');
       opt.value = it.path;
       opt.textContent = it.name + (it.isCurrent ? ' (current)' : '');
       select.appendChild(opt);
+      if (!firstPath) firstPath = it.path;
       if (it.isCurrent) currentPath = it.path;
     }
-    // Default to "All Iterations" — do NOT auto-select current sprint
-    loadWorkItems();
+    // Auto-select current sprint (or first) when switching projects
+    if (autoSelectCurrent) {
+      select.value = currentPath || firstPath || '';
+    }
+    await loadWorkItems(!!autoSelectCurrent);
     if (currentPath) {
       loadBurndown(currentPath);
       updateSprintCard(data.find(i => i.isCurrent));
@@ -4400,6 +4499,7 @@ async function loadWorkItems(refresh = false) {
     if (data.error) { toast(data.error, 'error'); return; }
     workItems = data;
     populateTagFilters();
+    document.querySelectorAll('.multi-select').forEach(ms => updateMultiSelectLabel(ms));
     renderBoard();
     renderBacklog();
     updateActivityFeed();
@@ -4416,8 +4516,12 @@ function populateTagFilters() {
     if (wi.tags) wi.tags.split(';').forEach(t => { const trimmed = t.trim(); if (trimmed) tags.add(trimmed); });
   });
   const sorted = [...tags].sort((a, b) => a.localeCompare(b));
-  const html = sorted.map(tag =>
-    `<div class="multi-select-item" data-value="${esc(tag)}" onclick="toggleMultiItem(this)"><div class="multi-select-check"></div> ${esc(tag)}</div>`
+  const toggleAllHtml = sorted.length > 0
+    ? `<div class="multi-select-toggle-all selected" onclick="toggleAllMultiItems(this)">Toggle All</div>`
+    : '';
+  const noTagHtml = `<div class="multi-select-item selected" data-value="__none__" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> (No Tag)</div>`;
+  const html = toggleAllHtml + noTagHtml + sorted.map(tag =>
+    `<div class="multi-select-item selected" data-value="${esc(tag)}" onclick="toggleMultiItem(this)"><div class="multi-select-toggle"></div> ${esc(tag)}</div>`
   ).join('');
   const boardPanel = document.getElementById('boardTagPanel');
   const backlogPanel = document.getElementById('backlogTagPanel');
@@ -4448,8 +4552,26 @@ function toggleMultiSelect(el) {
 function toggleMultiItem(item) {
   item.classList.toggle('selected');
   const ms = item.closest('.multi-select');
+  // Sync the Toggle All switch
+  const toggleAll = ms.querySelector('.multi-select-toggle-all');
+  if (toggleAll) {
+    const allItems = ms.querySelectorAll('.multi-select-item');
+    const allSelected = [...allItems].every(i => i.classList.contains('selected'));
+    toggleAll.classList.toggle('selected', allSelected);
+  }
   updateMultiSelectLabel(ms);
-  // Call the onchange handler
+  const fn = ms.dataset.onchange;
+  if (fn && window[fn]) window[fn]();
+}
+
+function toggleAllMultiItems(toggleAllEl) {
+  const ms = toggleAllEl.closest('.multi-select');
+  const items = ms.querySelectorAll('.multi-select-item');
+  const allSelected = [...items].every(i => i.classList.contains('selected'));
+  // If all on -> turn all off. If any off -> turn all on.
+  items.forEach(i => i.classList.toggle('selected', !allSelected));
+  toggleAllEl.classList.toggle('selected', !allSelected);
+  updateMultiSelectLabel(ms);
   const fn = ms.dataset.onchange;
   if (fn && window[fn]) window[fn]();
 }
@@ -4461,14 +4583,16 @@ function getMultiSelectValues(dataId) {
 }
 
 function updateMultiSelectLabel(ms) {
-  const selected = [...ms.querySelectorAll('.multi-select-item.selected')];
+  const allItems = [...ms.querySelectorAll('.multi-select-item')];
+  const selected = allItems.filter(i => i.classList.contains('selected'));
+  const hidden = allItems.length - selected.length;
   const label = ms.querySelector('.multi-select-label');
-  const defaultLabel = ms.querySelector('.multi-select-btn').dataset.label || label.textContent.split(':')[0].trim();
-
-  if (selected.length === 0) {
-    label.textContent = defaultLabel.replace(/:.*/, '');
-  } else {
-    label.textContent = selected.map(el => el.textContent.trim()).join(', ');
+  const countBadge = ms.querySelector('.multi-select-count');
+  const defaultLabel = ms.querySelector('.multi-select-btn').dataset.label || label.textContent.split(' ')[0];
+  label.textContent = defaultLabel;
+  if (countBadge) {
+    countBadge.textContent = selected.length;
+    countBadge.classList.add('visible');
   }
 }
 
@@ -4516,14 +4640,18 @@ function renderBoard() {
   const stateFilters = getMultiSelectValues('boardState');
   const tagFilters = getMultiSelectValues('boardTag');
   let filtered = workItems;
-  // Hide test types by default; show them only if explicitly selected
-  if (typeFilters.length) filtered = filtered.filter(wi => typeFilters.includes(wi.type));
-  else filtered = filtered.filter(wi => !HIDDEN_TYPES.includes(wi.type));
-  if (stateFilters.length) filtered = filtered.filter(wi => stateFilters.includes(wi.state));
-  if (tagFilters.length) filtered = filtered.filter(wi => {
-    const wiTags = wi.tags ? wi.tags.split(';').map(t => t.trim()) : [];
-    return tagFilters.some(tf => wiTags.includes(tf));
-  });
+  // Filters are ON by default; deselected items are hidden
+  filtered = filtered.filter(wi => typeFilters.includes(wi.type));
+  filtered = filtered.filter(wi => stateFilters.includes(wi.state));
+  const totalTags = document.querySelectorAll('#boardTagPanel .multi-select-item').length;
+  if (totalTags > 0 && tagFilters.length < totalTags) {
+    const showNoTag = tagFilters.includes('__none__');
+    filtered = filtered.filter(wi => {
+      const wiTags = wi.tags ? wi.tags.split(';').map(t => t.trim()).filter(Boolean) : [];
+      if (wiTags.length === 0) return showNoTag;
+      return wiTags.some(t => tagFilters.includes(t));
+    });
+  }
   if (search) filtered = filtered.filter(wi =>
     wi.title.toLowerCase().includes(search) || String(wi.id).includes(search) || wi.assignedTo.toLowerCase().includes(search)
   );
@@ -4801,13 +4929,22 @@ function filterBacklog() {
   const typeFilters = getMultiSelectValues('backlogType');
   const stateFilters = getMultiSelectValues('backlogState');
   const tagFilters = getMultiSelectValues('backlogTag');
-  const hasFilters = search || typeFilters.length || stateFilters.length || tagFilters.length;
+  const totalTags = document.querySelectorAll('#backlogTagPanel .multi-select-item').length;
+  const tagsFiltered = totalTags > 0 && tagFilters.length < totalTags;
+  const hasFilters = search || tagsFiltered
+    || typeFilters.length < document.querySelectorAll('[data-id="backlogType"] .multi-select-item').length
+    || stateFilters.length < document.querySelectorAll('[data-id="backlogState"] .multi-select-item').length;
 
   function matchesFilter(wi) {
     const matchSearch = !search || wi.title.toLowerCase().includes(search) || wi.assignedTo.toLowerCase().includes(search) || String(wi.id).includes(search);
-    const matchType = typeFilters.length > 0 ? typeFilters.includes(wi.type) : !HIDDEN_TYPES.includes(wi.type);
-    const matchState = stateFilters.length === 0 || stateFilters.includes(wi.state);
-    const matchTag = tagFilters.length === 0 || (wi.tags && tagFilters.some(tf => wi.tags.split(';').map(t => t.trim()).includes(tf)));
+    const matchType = typeFilters.includes(wi.type);
+    const matchState = stateFilters.includes(wi.state);
+    let matchTag = true;
+    if (tagsFiltered) {
+      const showNoTag = tagFilters.includes('__none__');
+      const wiTags = wi.tags ? wi.tags.split(';').map(t => t.trim()).filter(Boolean) : [];
+      matchTag = wiTags.length === 0 ? showNoTag : wiTags.some(t => tagFilters.includes(t));
+    }
     return matchSearch && matchType && matchState && matchTag;
   }
 
@@ -5516,12 +5653,20 @@ function switchSettingsTab(tabId, btn) {
 
 function openSettings() {
   document.getElementById('settingsOrg').value = configData.AzureDevOpsOrg || '';
-  document.getElementById('settingsProject').value = configData.AzureDevOpsProject || '';
   document.getElementById('settingsPAT').value = configData.AzureDevOpsPAT || '';
-  document.getElementById('settingsTeam').value = configData.DefaultTeam || '';
   document.getElementById('settingsUser').value = configData.DefaultUser || '';
   document.getElementById('settingsWispr').value = configData.WisprFlowKey || '';
   document.getElementById('settingsDefaultCli').value = configData.DefaultCli || activeCli || 'claude';
+  document.getElementById('settingsTeam').value = configData.DefaultTeam || '';
+  // Initialize projects list from config
+  const rawProjects = Array.isArray(configData.AzureDevOpsProjects) ? configData.AzureDevOpsProjects : [];
+  _settingsProjects = rawProjects.map(p => typeof p === 'object' ? p.name : p);
+  _settingsActiveProject = configData.AzureDevOpsProject || '';
+  // Migration: if there's an active project not in the list, add it
+  if (_settingsActiveProject && !_settingsProjects.includes(_settingsActiveProject)) {
+    _settingsProjects.unshift(_settingsActiveProject);
+  }
+  renderSettingsProjects();
   renderSettingsRepos();
   // Reset to first tab
   document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
@@ -5534,6 +5679,48 @@ function openSettings() {
 
 function closeSettings() {
   document.getElementById('settingsModal').classList.remove('open');
+}
+
+let _settingsProjects = [];
+let _settingsActiveProject = '';
+
+function renderSettingsProjects() {
+  const container = document.getElementById('settingsProjectList');
+  if (!_settingsProjects.length) {
+    container.innerHTML = '<div style="font-size:11px;color:var(--subtext0);padding:4px 0;">No projects added yet.</div>';
+    return;
+  }
+  container.innerHTML = _settingsProjects.map(name => {
+    const isActive = name === _settingsActiveProject;
+    return `<div class="project-item${isActive ? ' active' : ''}" onclick="setActiveProject('${esc(name)}')">
+      <div class="project-item-radio"></div>
+      <span class="project-item-name">${esc(name)}</span>
+      <button class="project-item-del" onclick="event.stopPropagation();deleteProjectFromSettings('${esc(name)}')" title="Remove">&times;</button>
+    </div>`;
+  }).join('');
+}
+
+function addProjectFromSettings() {
+  const input = document.getElementById('settingsProjectInput');
+  const name = input.value.trim();
+  if (!name || _settingsProjects.includes(name)) return;
+  _settingsProjects.push(name);
+  if (!_settingsActiveProject) _settingsActiveProject = name;
+  input.value = '';
+  renderSettingsProjects();
+}
+
+function deleteProjectFromSettings(name) {
+  _settingsProjects = _settingsProjects.filter(p => p !== name);
+  if (_settingsActiveProject === name) {
+    _settingsActiveProject = _settingsProjects[0] || '';
+  }
+  renderSettingsProjects();
+}
+
+function setActiveProject(name) {
+  _settingsActiveProject = name;
+  renderSettingsProjects();
 }
 
 function renderSettingsRepos() {
@@ -5568,7 +5755,8 @@ async function saveSettings() {
   const defaultCli = document.getElementById('settingsDefaultCli').value;
   const payload = {
     AzureDevOpsOrg: document.getElementById('settingsOrg').value.trim(),
-    AzureDevOpsProject: document.getElementById('settingsProject').value.trim(),
+    AzureDevOpsProject: _settingsActiveProject,
+    AzureDevOpsProjects: _settingsProjects,
     AzureDevOpsPAT: document.getElementById('settingsPAT').value.trim(),
     DefaultTeam: document.getElementById('settingsTeam').value.trim(),
     DefaultUser: document.getElementById('settingsUser').value.trim(),
@@ -5585,17 +5773,23 @@ async function saveSettings() {
     });
     const data = await res.json();
     if (data.ok) {
-      toast('Settings saved', 'success');
       closeSettings();
+      showLoading('Switching project...');
+      const minWait = new Promise(r => setTimeout(r, 4000));
       // Apply default CLI selection
       if (defaultCli && defaultCli !== activeCli) {
         switchCli(defaultCli);
       }
       // Force full reload — config changed, caches are stale
-      await loadConfig();
-      loadWorkItems(true);
+      document.getElementById('sprintSelect').innerHTML = '<option value="">All Iterations</option>';
+      await loadConfig(true);
+      loadVelocity();
+      await minWait;
+      hideLoading();
+      toast('Settings saved', 'success');
     }
   } catch (e) {
+    hideLoading();
     toast('Failed to save settings', 'error');
   }
 }
@@ -5635,6 +5829,72 @@ async function saveRepo() {
 }
 
 // ── Utilities ───────────────────────────────────────────────────────────
+// ── Full-screen loading overlay ──────────────────────────────────────────
+const _loadingQuotes = [
+  { text: 'First, solve the problem. Then, write the code.', author: 'John Johnson' },
+  { text: 'Simplicity is the soul of efficiency.', author: 'Austin Freeman' },
+  { text: 'Code is like humor. When you have to explain it, it\'s bad.', author: 'Cory House' },
+  { text: 'Make it work, make it right, make it fast.', author: 'Kent Beck' },
+  { text: 'The best error message is the one that never shows up.', author: 'Thomas Fuchs' },
+  { text: 'Talk is cheap. Show me the code.', author: 'Linus Torvalds' },
+  { text: 'Any fool can write code that a computer can understand. Good programmers write code that humans can understand.', author: 'Martin Fowler' },
+  { text: 'Measuring programming progress by lines of code is like measuring aircraft building progress by weight.', author: 'Bill Gates' },
+  { text: 'Perfection is achieved not when there is nothing more to add, but when there is nothing left to take away.', author: 'Antoine de Saint-Exupery' },
+  { text: 'The most disastrous thing that you can ever learn is your first programming language.', author: 'Alan Kay' },
+  { text: 'Programming is the art of telling another human what one wants the computer to do.', author: 'Donald Knuth' },
+  { text: 'It works on my machine.', author: 'Every Developer' },
+];
+let _loadingTimer = null;
+let _quoteTimer = null;
+function showLoading(text) {
+  const el = document.getElementById('loadingOverlay');
+  document.getElementById('loadingLabel').textContent = text || 'Loading';
+  el.classList.add('visible');
+  // Show a random quote with fade-in
+  _showRandomQuote();
+  clearTimeout(_loadingTimer);
+  _loadingTimer = setTimeout(hideLoading, 8000);
+}
+function _showRandomQuote() {
+  const q = _loadingQuotes[Math.floor(Math.random() * _loadingQuotes.length)];
+  const quoteEl = document.getElementById('loadingQuote');
+  const textEl = document.getElementById('loadingQuoteText');
+  const authorEl = document.getElementById('loadingQuoteAuthor');
+  quoteEl.classList.remove('visible');
+  setTimeout(() => {
+    textEl.textContent = '"' + q.text + '"';
+    authorEl.textContent = '— ' + q.author;
+    quoteEl.classList.add('visible');
+  }, 150);
+  clearInterval(_quoteTimer);
+  _quoteTimer = setInterval(() => {
+    const next = _loadingQuotes[Math.floor(Math.random() * _loadingQuotes.length)];
+    quoteEl.classList.remove('visible');
+    setTimeout(() => {
+      textEl.textContent = '"' + next.text + '"';
+      authorEl.textContent = '— ' + next.author;
+      quoteEl.classList.add('visible');
+    }, 400);
+  }, 4000);
+}
+function hideLoading() {
+  clearTimeout(_loadingTimer);
+  clearInterval(_quoteTimer);
+  const quoteEl = document.getElementById('loadingQuote');
+  quoteEl.classList.remove('visible');
+  document.getElementById('loadingOverlay').classList.remove('visible');
+}
+async function refreshAll() {
+  showLoading('Refreshing');
+  const minWait = new Promise(r => setTimeout(r, 4000));
+  try {
+    await loadWorkItems(true);
+    loadVelocity();
+  } catch (_) {}
+  await minWait;
+  hideLoading();
+}
+
 function esc(str) {
   if (!str) return '';
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
