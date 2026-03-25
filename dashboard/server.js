@@ -1077,15 +1077,32 @@ async function handleGitHubPulls(url, res) {
     if (gh.error) return json(res, gh, 400);
     const state = url.searchParams.get('state') || 'open';
     const data = await ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls?state=${state}&per_page=30&sort=updated&direction=desc`);
-    const pulls = data.map(pr => ({
-      number: pr.number, title: pr.title, state: pr.state, draft: pr.draft,
-      author: pr.user?.login || '', authorAvatar: pr.user?.avatar_url || '',
-      createdAt: pr.created_at, updatedAt: pr.updated_at,
-      headRef: pr.head?.ref || '', baseRef: pr.base?.ref || '',
-      labels: (pr.labels || []).map(l => ({ name: l.name, color: l.color })),
-      reviewers: (pr.requested_reviewers || []).map(r => r.login),
-      additions: pr.additions, deletions: pr.deletions,
-    }));
+    // Fetch reviews for each PR in parallel to get approval status
+    const reviewResults = await Promise.all(data.map(pr =>
+      ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls/${pr.number}/reviews`).catch(() => [])
+    ));
+    const pulls = data.map((pr, i) => {
+      const reviews = reviewResults[i] || [];
+      // Determine latest review state per reviewer (last review wins)
+      const byUser = {};
+      for (const r of reviews) {
+        if (r.state && r.state !== 'PENDING' && r.state !== 'COMMENTED') byUser[r.user?.login] = r.state;
+      }
+      const reviewStates = Object.values(byUser);
+      const reviewStatus = reviewStates.includes('CHANGES_REQUESTED') ? 'changes_requested'
+        : reviewStates.includes('APPROVED') ? 'approved' : null;
+      return {
+        number: pr.number, title: pr.title, state: pr.state, draft: pr.draft,
+        author: pr.user?.login || '', authorAvatar: pr.user?.avatar_url || '',
+        createdAt: pr.created_at, updatedAt: pr.updated_at,
+        headRef: pr.head?.ref || '', baseRef: pr.base?.ref || '',
+        labels: (pr.labels || []).map(l => ({ name: l.name, color: l.color })),
+        reviewers: (pr.requested_reviewers || []).map(r => r.login),
+        additions: pr.additions, deletions: pr.deletions,
+        comments: (pr.comments || 0) + (pr.review_comments || 0),
+        reviewStatus,
+      };
+    });
     json(res, { pulls });
   } catch (e) { json(res, { error: e.message }, 500); }
 }
@@ -1096,7 +1113,18 @@ async function handleGitHubPullDetail(url, res) {
     if (gh.error) return json(res, gh, 400);
     const num = url.searchParams.get('number');
     // Request with html media type to get body_html with signed image URLs
-    const pr = await ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls/${num}`, null, 'application/vnd.github.html+json');
+    const [pr, reviews] = await Promise.all([
+      ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls/${num}`, null, 'application/vnd.github.html+json'),
+      ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls/${num}/reviews`).catch(() => []),
+    ]);
+    // Determine latest review state per reviewer
+    const byUser = {};
+    for (const r of reviews) {
+      if (r.state && r.state !== 'PENDING' && r.state !== 'COMMENTED') byUser[r.user?.login] = r.state;
+    }
+    const reviewStates = Object.values(byUser);
+    const reviewStatus = reviewStates.includes('CHANGES_REQUESTED') ? 'changes_requested'
+      : reviewStates.includes('APPROVED') ? 'approved' : null;
     json(res, {
       number: pr.number, title: pr.title, state: pr.state, draft: pr.draft,
       body: pr.body || '', bodyHtml: pr.body_html || '',
@@ -1109,6 +1137,8 @@ async function handleGitHubPullDetail(url, res) {
       labels: (pr.labels || []).map(l => ({ name: l.name, color: l.color })),
       reviewers: (pr.requested_reviewers || []).map(r => r.login),
       htmlUrl: pr.html_url || '',
+      reviewStatus,
+      comments: (pr.comments || 0) + (pr.review_comments || 0),
     });
   } catch (e) { json(res, { error: e.message }, 500); }
 }

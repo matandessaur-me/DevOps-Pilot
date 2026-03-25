@@ -798,6 +798,10 @@
     .pr-item-labels { display: flex; gap: 3px; flex-shrink: 0; margin-left: auto; }
     .pr-label { font-size: 9px; padding: 1px 6px; border-radius: 10px; }
     .pr-draft-badge { font-size: 9px; padding: 1px 6px; border-radius: 10px; background: var(--surface2); color: var(--overlay1); }
+    .pr-review-badge { display: inline-flex; align-items: center; flex-shrink: 0; }
+    .pr-review-approved { color: var(--green); }
+    .pr-review-changes { color: var(--peach); }
+    .pr-comments-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; color: var(--subtext0); flex-shrink: 0; }
     .pr-detail { padding: 20px; overflow-y: auto; flex: 1; }
     .pr-detail-header { margin-bottom: 16px; }
     .pr-detail-title { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
@@ -891,6 +895,8 @@
     .pr-btn-changes { background: var(--red); color: var(--crust); }
     .pr-btn-github { background: var(--surface1); color: var(--text); border: 1px solid var(--surface2); border-radius: var(--radius); cursor: pointer; }
     .pr-btn-github:hover { background: var(--surface2); }
+    .pr-btn-merge { background: var(--mauve); color: var(--crust); }
+    .pr-btn-merge:hover { opacity: 0.85; }
     .pr-diff-container { margin-top: 12px; border: 1px solid var(--surface0); border-radius: var(--radius-lg); overflow: hidden; }
     /* Timeline */
     .pr-timeline { display: flex; flex-direction: column; gap: 0; }
@@ -4090,19 +4096,30 @@ function renderPRList() {
     const labels = pr.labels.map(l => `<span class="pr-label" style="background:#${l.color}22;color:#${l.color};">${esc(l.name)}</span>`).join('');
     const draft = pr.draft ? '<span class="pr-draft-badge">Draft</span>' : '';
     const ago = timeAgo(pr.updatedAt);
+    const reviewBadge = pr.reviewStatus === 'approved'
+      ? '<span class="pr-review-badge pr-review-approved" title="Approved"><i data-lucide="check-circle" style="width:12px;height:12px;"></i></span>'
+      : pr.reviewStatus === 'changes_requested'
+        ? '<span class="pr-review-badge pr-review-changes" title="Changes requested"><i data-lucide="alert-circle" style="width:12px;height:12px;"></i></span>'
+        : '';
+    const commentsBadge = pr.comments > 0
+      ? `<span class="pr-comments-badge" title="${pr.comments} comment${pr.comments !== 1 ? 's' : ''}"><i data-lucide="message-square" style="width:10px;height:10px;"></i> ${pr.comments}</span>`
+      : '';
     return `<div class="pr-item${active}" onclick="viewPR(${pr.number})">
       <div class="pr-item-top">
         <span class="pr-item-number">#${pr.number}</span>
+        ${reviewBadge}
         <span class="pr-item-title">${esc(pr.title)}</span>
         <span class="pr-item-time">${ago}</span>
       </div>
       <div class="pr-item-meta">
         <span class="pr-item-author">${esc(pr.author)}</span>
+        ${commentsBadge}
         <span class="pr-item-branch">${esc(pr.headRef)} &rarr; ${esc(pr.baseRef)}</span>
         <span class="pr-item-labels">${draft}${labels}</span>
       </div>
     </div>`;
   }).join('');
+  try { lucide.createIcons(); } catch (_) {}
 }
 
 function timeAgo(dateStr) {
@@ -4148,6 +4165,12 @@ function renderPRDetail(pr, files, timeline) {
 
   const labels = pr.labels.map(l => `<span class="pr-label" style="background:#${l.color}22;color:#${l.color};">${esc(l.name)}</span>`).join(' ');
 
+  const reviewBadge = pr.reviewStatus === 'approved'
+    ? '<span style="color:var(--green);font-weight:600;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="check-circle" style="width:13px;height:13px;"></i> Approved</span>'
+    : pr.reviewStatus === 'changes_requested'
+      ? '<span style="color:var(--peach);font-weight:600;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="alert-circle" style="width:13px;height:13px;"></i> Changes requested</span>'
+      : '';
+
   const filesHtml = files.map((f, i) => {
     const statusCls = f.status === 'added' ? 'added' : f.status === 'removed' ? 'removed' : f.status === 'renamed' ? 'renamed' : 'modified';
     return `<div class="pr-file-item" onclick="selectPRFile(${i})" data-idx="${i}">
@@ -4169,6 +4192,7 @@ function renderPRDetail(pr, files, timeline) {
         </div>
         <div class="pr-detail-meta">
           ${statusBadge}
+          ${reviewBadge}
           <span>#${pr.number}</span>
           <span>${esc(pr.author)}</span>
           <span>${esc(pr.headRef)} &rarr; ${esc(pr.baseRef)}</span>
@@ -4195,7 +4219,9 @@ function renderPRDetail(pr, files, timeline) {
       <button class="pr-expand-btn" onclick="openPRCommentModal()" title="Expand"><i data-lucide="expand" style="width:14px;height:14px;"></i></button>
       <button class="pr-btn pr-btn-comment" onclick="addPRComment()">Comment</button>
       <button class="pr-btn pr-btn-changes" onclick="openRequestChangesModal()">Request Changes</button>
-      <button class="pr-btn pr-btn-approve" onclick="submitPRReview('APPROVE')">Approve</button>
+      ${pr.reviewStatus === 'approved' && pr.htmlUrl
+        ? `<a href="${esc(pr.htmlUrl)}" target="_blank" class="pr-btn pr-btn-merge" style="text-decoration:none;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="git-merge" style="width:13px;height:13px;"></i> Merge on GitHub</a>`
+        : `<button class="pr-btn pr-btn-approve" onclick="submitPRReview('APPROVE')">Approve</button>`}
     </div>`;
   try { lucide.createIcons(); } catch (_) {}
 }
