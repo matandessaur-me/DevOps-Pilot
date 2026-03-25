@@ -789,7 +789,8 @@
     .pr-item:hover { background: var(--surface0); }
     .pr-item.active { background: var(--surface0); border-left: 2px solid var(--accent); }
     .pr-item-top { display: flex; align-items: center; gap: 6px; }
-    .pr-item-number { font-size: 11px; color: var(--subtext0); flex-shrink: 0; }
+    .pr-item-leading { display: flex; align-items: center; gap: 4px; flex-shrink: 0; min-width: 46px; }
+    .pr-item-number { font-size: 11px; color: var(--subtext0); }
     .pr-item-title { font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
     .pr-item-time { font-size: 10px; color: var(--overlay1); flex-shrink: 0; }
     .pr-item-meta { font-size: 10px; color: var(--subtext0); display: flex; gap: 6px; align-items: center; overflow: hidden; }
@@ -1958,7 +1959,7 @@
               <option value="closed">Closed</option>
               <option value="all">All</option>
             </select>
-            <button class="tab-bar-btn" onclick="loadPRs()" title="Refresh" style="padding:4px 6px;"><i data-lucide="refresh-cw" style="width:13px;height:13px;"></i></button>
+            <button class="tab-bar-btn" onclick="loadPRs()" title="Refresh" style="padding:4px 6px;display:flex;align-items:center;justify-content:center;"><i data-lucide="refresh-cw" style="width:13px;height:13px;"></i></button>
           </div>
           <div id="prsList" style="overflow-y:auto;flex:1;">
             <div class="empty-state" style="padding:20px;"><div class="empty-state-text">Select a repository</div></div>
@@ -4106,14 +4107,13 @@ function renderPRList() {
       : '';
     return `<div class="pr-item${active}" onclick="viewPR(${pr.number})">
       <div class="pr-item-top">
-        <span class="pr-item-number">#${pr.number}</span>
-        ${reviewBadge}
+        <span class="pr-item-leading"><span class="pr-item-number">#${pr.number}</span>${reviewBadge}</span>
         <span class="pr-item-title">${esc(pr.title)}</span>
+        ${commentsBadge}
         <span class="pr-item-time">${ago}</span>
       </div>
       <div class="pr-item-meta">
         <span class="pr-item-author">${esc(pr.author)}</span>
-        ${commentsBadge}
         <span class="pr-item-branch">${esc(pr.headRef)} &rarr; ${esc(pr.baseRef)}</span>
         <span class="pr-item-labels">${draft}${labels}</span>
       </div>
@@ -6248,9 +6248,10 @@ function selectRepo(name) {
   loadGitLogPanel();
   // Load project scripts
   loadProjectScripts();
-  // Sync PR tab repo selector
+  // Sync PR tab repo selector and reload PRs if on that tab
   const prSelect = document.getElementById('prsRepoSelect');
   if (prSelect) { prSelect.value = name; prsCurrentRepo = name; }
+  if (document.getElementById('panel-prs')?.classList.contains('active')) { loadPRs(); }
   pushUiContext();
 }
 
