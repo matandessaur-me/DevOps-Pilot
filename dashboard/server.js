@@ -1010,21 +1010,18 @@ async function handleStartWorking(req, res) {
   }
 }
 
-// ── Pull Request Creation ────────────────────────────────────────────────────
+// ── Pull Request Creation (GitHub) ───────────────────────────────────────────
 async function handleCreatePullRequest(req, res) {
   try {
     const { repoName, title, description, sourceBranch, targetBranch, workItemId } = await readBody(req);
     const cfg = getConfig();
-    const org = cfg.AzureDevOpsOrg;
-    const project = cfg.AzureDevOpsProject;
 
     if (!repoName) return json(res, { error: 'repoName is required' }, 400);
     if (!title) return json(res, { error: 'title is required' }, 400);
 
-    // Look up the ADO repo ID by name
-    const repos = await adoRequest('GET', `/git/repositories?api-version=7.1`);
-    const adoRepo = (repos.value || []).find(r => r.name.toLowerCase() === repoName.toLowerCase());
-    if (!adoRepo) return json(res, { error: `Repository "${repoName}" not found in Azure DevOps project` }, 404);
+    // Resolve GitHub owner/repo from git remote
+    const gh = resolveGitHub(repoName);
+    if (gh.error) return json(res, gh, 400);
 
     // Determine source branch — use provided or detect from local git
     let source = sourceBranch;
@@ -1036,22 +1033,21 @@ async function handleCreatePullRequest(req, res) {
 
     const target = targetBranch || 'main';
 
-    const prBody = {
-      sourceRefName: `refs/heads/${source}`,
-      targetRefName: `refs/heads/${target}`,
-      title,
-      description: description || '',
-    };
-
-    // Link work item if provided
+    // Build PR description — append AB# link if work item provided
+    let body = description || '';
     if (workItemId) {
-      prBody.workItemRefs = [{ id: String(workItemId) }];
+      const adoUrl = `https://dev.azure.com/${cfg.AzureDevOpsOrg}/${encodeURIComponent(cfg.AzureDevOpsProject)}/_workitems/edit/${workItemId}`;
+      body += `${body ? '\n\n' : ''}AB#${workItemId} — [View in Azure DevOps](${adoUrl})`;
     }
 
-    const pr = await adoRequest('POST', `/git/repositories/${adoRepo.id}/pullrequests?api-version=7.1`, prBody);
+    const pr = await ghRequest('POST', `/repos/${gh.owner}/${gh.repo}/pulls`, {
+      title,
+      body,
+      head: source,
+      base: target,
+    });
 
-    const prUrl = `https://dev.azure.com/${org}/${project}/_git/${encodeURIComponent(repoName)}/pullrequest/${pr.pullRequestId}`;
-    json(res, { ok: true, pullRequestId: pr.pullRequestId, url: prUrl, title: pr.title });
+    json(res, { ok: true, pullRequestId: pr.number, url: pr.html_url, title: pr.title });
   } catch (e) {
     json(res, { error: e.message }, 500);
   }
@@ -1109,6 +1105,7 @@ async function handleGitHubPullDetail(url, res) {
       changedFiles: pr.changed_files,
       labels: (pr.labels || []).map(l => ({ name: l.name, color: l.color })),
       reviewers: (pr.requested_reviewers || []).map(r => r.login),
+      htmlUrl: pr.html_url || '',
     });
   } catch (e) { json(res, { error: e.message }, 500); }
 }

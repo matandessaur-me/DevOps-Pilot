@@ -3,7 +3,7 @@
     One-shot: push branch and create pull request.
 
 .DESCRIPTION
-    Pushes the current branch to origin and creates a pull request in Azure DevOps.
+    Pushes the current branch to origin and creates a pull request on GitHub.
     Automatically detects branch, work item ID, and generates a title from the branch name.
 
 .PARAMETER Repo
@@ -56,7 +56,8 @@ Write-Host ""
 
 # Push
 Write-Host "Pushing to origin..." -ForegroundColor Cyan
-git -C $repoPath push -u origin $branch 2>&1 | Write-Host
+$pushOutput = git -C $repoPath push -u origin $branch 2>&1
+$pushOutput | ForEach-Object { Write-Host $_ }
 
 # Create PR
 Write-Host "`nCreating pull request..." -ForegroundColor Cyan

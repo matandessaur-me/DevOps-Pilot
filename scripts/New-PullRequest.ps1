@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    Creates a pull request in Azure DevOps.
+    Creates a pull request on GitHub.
 
 .DESCRIPTION
     Pushes the current branch to origin, then creates a pull request via the
-    DevOps Pilot API (which calls Azure DevOps REST API). Automatically detects
-    the current branch and links to the work item if the branch contains AB#ID.
+    DevOps Pilot API (which calls GitHub). Automatically detects the current
+    branch and links to the Azure DevOps work item if the branch contains AB#ID.
 
 .PARAMETER Repo
     Repository name (must match a configured repo).
@@ -56,7 +56,8 @@ Write-Host "Current branch: $branch" -ForegroundColor Cyan
 
 # Push to origin first
 Write-Host "Pushing to origin..." -ForegroundColor Cyan
-git -C $repoPath push -u origin $branch 2>&1 | Write-Host
+$pushOutput = git -C $repoPath push -u origin $branch 2>&1
+$pushOutput | ForEach-Object { Write-Host $_ }
 
 # Extract work item ID from branch name (e.g., feature/AB#12345-description)
 $workItemId = $null
@@ -65,7 +66,7 @@ if ($branch -match 'AB#(\d+)') {
     Write-Host "Linked work item: #$workItemId" -ForegroundColor Cyan
 }
 
-# Create PR via DevOps Pilot API
+# Create PR on GitHub via DevOps Pilot API
 $body = @{
     repoName = $Repo
     title = $Title

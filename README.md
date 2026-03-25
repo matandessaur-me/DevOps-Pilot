@@ -134,7 +134,7 @@ The server exposes a REST API at `http://127.0.0.1:3800/api/` that both the dash
 | `POST` | `/api/workitems/create` | Create a work item |
 | `PATCH` | `/api/workitems/{id}` | Update work item fields |
 | `PATCH` | `/api/workitems/{id}/state` | Change work item state |
-| `POST` | `/api/pull-request` | Create an Azure DevOps pull request |
+| `POST` | `/api/pull-request` | Create a pull request on GitHub |
 
 ### Sprints & Velocity
 | Method | Endpoint | Description |
@@ -184,7 +184,7 @@ Pre-made scripts in `scripts/` that AI agents (and you) can use:
 | `Set-WorkItemState.ps1` | Move a work item between states |
 | `Commit-Changes.ps1` | Stage and commit with automatic AB# linking |
 | `Push-AndPR.ps1` | Push and create a pull request in one shot |
-| `New-PullRequest.ps1` | Create an Azure DevOps pull request |
+| `New-PullRequest.ps1` | Create a pull request on GitHub |
 | `Show-Diff.ps1` | Open the built-in diff viewer |
 | `Save-Note.ps1` | Save a markdown note to the scratchpad |
 | `Refresh-Board.ps1` | Refresh the work items list in the dashboard |

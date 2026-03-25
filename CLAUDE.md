@@ -9,10 +9,19 @@ You are running inside a terminal with access to:
 - The DevOps Pilot REST API at `http://127.0.0.1:3800/api/`
 - Bash, PowerShell, git, and any CLI tools installed on the system
 
+## CRITICAL: GitHub vs Azure DevOps Split
+
+**All code repositories, branches, and pull requests live on GitHub.** Azure DevOps is used ONLY for work item tracking (backlog, sprints, boards, velocity).
+
+- **GitHub**: Repos, branches, PRs, code review → use `/api/github/*` endpoints
+- **Azure DevOps**: Work items, sprints, velocity, boards → use `/api/workitems/*` endpoints
+- **To create PRs**, use `Push-AndPR.ps1` or the `/api/pull-request` endpoint — both create PRs on GitHub.
+- `AB#` references in branch names and commit messages link GitHub commits back to Azure DevOps work items automatically.
+
 ## ABSOLUTE RULES — NEVER VIOLATE THESE
 
-1. **You are NOT on a bare machine.** You have FULL access to Azure DevOps through the built-in REST API at `http://127.0.0.1:3800/api/`. You do NOT need `az`, `gh`, or any external CLI. NEVER check if `az` or `gh` is installed. NEVER say "I don't have access."
-2. **NEVER use `gh` (GitHub CLI).** This is Azure DevOps, not GitHub.
+1. **You are NOT on a bare machine.** You have FULL access to Azure DevOps and GitHub through the built-in REST API at `http://127.0.0.1:3800/api/`. You do NOT need `az`, `gh`, or any external CLI. NEVER check if `az` or `gh` is installed. NEVER say "I don't have access."
+2. **NEVER use `gh` (GitHub CLI).** The app's built-in API handles all GitHub interactions — use the `/api/github/*` endpoints instead.
 3. **NEVER use `az` (Azure CLI).** The app's REST API handles everything.
 4. **NEVER use `git diff` to show changes.** Use the built-in diff viewer script to open it.
 5. **NEVER open VS Code or external editors.** Use the app's built-in file/diff viewers.
@@ -96,7 +105,7 @@ You are running inside a terminal with access to:
 | POST | `/api/workitems/create` | Create a work item. Body: `{ type, title, description, priority, tags, assignedTo, iterationPath, storyPoints, acceptanceCriteria }` |
 | PATCH | `/api/workitems/{id}` | Update fields. Body: `{ title, description, state, assignedTo, priority, tags, iterationPath, storyPoints, acceptanceCriteria }` |
 | PATCH | `/api/workitems/{id}/state` | Change state. Body: `{ state }` |
-| POST | `/api/pull-request` | Create PR. Body: `{ repoName, title, description, sourceBranch, targetBranch, workItemId }` |
+| POST | `/api/pull-request` | Create a pull request on GitHub. Body: `{ repoName, title, description, sourceBranch, targetBranch, workItemId }` |
 
 ### Sprints & Velocity
 | Method | Endpoint | Description |
@@ -220,7 +229,7 @@ powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "./scripts/ScriptName
 | `Find-WorkItems.ps1` | Search/filter work items | `./scripts/Find-WorkItems.ps1 -Search 'login' -Type 'Bug' -State 'Active'` |
 | `save-note.js` | **Save markdown note (use this from bash!)** | `node scripts/save-note.js "Summary" "content"` or `--file .ai-workspace/note.md` |
 | `Show-Diff.ps1` | Open diff viewer in dashboard | `./scripts/Show-Diff.ps1` or `./scripts/Show-Diff.ps1 -Repo "MyRepo" -Path "src/file.tsx"` |
-| `New-PullRequest.ps1` | Create Azure DevOps pull request | `./scripts/New-PullRequest.ps1 -Repo "MyRepo" -Title "Add feature" -Description "Details..."` |
+| `New-PullRequest.ps1` | Create a pull request on GitHub | `./scripts/New-PullRequest.ps1 -Repo "MyRepo" -Title "Add feature" -Description "Details..."` |
 | `Get-MyWorkItems.ps1` | My assigned items (grouped by state) | `./scripts/Get-MyWorkItems.ps1` or `./scripts/Get-MyWorkItems.ps1 -State Active` |
 | `Commit-Changes.ps1` | Stage, commit, auto-link AB# | `./scripts/Commit-Changes.ps1 -Message "Fix bug"` (opens diff viewer first) |
 | `Push-AndPR.ps1` | Push + create PR in one shot | `./scripts/Push-AndPR.ps1 -Repo "MyRepo"` (auto-generates title from branch) |
@@ -364,15 +373,17 @@ The AI should guide the user through this flow naturally. Don't skip steps.
 
 ## CRITICAL: Creating Pull Requests
 
-**This is an Azure DevOps project. NEVER use `gh` (GitHub CLI).** Use the built-in script:
+**All repos are on GitHub. NEVER use `gh` (GitHub CLI)** — the app's API handles GitHub interactions. Use the built-in script:
 
 ```bash
-# From bash — create a PR (automatically pushes, detects branch, links work item from AB# in branch name)
-powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "./scripts/New-PullRequest.ps1 -Repo 'MyRepo' -Title 'Add feature X' -Description 'Details here'"
+# From bash — push + create GitHub PR in one shot (auto-detects branch, generates title, links AB# work item)
+powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "./scripts/Push-AndPR.ps1 -Repo 'MyRepo'"
 
-# With a specific target branch
-powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "./scripts/New-PullRequest.ps1 -Repo 'MyRepo' -Title 'Fix bug' -TargetBranch 'develop'"
+# With a custom title and target branch
+powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "./scripts/Push-AndPR.ps1 -Repo 'MyRepo' -Title 'Add feature X' -Description 'Details here' -TargetBranch 'develop'"
 ```
+
+You can also use `New-PullRequest.ps1` directly if you need more control over the PR title and description.
 
 ## Important Notes
 
@@ -384,6 +395,7 @@ powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "./scripts/New-PullRe
 - Pass `?refresh=1` to force-refresh work items
 - **Use the app's diff viewer** (see above) — NEVER use `git diff` in the terminal
 - **Use the app's file viewer** (`/api/ui/view-file`) — NEVER open VS Code or external editors
-- **NEVER use `gh`** — this project uses Azure DevOps, not GitHub. Use `New-PullRequest.ps1` for PRs.
+- **NEVER use `gh`** — the app's REST API handles all GitHub interactions. Use `Push-AndPR.ps1` for PRs.
 - **NEVER use `az`** — the app's REST API handles everything
+- **All repos are on GitHub**, not Azure DevOps. Azure DevOps is only for work item tracking.
 - **NEVER use backslash paths** in bash — always use forward slashes (`./scripts/` not `.\scripts\`)
