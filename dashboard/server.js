@@ -1875,6 +1875,11 @@ async function handleUiContextUpdate(req, res) {
 
 async function handleUiAction(req, res, action) {
   const data = await readBody(req);
+  // Normalize: accept "commit" as alias for "hash" in view-commit-diff
+  if (action === 'view-commit-diff' && data.commit && !data.hash) {
+    data.hash = data.commit;
+    delete data.commit;
+  }
   broadcast({ type: 'ui-action', action, ...data });
   json(res, { ok: true, action });
 }

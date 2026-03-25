@@ -162,6 +162,7 @@ You can control the dashboard UI. **Use these intelligently based on context** â
 | POST | `/api/ui/view-note` | Open a note in preview. Body: `{ name: "My Note" }` |
 | POST | `/api/ui/view-file` | Open a file in the code viewer. Body: `{ repo: "RepoName", path: "src/index.ts", line: 132 }` (line is optional â€” scrolls to and highlights that line) |
 | POST | `/api/ui/view-diff` | Open split diff for a file. Body: `{ repo: "RepoName", path: "src/index.ts", base: "HEAD" }` |
+| POST | `/api/ui/view-commit-diff` | Open the commit diff viewer for a specific commit. Body: `{ repo: "RepoName", hash: "abc1234" }` (`commit` is also accepted as an alias for `hash`) |
 | POST | `/api/ui/refresh-workitems` | Refresh work items list. Body: `{}` |
 | POST | `/api/ui/view-activity` | Open the Activity Timeline view. Body: `{}` |
 | POST | `/api/ui/view-pr` | Open a pull request. Body: `{ repo: "RepoName", number: 123 }` (number optional) |
