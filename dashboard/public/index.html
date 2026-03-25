@@ -1523,6 +1523,64 @@
       font: 12px var(--font-ui); color: var(--overlay1);
       margin-top: 8px;
     }
+    /* ── Onboarding wizard ──────────────────────────────────────────────── */
+    .onboarding {
+      position: fixed; inset: 0; z-index: 10000;
+      background: var(--base); display: none;
+      flex-direction: column; align-items: center; justify-content: center;
+    }
+    .onboarding.visible { display: flex; }
+    .onboarding-card {
+      width: 520px; max-height: 80vh; display: flex; flex-direction: column;
+      background: var(--mantle); border: 1px solid var(--surface1);
+      border-radius: var(--radius-lg); box-shadow: 0 16px 48px rgba(0,0,0,0.4);
+      overflow: hidden;
+    }
+    .onboarding-body { padding: 28px 32px; overflow-y: auto; flex: 1; }
+    .onboarding-title { font: 20px var(--font-ui); font-weight: 700; color: var(--text); margin-bottom: 6px; }
+    .onboarding-subtitle { font: 13px var(--font-ui); color: var(--subtext0); margin-bottom: 20px; line-height: 1.5; }
+    .onboarding-field { margin-bottom: 14px; }
+    .onboarding-field label { display: block; font: 11px var(--font-ui); font-weight: 600; color: var(--subtext1); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
+    .onboarding-field input, .onboarding-field select {
+      width: 100%; padding: 8px 10px; font: 13px var(--font-ui); color: var(--text);
+      background: var(--surface0); border: 1px solid var(--surface1); border-radius: var(--radius);
+      outline: none; box-sizing: border-box;
+    }
+    .onboarding-field input:focus, .onboarding-field select:focus { border-color: var(--accent); }
+    .onboarding-hint {
+      font: 11px/1.5 var(--font-ui); color: var(--subtext0); margin-top: 4px;
+      padding: 8px 10px; background: var(--surface0); border-radius: var(--radius);
+      border-left: 2px solid var(--accent);
+    }
+    .onboarding-hint a { color: var(--accent); text-decoration: none; }
+    .onboarding-hint code { font: 10px var(--font-mono); background: var(--base); padding: 1px 4px; border-radius: 2px; }
+    .onboarding-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 32px; border-top: 1px solid var(--surface0);
+    }
+    .onboarding-dots { display: flex; gap: 6px; }
+    .onboarding-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--surface1); transition: background 0.2s; }
+    .onboarding-dot.active { background: var(--accent); }
+    .onboarding-dot.done { background: var(--green); }
+    .onboarding-btns { display: flex; gap: 8px; }
+    .onboarding-btn {
+      padding: 8px 20px; border: none; border-radius: var(--radius); font: 12px var(--font-ui);
+      font-weight: 600; cursor: pointer; transition: opacity 0.1s;
+    }
+    .onboarding-btn:hover { opacity: 0.85; }
+    .onboarding-btn-secondary { background: var(--surface1); color: var(--text); }
+    .onboarding-btn-primary { background: var(--accent); color: var(--crust); }
+    .onboarding-btn:disabled { opacity: 0.4; cursor: default; }
+    .onboarding-section-title { font: 12px var(--font-ui); font-weight: 600; color: var(--text); margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--surface0); }
+    .onboarding-repo-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--surface0); font-size: 12px; }
+    .onboarding-repo-name { font-weight: 600; color: var(--accent); min-width: 80px; }
+    .onboarding-repo-path { color: var(--subtext0); font-family: var(--font-mono); font-size: 11px; flex: 1; overflow: hidden; text-overflow: ellipsis; }
+    .onboarding-repo-del { background: none; border: none; color: var(--red); cursor: pointer; font-size: 14px; padding: 2px; }
+    .onboarding-overview-item { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; }
+    .onboarding-overview-icon { width: 32px; height: 32px; border-radius: var(--radius); background: var(--surface0); display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--accent); }
+    .onboarding-overview-text { flex: 1; }
+    .onboarding-overview-text strong { color: var(--text); font-size: 13px; display: block; margin-bottom: 2px; }
+    .onboarding-overview-text span { color: var(--subtext0); font-size: 11px; line-height: 1.4; }
   </style>
 </head>
 <body>
@@ -1533,6 +1591,20 @@
   <div class="loading-overlay-quote" id="loadingQuote">
     <div class="loading-overlay-quote-text" id="loadingQuoteText"></div>
     <div class="loading-overlay-quote-author" id="loadingQuoteAuthor"></div>
+  </div>
+</div>
+
+<!-- ═══ Onboarding Wizard ═══════════════════════════════════════════════ -->
+<div class="onboarding" id="onboarding">
+  <div class="onboarding-card">
+    <div class="onboarding-body" id="onboardingBody"></div>
+    <div class="onboarding-footer">
+      <div class="onboarding-dots" id="onboardingDots"></div>
+      <div class="onboarding-btns">
+        <button class="onboarding-btn onboarding-btn-secondary" id="obBack" onclick="obNav(-1)">Back</button>
+        <button class="onboarding-btn onboarding-btn-primary" id="obNext" onclick="obNav(1)">Next</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -4808,7 +4880,11 @@ window.open = function(url, target) {
 switchCli(activeCli);
 try { lucide.createIcons(); } catch (_) {}
 connect();
-loadConfig();
+(async () => {
+  await loadConfig();
+  // Show onboarding if no config exists
+  if (!configData.DefaultUser) { startOnboarding(); }
+})();
 
 // ── CLI Switching ───────────────────────────────────────────────────────
 function toggleCliDropdown() {
@@ -6516,6 +6592,243 @@ async function refreshAll() {
 function esc(str) {
   if (!str) return '';
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Onboarding Wizard ───────────────────────────────────────────────────
+let _obStep = 0;
+let _obData = { displayName: '', org: '', project: '', pat: '', team: '', ghPat: '', wisprKey: '', defaultCli: 'claude', repos: {} };
+let _obAiStatus = {};
+
+const OB_STEPS = [
+  // 0: Display name
+  () => ({
+    title: 'What should we call you?',
+    subtitle: 'This will be used as your display name across DevOps Pilot.',
+    html: `<div class="onboarding-field"><label>Your Name</label><input id="obName" type="text" placeholder="e.g. Jane Doe" value="${esc(_obData.displayName)}" oninput="_obData.displayName=this.value"></div>`,
+    validate: () => !!_obData.displayName.trim(),
+  }),
+  // 1: Welcome
+  () => ({
+    title: `Welcome, ${esc(_obData.displayName.split(' ')[0])}!`,
+    subtitle: "Let's get you set up. This will only take a minute. We'll walk you through connecting your tools and services.",
+    html: `<div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;">
+      <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="bot" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>AI Tools</strong><span>Check and install AI assistants</span></div></div>
+      <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="cloud" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>Azure DevOps</strong><span>Connect to your boards and sprints</span></div></div>
+      <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="folder-git-2" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>Repositories</strong><span>Add your local code repositories</span></div></div>
+      <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="settings" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>Integrations</strong><span>GitHub PRs and voice input</span></div></div>
+    </div>`,
+  }),
+  // 2: AI Tools
+  () => ({
+    title: 'AI Tools',
+    subtitle: 'DevOps Pilot works with AI assistants to help you write code and manage your work. Check which ones are installed, then pick your default.',
+    html: `<div id="obAiTools" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;"><div style="font-size:11px;color:var(--subtext0);">Detecting...</div></div>
+      <div class="onboarding-field"><label>Default AI</label><select id="obDefaultCli" onchange="_obData.defaultCli=this.value" style="padding:8px 10px;font-size:13px;">
+        <option value="claude"${_obData.defaultCli==='claude'?' selected':''}>Claude Code</option>
+        <option value="gemini"${_obData.defaultCli==='gemini'?' selected':''}>Gemini CLI</option>
+        <option value="copilot"${_obData.defaultCli==='copilot'?' selected':''}>Copilot CLI</option>
+        <option value="codex"${_obData.defaultCli==='codex'?' selected':''}>Codex CLI</option>
+      </select></div>
+      <div class="onboarding-hint">Don't have any installed? Each tool has a one-click Install button above. They require <code>npm</code> (Node.js) which is already installed since this app is running.</div>`,
+    onEnter: () => obDetectAiTools(),
+  }),
+  // 3: Azure DevOps
+  () => ({
+    title: 'Azure DevOps',
+    subtitle: 'Connect to your Azure DevOps organization to manage work items, sprints, and pull requests.',
+    html: `<div class="onboarding-field"><label>Organization</label><input id="obOrg" type="text" placeholder="e.g. my-org" value="${esc(_obData.org)}" oninput="_obData.org=this.value"></div>
+      <div class="onboarding-field"><label>Project</label><input id="obProject" type="text" placeholder="e.g. My Project" value="${esc(_obData.project)}" oninput="_obData.project=this.value"></div>
+      <div class="onboarding-field"><label>Personal Access Token</label><input id="obPat" type="password" placeholder="Your PAT" value="${esc(_obData.pat)}" oninput="_obData.pat=this.value"></div>
+      <div class="onboarding-hint">
+        <strong>How to get your PAT:</strong><br>
+        1. Go to <a href="https://dev.azure.com" target="_blank">dev.azure.com</a> and sign in<br>
+        2. Click your avatar (top right) &rarr; <strong>Personal Access Tokens</strong><br>
+        3. Click <strong>New Token</strong>, give it a name, set expiration<br>
+        4. Under Scopes, select <strong>Work Items: Read & Write</strong> and <strong>Code: Read & Write</strong><br>
+        5. Click Create and copy the token
+      </div>
+      <div class="onboarding-field" style="margin-top:14px;"><label>Default Team</label><input id="obTeam" type="text" placeholder="e.g. My Project Team (optional)" value="${esc(_obData.team)}" oninput="_obData.team=this.value"></div>
+      <div class="onboarding-field"><label>Display Name (must match your Azure DevOps name)</label><input id="obAdoName" type="text" value="${esc(_obData.displayName)}" oninput="_obData.displayName=this.value">
+      <div style="font-size:10px;color:var(--subtext0);margin-top:3px;">This needs to match exactly how your name appears in Azure DevOps for "My Items" to work.</div></div>`,
+  }),
+  // 4: Repositories
+  () => ({
+    title: 'Repositories',
+    subtitle: 'Add the local repositories you work with. DevOps Pilot uses these for file browsing, diffs, commits, and pull requests.',
+    html: `<div id="obRepoList" style="margin-bottom:10px;"></div>
+      <div style="display:grid;grid-template-columns:1fr 2fr auto;gap:8px;margin-bottom:14px;">
+        <input id="obRepoName" type="text" placeholder="Name" style="padding:8px;font-size:12px;background:var(--surface0);border:1px solid var(--surface1);border-radius:var(--radius);color:var(--text);outline:none;">
+        <input id="obRepoPath" type="text" placeholder="C:\\Code\\my-project" style="padding:8px;font:12px var(--font-mono);background:var(--surface0);border:1px solid var(--surface1);border-radius:var(--radius);color:var(--text);outline:none;">
+        <button class="onboarding-btn onboarding-btn-primary" onclick="obAddRepo()" style="padding:8px 14px;">Add</button>
+      </div>
+      <div class="onboarding-hint">
+        <strong>How to find your repo path:</strong><br>
+        1. Open the folder in File Explorer<br>
+        2. Click the address bar at the top<br>
+        3. Copy the full path (e.g. <code>C:\\Code\\my-project</code>)<br>
+        The <strong>Name</strong> is a short label you choose (e.g. "Frontend", "API").
+      </div>`,
+    onEnter: () => obRenderRepos(),
+  }),
+  // 5: Integrations (GitHub PAT + Wispr)
+  () => ({
+    title: 'Integrations',
+    subtitle: 'Optional: Connect GitHub for pull request reviews and Wispr Flow for voice input.',
+    html: `<div class="onboarding-section-title">GitHub</div>
+      <div class="onboarding-field"><label>Personal Access Token</label><input id="obGhPat" type="password" placeholder="ghp_..." value="${esc(_obData.ghPat)}" oninput="_obData.ghPat=this.value"></div>
+      <div class="onboarding-hint" style="margin-bottom:18px;">
+        <strong>How to get your GitHub PAT:</strong><br>
+        1. Go to <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a><br>
+        2. Click <strong>Generate new token (classic)</strong><br>
+        3. Select the <strong>repo</strong> scope<br>
+        4. Click Generate and copy the <code>ghp_...</code> token<br>
+        5. If your org uses SAML/SSO, click <strong>Configure SSO</strong> next to the token and authorize it
+      </div>
+      <div class="onboarding-section-title">Voice Input (Wispr Flow)</div>
+      <div class="onboarding-field"><label>API Key (optional)</label><input id="obWispr" type="password" placeholder="fl-..." value="${esc(_obData.wisprKey)}" oninput="_obData.wisprKey=this.value"></div>
+      <div style="font-size:10px;color:var(--subtext0);margin-top:3px;">Hold Ctrl+Shift to talk, release to transcribe. Requires a Wispr Flow subscription.</div>`,
+  }),
+  // 6: Overview
+  () => ({
+    title: "You're all set!",
+    subtitle: "Here's what you can do with DevOps Pilot:",
+    html: `<div style="display:flex;flex-direction:column;gap:10px;">
+      <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="list" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>Backlog & Board</strong><span>View and manage work items in list or kanban view with filters</span></div></div>
+      <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="git-pull-request" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>Pull Requests</strong><span>Review, comment, and approve GitHub PRs with full conversation timeline</span></div></div>
+      <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="terminal" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>AI Terminal</strong><span>Launch Claude, Gemini, Copilot, or Codex directly in the built-in terminal</span></div></div>
+      <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="file-code" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>Files & Diffs</strong><span>Browse code, view diffs, and commit changes with AI-powered messages</span></div></div>
+      <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="file-text" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>Notes</strong><span>Markdown scratchpad for summaries, meeting notes, and documentation</span></div></div>
+      <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="search" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>Command Palette</strong><span>Press <code style="background:var(--surface0);padding:1px 4px;border-radius:2px;font-size:10px;">Ctrl+K</code> to quickly access anything</span></div></div>
+    </div>
+    <div style="margin-top:16px;padding:10px 12px;background:var(--surface0);border-radius:var(--radius);font-size:11px;color:var(--subtext0);border-left:2px solid var(--accent);">
+      You can change any of these settings later from the <strong style="color:var(--text);">settings button</strong> at the bottom left of the sidebar.
+    </div>`,
+    nextLabel: 'Get Started',
+  }),
+];
+
+function startOnboarding() {
+  _obStep = 0;
+  _obData = { displayName: '', org: '', project: '', pat: '', team: '', ghPat: '', wisprKey: '', defaultCli: 'claude', repos: {} };
+  document.getElementById('onboarding').classList.add('visible');
+  obRender();
+}
+
+function obRender() {
+  const step = OB_STEPS[_obStep]();
+  const body = document.getElementById('onboardingBody');
+  body.innerHTML = `<div class="onboarding-title">${step.title}</div><div class="onboarding-subtitle">${step.subtitle}</div>${step.html}`;
+  // Dots
+  const dots = document.getElementById('onboardingDots');
+  dots.innerHTML = OB_STEPS.map((_, i) => `<div class="onboarding-dot${i === _obStep ? ' active' : i < _obStep ? ' done' : ''}"></div>`).join('');
+  // Buttons
+  document.getElementById('obBack').style.display = _obStep === 0 ? 'none' : '';
+  const nextBtn = document.getElementById('obNext');
+  nextBtn.textContent = step.nextLabel || (_obStep === OB_STEPS.length - 1 ? 'Get Started' : 'Next');
+  try { lucide.createIcons(); } catch (_) {}
+  if (step.onEnter) step.onEnter();
+}
+
+async function obNav(dir) {
+  if (dir > 0) {
+    const step = OB_STEPS[_obStep]();
+    if (step.validate && !step.validate()) { toast('Please fill in the required field', 'info'); return; }
+    if (_obStep === OB_STEPS.length - 1) { await obFinish(); return; }
+  }
+  _obStep = Math.max(0, Math.min(OB_STEPS.length - 1, _obStep + dir));
+  obRender();
+}
+
+async function obFinish() {
+  const payload = {
+    AzureDevOpsOrg: _obData.org.trim(),
+    AzureDevOpsProject: _obData.project.trim(),
+    AzureDevOpsProjects: _obData.project.trim() ? [_obData.project.trim()] : [],
+    AzureDevOpsPAT: _obData.pat.trim(),
+    DefaultTeam: _obData.team.trim(),
+    DefaultUser: _obData.displayName.trim(),
+    DefaultCli: _obData.defaultCli,
+    GitHubPAT: _obData.ghPat.trim(),
+    WisprFlowKey: _obData.wisprKey.trim(),
+    Repos: _obData.repos,
+  };
+  try {
+    await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  } catch (_) {}
+  document.getElementById('onboarding').classList.remove('visible');
+  showLoading('Loading...');
+  const minWait = new Promise(r => setTimeout(r, 4000));
+  await loadConfig(true);
+  loadVelocity();
+  if (_obData.defaultCli) switchCli(_obData.defaultCli);
+  await minWait;
+  hideLoading();
+  toast('Setup complete!', 'success');
+}
+
+async function obDetectAiTools() {
+  const container = document.getElementById('obAiTools');
+  if (!container) return;
+  container.innerHTML = '<div style="font-size:11px;color:var(--subtext0);">Detecting installed AI tools...</div>';
+  try {
+    const res = await fetch('/api/prerequisites');
+    const data = await res.json();
+    _obAiStatus = data.cliTools || {};
+    obRenderAiTools();
+  } catch (_) {
+    container.innerHTML = '<div style="font-size:11px;color:var(--red);">Failed to detect AI tools</div>';
+  }
+}
+
+function obRenderAiTools() {
+  const container = document.getElementById('obAiTools');
+  if (!container) return;
+  const meta = { claude: { name: 'Claude Code', color: '#d97757', pkg: '@anthropic-ai/claude-code' }, gemini: { name: 'Gemini CLI', color: '#078efa', pkg: '@google/gemini-cli' }, copilot: { name: 'Copilot CLI', color: '#8534f3', pkg: '@githubnext/github-copilot-cli' }, codex: { name: 'Codex CLI', color: '#10a37f', pkg: '@openai/codex' } };
+  container.innerHTML = Object.entries(meta).map(([id, m]) => {
+    const installed = _obAiStatus[id]?.installed;
+    return `<div class="ai-tool-card">
+      <div class="ai-tool-dot" style="background:${m.color}"></div>
+      <div class="ai-tool-info"><div class="ai-tool-name">${m.name}</div>
+        ${installed ? '<span class="ai-tool-status installed">Installed</span>' : `<span class="ai-tool-status not-installed">Not installed</span>`}
+      </div>
+      <button class="ai-tool-btn ${installed ? 'installed' : 'install'}" id="obAiBtn-${id}" onclick="${installed ? '' : `obInstallCli('${id}')`}" ${installed ? 'disabled' : ''}>${installed ? 'Installed' : 'Install'}</button>
+    </div>`;
+  }).join('');
+}
+
+async function obInstallCli(cli) {
+  const btn = document.getElementById(`obAiBtn-${cli}`);
+  if (!btn) return;
+  btn.className = 'ai-tool-btn installing'; btn.textContent = 'Installing...'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/cli/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cli }) });
+    const data = await res.json();
+    if (data.ok && data.installed) { _obAiStatus[cli] = { installed: true }; toast(`Installed!`, 'success'); obRenderAiTools(); }
+    else { btn.className = 'ai-tool-btn install'; btn.textContent = 'Retry'; btn.disabled = false; toast('Install failed', 'error'); }
+  } catch (_) { btn.className = 'ai-tool-btn install'; btn.textContent = 'Retry'; btn.disabled = false; }
+}
+
+function obRenderRepos() {
+  const container = document.getElementById('obRepoList');
+  if (!container) return;
+  const entries = Object.entries(_obData.repos);
+  if (!entries.length) { container.innerHTML = '<div style="font-size:11px;color:var(--subtext0);padding:4px 0;">No repositories added yet.</div>'; return; }
+  container.innerHTML = entries.map(([name, path]) => `<div class="onboarding-repo-item"><span class="onboarding-repo-name">${esc(name)}</span><span class="onboarding-repo-path">${esc(path)}</span><button class="onboarding-repo-del" onclick="obRemoveRepo('${esc(name)}')">&times;</button></div>`).join('');
+}
+
+function obAddRepo() {
+  const name = document.getElementById('obRepoName')?.value.trim();
+  const path = document.getElementById('obRepoPath')?.value.trim();
+  if (!name || !path) return;
+  _obData.repos[name] = path;
+  document.getElementById('obRepoName').value = '';
+  document.getElementById('obRepoPath').value = '';
+  obRenderRepos();
+}
+
+function obRemoveRepo(name) {
+  delete _obData.repos[name];
+  obRenderRepos();
 }
 
 function renderHtmlBody(html) {
