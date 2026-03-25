@@ -25,25 +25,37 @@ You are running inside a PowerShell terminal with access to:
 3. **NEVER use `az` (Azure CLI).** The app's REST API handles everything.
 4. **NEVER use `git diff` to show changes.** Use `.\scripts\Show-Diff.ps1` to open the built-in diff viewer.
 5. **NEVER open VS Code or external editors.** Use the app's built-in file/diff viewers.
-6. **You are inside a PowerShell PTY.** No bash commands (`cat`, `echo`, `grep`). Use PowerShell.
+6. **NEVER use `pwsh` or `pwsh.exe`.** It is NOT installed on this system. Always use `powershell.exe` to run `.ps1` scripts, and use `curl` for API calls. See Shell Rules below.
 7. **You are launched in the DevOps Pilot directory, but the user may be working in a DIFFERENT repo.** Before doing any code-related work (searching files, reading code, git operations), ALWAYS check which repo the user has selected by calling `GET /api/ui/context`. The response includes `activeRepo` (name) and `activeRepoPath` (full path on disk). **Work in that directory for code-related tasks, not your current working directory.**
 8. **ALWAYS run scripts from the DevOps Pilot directory.** All `.\scripts\*.ps1` files live in the DevOps Pilot project root. NEVER `cd` into another repo and try to run scripts from there — they won't exist. When working on code in another repo, use `activeRepoPath` for git/file operations, but run DevOps Pilot scripts from the DevOps Pilot directory.
 9. **Repo names are CONFIGURED names, not folder names.** When scripts or API endpoints require a `-Repo` parameter or `repoName` field, use the **configured repo name** from `/api/repos` (e.g., `"Residential Site"`, `"High5"`), NOT the folder name on disk (e.g., NOT `"website-bathfitter-residential"`). Always check `/api/repos` or `/api/ui/context` → `activeRepo` to get the correct name.
 
 ## CRITICAL: Shell Rules
 
-**You are inside a PowerShell PTY.** Follow these rules strictly:
+**You may be running in a PowerShell PTY, bash, or another shell.** Follow these rules strictly:
 
+### PowerShell Executable
+**NEVER use `pwsh` or `pwsh.exe`.** It is NOT installed. Use `powershell.exe` (Windows PowerShell 5.1) for ALL PowerShell operations:
+```
+powershell.exe -ExecutionPolicy Bypass -NoProfile -File ".\scripts\Get-SprintStatus.ps1"
+powershell.exe -ExecutionPolicy Bypass -NoProfile -Command ".\scripts\Get-WorkItem.ps1 -Id 12345"
+```
+
+### For API calls, prefer `curl` over `Invoke-RestMethod`
+`curl` works in ALL shells without PowerShell. Use it for direct API calls:
+```
+curl -s http://127.0.0.1:3800/api/workitems?iteration=Project%5CSprint%201
+curl -s http://127.0.0.1:3800/api/iterations
+curl -s -X POST http://127.0.0.1:3800/api/ui/tab -H "Content-Type: application/json" -d '{"tab":"backlog"}'
+```
+Only use `Invoke-RestMethod` when inside a `.ps1` script file, never inline in the terminal.
+
+### General Rules
 1. **ALWAYS use the pre-made scripts** in `.\scripts\` — they handle everything. Just fill in the parameters.
-2. **For custom queries or temp files**, use the `.ai-workspace\` folder:
-   ```
-   # Write your query to the workspace, then run it
-   .\scripts\Run-Query.ps1 -File ".\.ai-workspace\my-query.ps1"
-   ```
-3. **NEVER use bash commands** — no `cat`, `echo`, `grep`. Use PowerShell equivalents.
-4. **NEVER use Invoke-RestMethod inline** with `$_` or pipeline variables — bash eats `$_`. Always put complex queries in a `.ps1` file first.
-5. **All scripts run with** `-ExecutionPolicy Bypass -NoProfile` already set.
-6. **Clean up after yourself** — when done with temp files in `.ai-workspace\`, delete them.
+2. **For custom queries or temp files**, use the `.ai-workspace\` folder.
+3. **NEVER use Invoke-RestMethod inline** in the terminal — use `curl` instead, or put complex queries in a `.ps1` file first.
+4. **All scripts run with** `-ExecutionPolicy Bypass -NoProfile` already set.
+5. **Clean up after yourself** — when done with temp files in `.ai-workspace\`, delete them.
 
 ## CRITICAL: Speed Rules
 
