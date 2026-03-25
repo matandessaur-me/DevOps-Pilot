@@ -1940,18 +1940,21 @@ const terminals = new Map(); // termId -> { pty, cols, rows }
 let defaultCols = 120, defaultRows = 30;
 
 function findShell() {
-  try { execSync('where pwsh.exe 2>nul', { encoding: 'utf8', timeout: 3000 }).trim(); return 'pwsh.exe'; } catch (_) {
-    try { execSync('where powershell.exe 2>nul', { encoding: 'utf8', timeout: 3000 }).trim(); return 'powershell.exe'; } catch (_2) {
-      const candidates = [
-        path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', '7', 'pwsh.exe'),
-      ];
-      for (const c of candidates) { if (fs.existsSync(c)) return c; }
-      return 'powershell.exe';
-    }
+  // Prefer Git Bash — all AI CLIs (Copilot, Gemini, Codex, Claude) work best in bash
+  const gitBashCandidates = [
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe'),
+    path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Git', 'bin', 'bash.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'bin', 'bash.exe'),
+  ];
+  for (const c of gitBashCandidates) { if (fs.existsSync(c)) return { shell: c, type: 'bash' }; }
+  // Fallback: try bash on PATH (WSL, MSYS2, etc.)
+  try { execSync('where bash.exe 2>nul', { encoding: 'utf8', timeout: 3000 }).trim(); return { shell: 'bash.exe', type: 'bash' }; } catch (_) {}
+  // Last resort: PowerShell
+  try { execSync('where powershell.exe 2>nul', { encoding: 'utf8', timeout: 3000 }).trim(); return { shell: 'powershell.exe', type: 'powershell' }; } catch (_2) {
+    return { shell: 'powershell.exe', type: 'powershell' };
   }
 }
-const shellPath = findShell();
+const { shell: shellPath, type: shellType } = findShell();
 
 function broadcast(msg) {
   const payload = JSON.stringify(msg);
@@ -1967,7 +1970,8 @@ function createTerminal(termId, cols = 120, rows = 30, cwd = repoRoot) {
     terminals.delete(termId);
   }
 
-  const ptyProcess = pty.spawn(shellPath, ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-NoLogo', '-NoExit'], {
+  const shellArgs = shellType === 'bash' ? ['--login', '-i'] : ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-NoLogo', '-NoExit'];
+  const ptyProcess = pty.spawn(shellPath, shellArgs, {
     name: 'xterm-256color',
     cols, rows,
     cwd,
