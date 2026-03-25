@@ -4954,11 +4954,6 @@ function launchAi() {
     document.getElementById('termStatus').textContent = `${cfg.label} running`;
     document.getElementById('aiBtn').textContent = 'Stop AI';
     document.getElementById('mainTermTab').textContent = cfg.label;
-    // Clear startup noise after AI has loaded
-    setTimeout(() => {
-      const inst = termInstances.get('main');
-      if (inst && aiLaunched) inst.term.clear();
-    }, 4000);
   }
 
   // If a restart is pending, wait for it
