@@ -2497,9 +2497,9 @@ function createTermInstance(termId, label) {
     term.loadAddon(webgl);
   } catch (_) {}
 
-  // Let Ctrl+Shift (voice recording) pass through to document handlers
+  // Let modifier-only keys pass through to document handlers (voice recording uses Ctrl+Shift)
   term.attachCustomKeyEventHandler((e) => {
-    if (e.ctrlKey && e.shiftKey && (e.key === 'Control' || e.key === 'Shift')) return false;
+    if (e.key === 'Control' || e.key === 'Shift') return false;
     return true;
   });
 
