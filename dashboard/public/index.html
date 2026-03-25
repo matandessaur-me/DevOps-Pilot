@@ -399,10 +399,6 @@
     .backlog-view-btn:not(:last-child) { border-right: 1px solid var(--surface1); }
     .backlog-view-btn:hover { color: var(--text); background: var(--surface1); }
     .backlog-view-btn.active { background: var(--accent); color: var(--crust); }
-    .sidebar-view-toggle .backlog-view-btn {
-      flex: 1; width: auto; gap: 6px; font: 12px var(--font-ui); height: 30px;
-    }
-    .view-toggle-label { font-size: 11px; }
 
     /* ── Multi-select dropdown ────────────────────────────────────────────── */
     .multi-select { position: relative; user-select: none; }
@@ -1664,11 +1660,10 @@
   <aside class="sidebar">
     <div class="sidebar-fixed" id="sidebarAdoFixed" style="display:none;">
       <div class="field-group">
-        <label class="field-label">View</label>
-        <div class="backlog-view-toggle sidebar-view-toggle">
-          <button class="backlog-view-btn active" id="btnViewList" onclick="switchBacklogView('list')" title="List View"><i data-lucide="list" style="width:14px;height:14px;"></i> <span class="view-toggle-label">List</span></button>
-          <button class="backlog-view-btn" id="btnViewBoard" onclick="switchBacklogView('board')" title="Board View"><i data-lucide="columns-3" style="width:14px;height:14px;"></i> <span class="view-toggle-label">Board</span></button>
-        </div>
+        <label class="field-label">Board</label>
+        <select class="field-select" id="boardTeamSelect" onchange="switchTeam(this.value)">
+          <option value="">Loading teams...</option>
+        </select>
       </div>
       <div class="field-group">
         <label class="field-label">Iteration</label>
@@ -1755,9 +1750,6 @@
     <!-- Backlog (unified: list + board views) -->
     <div class="tab-panel" id="panel-backlog">
       <div class="view-toolbar">
-        <select class="view-filter" id="boardTeamSelect" onchange="switchTeam(this.value)" style="font-weight:600;color:var(--text);min-width:160px;">
-          <option value="">Loading teams...</option>
-        </select>
         <div style="flex:1"></div>
         <input class="view-search" id="backlogSearch" type="text" placeholder="Search..." oninput="applyBacklogFilters()">
         <div class="multi-select" data-id="backlogState" data-onchange="applyBacklogFilters">
@@ -1798,6 +1790,10 @@
             <span class="multi-select-arrow">&#9662;</span>
           </div>
           <div class="multi-select-panel" id="backlogTagPanel"></div>
+        </div>
+        <div class="backlog-view-toggle">
+          <button class="backlog-view-btn active" id="btnViewList" onclick="switchBacklogView('list')" title="List View"><i data-lucide="list" style="width:14px;height:14px;"></i></button>
+          <button class="backlog-view-btn" id="btnViewBoard" onclick="switchBacklogView('board')" title="Board View"><i data-lucide="columns-3" style="width:14px;height:14px;"></i></button>
         </div>
       </div>
       <!-- List view -->
