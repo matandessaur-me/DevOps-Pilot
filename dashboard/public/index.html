@@ -7438,8 +7438,8 @@ function renderMarkdown(text) {
     html = html.replace(/\n\*\*\*\n/g, '\n<hr style="border:none;border-top:1px solid var(--surface1);margin:12px 0;">\n');
     // Convert newlines to <br>
     html = html.replace(/\n/g, '<br>');
-    // Collapse 3+ consecutive <br> into max 2
-    html = html.replace(/(<br>){3,}/gi, '<br><br>');
+    // Collapse 2+ consecutive <br> into 1 (empty lines were too tall)
+    html = html.replace(/(<br>){2,}/gi, '<br>');
     // Clean up <br> around block elements
     html = html.replace(/(<\/(?:h[1-6]|p|li|ul|ol|blockquote|details|summary|pre|div|hr)>)(<br>)+/gi, '$1');
     html = html.replace(/(<br>)+(<(?:h[1-6]|p|li|ul|ol|blockquote|details|summary|pre|div|hr)[\s>/])/gi, '$2');
@@ -7510,6 +7510,8 @@ function renderMarkdown(text) {
   html = html.replace(/^&gt; (.+)$/gm, '<div style="border-left:3px solid var(--surface1);padding-left:10px;color:var(--subtext0);margin:4px 0;">$1</div>');
   // Line breaks — BEFORE restoring code blocks so \n inside <pre> is preserved
   html = html.replace(/\n/g, '<br>');
+  // Collapse 2+ consecutive <br> into 1 (empty lines were too tall)
+  html = html.replace(/(<br>){2,}/gi, '<br>');
   // Restore code blocks and inline code AFTER line break conversion
   earlyCodeBlocks.forEach((block, i) => { html = html.replace(`%%EARLYCODE_${i}%%`, block); });
   codeBlocks.forEach((block, i) => { html = html.replace(`%%CODEBLOCK_${i}%%`, block); });
