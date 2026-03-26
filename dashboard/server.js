@@ -70,6 +70,8 @@ const server = http.createServer(async (req, res) => {
     // ── Config ────────────────────────────────────────────────────────────
     if (url.pathname === '/api/config' && req.method === 'GET')  return handleGetConfig(res);
     if (url.pathname === '/api/config' && req.method === 'POST') return handleSaveConfig(req, res);
+    if (url.pathname === '/api/config/export' && req.method === 'GET')  return handleExportConfig(res);
+    if (url.pathname === '/api/config/import' && req.method === 'POST') return handleImportConfig(req, res);
     if (url.pathname === '/api/prerequisites')                   return handlePrerequisites(res);
     if (url.pathname === '/api/cli/install' && req.method === 'POST') return handleCliInstall(req, res);
 
@@ -87,12 +89,16 @@ const server = http.createServer(async (req, res) => {
     const wiStateMatch = url.pathname.match(/^\/api\/workitems\/(\d+)\/state$/);
     if (wiStateMatch && req.method === 'PATCH') return handleWorkItemState(wiStateMatch[1], req, res);
 
+    const wiCommentMatch = url.pathname.match(/^\/api\/workitems\/(\d+)\/comments$/);
+    if (wiCommentMatch && req.method === 'POST') return handleAddWorkItemComment(wiCommentMatch[1], req, res);
+
     // ── Azure DevOps: Velocity ────────────────────────────────────────────
     if (url.pathname === '/api/velocity' && req.method === 'GET') return handleVelocity(res);
 
     // ── Azure DevOps: Teams & Members ─────────────────────────────────────
     if (url.pathname === '/api/teams' && req.method === 'GET') return handleTeams(res);
     if (url.pathname === '/api/team-members' && req.method === 'GET') return handleTeamMembers(res);
+    if (url.pathname === '/api/areas' && req.method === 'GET') return handleAreas(res);
 
     // ── Azure DevOps: Burndown ────────────────────────────────────────────
     if (url.pathname === '/api/burndown' && req.method === 'GET') return handleBurndown(url, res);
@@ -210,6 +216,49 @@ async function handleSaveConfig(req, res) {
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
   // Immediately clear all caches so the next request uses the new config
   teamAreasCache = { data: null, team: null, ts: 0 };
+  areasCache = { data: null, ts: 0 };
+  iterationsCache = { data: null, ts: 0 };
+  workItemsCache = { data: null, key: null, ts: 0 };
+  json(res, { ok: true });
+}
+
+// Sensitive fields to strip from exports (PATs, API keys)
+const SENSITIVE_KEYS = ['AzureDevOpsPAT', 'GitHubPAT', 'WisprFlowKey'];
+
+function handleExportConfig(res) {
+  const cfg = getConfig();
+  // Strip sensitive fields
+  const exportCfg = { ...cfg };
+  for (const key of SENSITIVE_KEYS) delete exportCfg[key];
+  exportCfg._exportedAt = new Date().toISOString();
+  exportCfg._exportedFrom = 'DevOps Pilot';
+  res.writeHead(200, {
+    'Content-Type': 'application/json',
+    'Content-Disposition': 'attachment; filename="devops-pilot-settings.json"',
+  });
+  res.end(JSON.stringify(exportCfg, null, 2));
+}
+
+async function handleImportConfig(req, res) {
+  const incoming = await readBody(req);
+  if (!incoming || typeof incoming !== 'object') {
+    return json(res, { error: 'Invalid settings file' }, 400);
+  }
+  // Remove export metadata
+  delete incoming._exportedAt;
+  delete incoming._exportedFrom;
+  // Merge with existing config (preserve existing PATs if not provided)
+  let existing = {};
+  try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch (_) {}
+  const config = { ...existing, ...incoming };
+  // Restore sensitive fields from existing if not in import
+  for (const key of SENSITIVE_KEYS) {
+    if (!incoming[key] && existing[key]) config[key] = existing[key];
+  }
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+  teamAreasCache = { data: null, team: null, ts: 0 };
+  areasCache = { data: null, ts: 0 };
   iterationsCache = { data: null, ts: 0 };
   workItemsCache = { data: null, key: null, ts: 0 };
   json(res, { ok: true });
@@ -223,6 +272,7 @@ try {
       if (configWatchDebounce) clearTimeout(configWatchDebounce);
       configWatchDebounce = setTimeout(() => {
         teamAreasCache = { data: null, team: null, ts: 0 };
+        areasCache = { data: null, ts: 0 };
         iterationsCache = { data: null, ts: 0 };
         workItemsCache = { data: null, key: null, ts: 0 };
         broadcast({ type: 'config-changed' });
@@ -239,28 +289,11 @@ function handlePrerequisites(res) {
     config: { exists: false, complete: false },
   };
 
-  const cliChecks = [
-    { id: 'claude',  cmd: 'where claude.cmd 2>nul || where claude 2>nul' },
-    { id: 'gemini',  cmd: 'where gemini.cmd 2>nul || where gemini 2>nul' },
-    { id: 'copilot', cmd: 'where copilot.cmd 2>nul || where copilot 2>nul' },
-    { id: 'codex',   cmd: 'where codex.cmd 2>nul || where codex 2>nul' },
-  ];
-  for (const cli of cliChecks) {
-    result.cliTools[cli.id] = { installed: false, path: '' };
-    try {
-      const where = execSync(cli.cmd, { encoding: 'utf8', timeout: 5000 }).trim();
-      if (where) {
-        result.cliTools[cli.id].installed = true;
-        result.cliTools[cli.id].path = where.split('\n')[0].trim();
-      }
-    } catch (_) {}
+  for (const id of ['claude', 'gemini', 'copilot', 'codex']) {
+    result.cliTools[id] = detectCli(id);
   }
 
-  result.pwsh = { installed: false, path: '' };
-  try {
-    const pwshPath = execSync('where pwsh.exe 2>nul', { encoding: 'utf8', timeout: 5000 }).trim();
-    if (pwshPath) { result.pwsh.installed = true; result.pwsh.path = pwshPath.split('\n')[0].trim(); }
-  } catch (_) {}
+  result.pwsh = detectPwsh();
 
   try {
     const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -278,11 +311,72 @@ function handlePrerequisites(res) {
 const CLI_INSTALL_COMMANDS = {
   claude:  'npm install -g @anthropic-ai/claude-code',
   gemini:  'npm install -g @google/gemini-cli',
-  copilot: 'npm install -g @githubnext/github-copilot-cli',
+  copilot: 'npm install -g @github/copilot',
   codex:   'npm install -g @openai/codex',
 };
 
+// Detect a CLI tool via `where` first, then fall back to common npm global paths.
+// After a fresh npm install the current process PATH may be stale, so we also
+// check the typical npm global bin directories directly (same strategy as detectPwsh).
+// Returns { installed, path, inPath } -- `inPath` indicates if `where` found it (ready to use)
+// vs found via fallback (installed but may need terminal restart).
+function detectCli(cli) {
+  // 1. Try `where` (checks current PATH -- means it's ready to use right now)
+  const whereCmd = `where ${cli}.cmd 2>nul || where ${cli} 2>nul`;
+  try {
+    const where = execSync(whereCmd, { encoding: 'utf8', timeout: 5000 }).trim();
+    if (where) return { installed: true, path: where.split('\n')[0].trim(), inPath: true };
+  } catch (_) {}
+
+  // 2. Fallback: check common npm global install locations
+  const npmPrefixes = [];
+  // Try to get the actual npm prefix
+  try {
+    const prefix = execSync('npm config get prefix', { encoding: 'utf8', timeout: 5000 }).trim();
+    if (prefix) npmPrefixes.push(prefix);
+  } catch (_) {}
+  // Common Windows locations
+  const appData = process.env.APPDATA || '';
+  if (appData) npmPrefixes.push(path.join(appData, 'npm'));
+  const localAppData = process.env.LOCALAPPDATA || '';
+  if (localAppData) npmPrefixes.push(path.join(localAppData, 'npm'));
+  // nvm-windows uses per-version dirs
+  const nvmHome = process.env.NVM_HOME || process.env.NVM_SYMLINK || '';
+  if (nvmHome) npmPrefixes.push(nvmHome);
+  // Deduplicate
+  const seen = new Set();
+  for (const prefix of npmPrefixes) {
+    if (!prefix || seen.has(prefix.toLowerCase())) continue;
+    seen.add(prefix.toLowerCase());
+    for (const ext of ['.cmd', '.ps1', '']) {
+      const candidate = path.join(prefix, cli + ext);
+      try { if (fs.existsSync(candidate)) return { installed: true, path: candidate, inPath: false }; } catch (_) {}
+    }
+  }
+  return { installed: false, path: '', inPath: false };
+}
+
 const PWSH_WINGET_CMD = 'winget install Microsoft.PowerShell --accept-source-agreements --accept-package-agreements';
+
+// Detect pwsh.exe via `where` first, then fall back to common install paths.
+// `where` relies on the current process PATH which may be stale after a fresh install.
+function detectPwsh() {
+  try {
+    const where = execSync('where pwsh.exe 2>nul', { encoding: 'utf8', timeout: 5000 }).trim();
+    if (where) return { installed: true, path: where.split('\n')[0].trim() };
+  } catch (_) {}
+  // Fallback: check common install locations (PATH may not be refreshed yet)
+  const candidates = [
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', '7', 'pwsh.exe'),
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', '8', 'pwsh.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'PowerShell', 'pwsh.exe'),
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', 'pwsh.exe'),
+  ];
+  for (const c of candidates) {
+    try { if (c && fs.existsSync(c)) return { installed: true, path: c }; } catch (_) {}
+  }
+  return { installed: false, path: '' };
+}
 
 function handleCliInstall(req, res) {
   let body = '';
@@ -300,19 +394,21 @@ function handleCliInstall(req, res) {
       // Run install asynchronously
       const { exec } = require('child_process');
       exec(installCmd, { timeout: 120000, encoding: 'utf8' }, (err, stdout, stderr) => {
-        // After install, re-check if it's actually available
-        const checkCmd = `where ${cli}.cmd 2>nul || where ${cli} 2>nul`;
-        let installed = false;
-        let installPath = '';
-        try {
-          const where = execSync(checkCmd, { encoding: 'utf8', timeout: 5000 }).trim();
-          if (where) { installed = true; installPath = where.split('\n')[0].trim(); }
-        } catch (_) {}
+        // After install, re-check using detectCli (checks PATH + common npm global dirs)
+        const result = detectCli(cli);
 
-        if (installed) {
-          json(res, { ok: true, cli, installed: true, path: installPath });
+        if (result.installed) {
+          json(res, {
+            ok: true, cli, installed: true, path: result.path,
+            // If found via fallback (not in PATH), the user may need to restart the app
+            needsRestart: !result.inPath,
+          });
         } else {
-          json(res, { ok: false, cli, installed: false, error: err ? err.message : 'Install completed but CLI not found in PATH' });
+          json(res, {
+            ok: false, cli, installed: false,
+            error: err ? err.message : 'Installation failed. Please try the manual command below.',
+            fallbackCmd: installCmd,
+          });
         }
       });
     } catch (e) {
@@ -326,16 +422,10 @@ function handlePwshInstall(res) {
   // Attempt elevated install via Start-Process -Verb RunAs (triggers UAC prompt)
   const elevatedCmd = `powershell.exe -NoProfile -Command "Start-Process -FilePath 'winget' -ArgumentList 'install Microsoft.PowerShell --accept-source-agreements --accept-package-agreements' -Verb RunAs -Wait -PassThru | Select-Object -ExpandProperty ExitCode"`;
   exec(elevatedCmd, { timeout: 180000, encoding: 'utf8' }, (err, stdout, stderr) => {
-    // Check if pwsh is now available regardless of exit code
-    let installed = false;
-    let installPath = '';
-    try {
-      const where = execSync('where pwsh.exe 2>nul', { encoding: 'utf8', timeout: 5000 }).trim();
-      if (where) { installed = true; installPath = where.split('\n')[0].trim(); }
-    } catch (_) {}
-
-    if (installed) {
-      json(res, { ok: true, cli: 'pwsh', installed: true, path: installPath });
+    // Check if pwsh is now available (detectPwsh checks common paths too, not just PATH)
+    const result = detectPwsh();
+    if (result.installed) {
+      json(res, { ok: true, cli: 'pwsh', installed: true, path: result.path });
     } else {
       json(res, {
         ok: false, cli: 'pwsh', installed: false,
@@ -483,9 +573,11 @@ function ghRequest(method, apiPath, body, accept) {
 let iterationsCache = { data: null, ts: 0 };
 let workItemsCache = { data: null, key: null, ts: 0 };
 let teamAreasCache = { data: null, team: null, ts: 0 };
+let areasCache = { data: null, ts: 0 };
 const ITER_CACHE_TTL = 300000;
 const WI_CACHE_TTL = 30000;
 const TEAM_AREAS_TTL = 600000; // 10 min
+const AREAS_CACHE_TTL = 600000; // 10 min
 
 // ── Get team area paths (for scoping work items to a team) ──────────────────
 async function getTeamAreaPaths() {
@@ -557,43 +649,91 @@ async function handleWorkItems(url, res) {
   const state = url.searchParams.get('state') || '';
   const type = url.searchParams.get('type') || '';
   const assignedTo = url.searchParams.get('assignedTo') || '';
-  const cacheKey = `${iterationPath}|${state}|${type}|${assignedTo}`;
+  const areaPath = url.searchParams.get('area') || '';
+  const closedTopParam = url.searchParams.get('closedTop');
+  const closedTop = Math.min(parseInt(closedTopParam || '10', 10) || 10, 200);
+  // When closedTop is explicitly passed (by the dashboard), fetch closed items separately
+  // When not passed (by scripts), use legacy behavior (exclude closed entirely)
+  const noClosedFilter = !iterationPath && !state;
+  const fetchClosedSeparately = noClosedFilter && closedTopParam !== null;
+  const cacheKey = `${iterationPath}|${state}|${type}|${assignedTo}|${areaPath}|ct${closedTopParam !== null ? closedTop : '-'}`;
 
   try {
     if (!refresh && workItemsCache.data && workItemsCache.key === cacheKey && Date.now() - workItemsCache.ts < WI_CACHE_TTL) {
       return json(res, workItemsCache.data);
     }
 
-    // Get team area paths to scope work items
-    const teamAreas = await getTeamAreaPaths();
+    // Build area path clause (reused for both queries)
+    // If an explicit area is selected, use it; otherwise fall back to team area paths
+    let areaClause = '';
+    if (areaPath) {
+      areaClause = ` AND [System.AreaPath] UNDER '${areaPath}'`;
+    } else {
+      const teamAreas = await getTeamAreaPaths();
+      if (teamAreas && teamAreas.length > 0) {
+        const areaConditions = teamAreas.map(a => `[System.AreaPath] UNDER '${a}'`).join(' OR ');
+        areaClause = ` AND (${areaConditions})`;
+      }
+    }
 
     let wiqlQuery = `SELECT [System.Id] FROM WorkItems WHERE [System.State] NOT IN ('Removed')`;
     // Without an iteration filter, exclude Closed to avoid 20k+ results
-    if (!iterationPath && !state) wiqlQuery += ` AND [System.State] NOT IN ('Closed', 'Done')`;
-    // Scope to team's area paths
-    if (teamAreas && teamAreas.length > 0) {
-      const areaConditions = teamAreas.map(a => `[System.AreaPath] UNDER '${a}'`).join(' OR ');
-      wiqlQuery += ` AND (${areaConditions})`;
-    }
+    if (noClosedFilter) wiqlQuery += ` AND [System.State] NOT IN ('Closed', 'Done')`;
+    wiqlQuery += areaClause;
     if (iterationPath) wiqlQuery += ` AND [System.IterationPath] = '${iterationPath}'`;
     if (state)         wiqlQuery += ` AND [System.State] = '${state}'`;
     if (type)          wiqlQuery += ` AND [System.WorkItemType] = '${type}'`;
     if (assignedTo)    wiqlQuery += ` AND [System.AssignedTo] = '${assignedTo}'`;
     wiqlQuery += ` ORDER BY [System.ChangedDate] DESC`;
 
-    const wiql = await adoRequest('POST', '/wit/wiql?$top=200&api-version=7.1', { query: wiqlQuery });
-    const ids = (wiql.workItems || []).map(w => w.id).slice(0, 200);
+    // Run main query (and closed query in parallel when needed)
+    const mainPromise = adoRequest('POST', '/wit/wiql?$top=200&api-version=7.1', { query: wiqlQuery });
 
-    if (ids.length === 0) {
-      workItemsCache = { data: [], key: cacheKey, ts: Date.now() };
-      return json(res, []);
+    let closedPromise = null;
+    if (fetchClosedSeparately) {
+      // Fetch all closed IDs (lightweight -- just IDs, no details) to get total count
+      let closedQuery = `SELECT [System.Id] FROM WorkItems WHERE [System.State] IN ('Closed', 'Done') AND [System.State] NOT IN ('Removed')`;
+      closedQuery += areaClause;
+      if (type)       closedQuery += ` AND [System.WorkItemType] = '${type}'`;
+      if (assignedTo) closedQuery += ` AND [System.AssignedTo] = '${assignedTo}'`;
+      closedQuery += ` ORDER BY [System.ChangedDate] DESC`;
+      closedPromise = adoRequest('POST', '/wit/wiql?api-version=7.1', { query: closedQuery });
     }
 
-    const details = await adoRequest('GET',
-      `/wit/workitems?ids=${ids.join(',')}&fields=System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.Tags,System.CreatedDate,System.ChangedDate,Microsoft.VSTS.Common.Priority,System.IterationPath,Microsoft.VSTS.Scheduling.StoryPoints,Microsoft.VSTS.Scheduling.Effort,System.Parent&api-version=7.1`
-    );
+    const [wiql, closedWiql] = await Promise.all([mainPromise, closedPromise]);
 
-    const result = (details.value || []).map(wi => {
+    const mainIds = (wiql.workItems || []).map(w => w.id).slice(0, 200);
+    let closedIds = [];
+    let hasMoreClosed = false;
+    let totalClosed = 0;
+
+    if (closedWiql) {
+      const allClosedIds = (closedWiql.workItems || []).map(w => w.id);
+      totalClosed = allClosedIds.length;
+      hasMoreClosed = totalClosed > closedTop;
+      closedIds = allClosedIds.slice(0, closedTop);
+    }
+
+    const allIds = [...new Set([...mainIds, ...closedIds])];
+
+    if (allIds.length === 0) {
+      const emptyResult = fetchClosedSeparately ? { items: [], hasMoreClosed: false, totalClosed: 0 } : [];
+      workItemsCache = { data: emptyResult, key: cacheKey, ts: Date.now() };
+      return json(res, emptyResult);
+    }
+
+    // Fetch details in batches of 200 (API limit)
+    const batches = [];
+    for (let i = 0; i < allIds.length; i += 200) {
+      batches.push(allIds.slice(i, i + 200));
+    }
+    const detailResults = await Promise.all(batches.map(batch =>
+      adoRequest('GET',
+        `/wit/workitems?ids=${batch.join(',')}&fields=System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.Tags,System.CreatedDate,System.ChangedDate,Microsoft.VSTS.Common.Priority,System.IterationPath,Microsoft.VSTS.Scheduling.StoryPoints,Microsoft.VSTS.Scheduling.Effort,System.Parent&api-version=7.1`
+      )
+    ));
+
+    const items = detailResults.flatMap(d => (d.value || []).map(wi => {
       const f = wi.fields;
       return {
         id: wi.id,
@@ -609,8 +749,11 @@ async function handleWorkItems(url, res) {
         createdDate: f['System.CreatedDate'] || '',
         parentId: f['System.Parent'] || null,
       };
-    });
+    }));
 
+    // When excluding closed (no iteration/state filter), return wrapped format with pagination info
+    // Otherwise return flat array for backward compat with scripts
+    const result = fetchClosedSeparately ? { items, hasMoreClosed, totalClosed } : items;
     workItemsCache = { data: result, key: cacheKey, ts: Date.now() };
     json(res, result);
   } catch (e) {
@@ -747,13 +890,34 @@ async function handleWorkItemState(id, req, res) {
   }
 }
 
+// ── Add Work Item Comment ──────────────────────────────────────────────────
+async function handleAddWorkItemComment(id, req, res) {
+  try {
+    const { text } = await readBody(req);
+    if (!text) return json(res, { error: 'text is required' }, 400);
+    const result = await adoRequest('POST',
+      `/wit/workitems/${id}/comments?api-version=7.1-preview.4`,
+      { text: sanitizeText(text) }
+    );
+    json(res, { ok: true, id: result.id, text: result.text, author: result.createdBy?.displayName || '', date: result.createdDate || '' });
+  } catch (e) {
+    json(res, { error: e.message }, 502);
+  }
+}
+
 // ── Create Work Item ────────────────────────────────────────────────────────
 // Strip non-ASCII control chars and replacement characters (U+FFFD, etc.)
 // Keeps standard printable ASCII, common Unicode letters/symbols, and whitespace.
 function sanitizeText(str) {
   if (!str) return str;
   return str
-    .replace(/[\uFFFD\uFFFE\uFFFF]/g, '')       // replacement/noncharacters
+    .replace(/[\u2014]/g, '--')                   // em dash -> --
+    .replace(/[\u2013]/g, '-')                    // en dash -> -
+    .replace(/[\u2018\u2019\u201A]/g, "'")        // smart single quotes -> '
+    .replace(/[\u201C\u201D\u201E]/g, '"')        // smart double quotes -> "
+    .replace(/[\u2026]/g, '...')                   // ellipsis -> ...
+    .replace(/[\u00A0]/g, ' ')                     // non-breaking space -> space
+    .replace(/[\uFFFD\uFFFE\uFFFF]/g, '')         // replacement/noncharacters
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '') // control chars (keep \t \n \r)
     .replace(/[\uD800-\uDFFF]/g, '')              // lone surrogates
     .trim();
@@ -924,6 +1088,38 @@ async function handleTeams(res) {
   }
 }
 
+// ── Area Paths ──────────────────────────────────────────────────────────────
+async function handleAreas(res) {
+  try {
+    if (areasCache.data && Date.now() - areasCache.ts < AREAS_CACHE_TTL) {
+      return json(res, areasCache.data);
+    }
+
+    const cfg = getConfig();
+    const project = cfg.AzureDevOpsProject;
+    // Fetch the area tree from the classification nodes API
+    const data = await adoRequest('GET',
+      `/wit/classificationnodes/Areas?$depth=10&api-version=7.1`, null, null, true
+    );
+
+    // Flatten the tree into a list of area paths
+    const areas = [];
+    function walk(node, prefix) {
+      const path = prefix ? `${prefix}\\${node.name}` : node.name;
+      areas.push(path);
+      if (node.children) {
+        for (const child of node.children) walk(child, path);
+      }
+    }
+    if (data.name) walk(data, '');
+
+    areasCache = { data: areas, ts: Date.now() };
+    json(res, areas);
+  } catch (e) {
+    json(res, { error: e.message }, 502);
+  }
+}
+
 // List members — collect from ALL teams to get full picture
 async function handleTeamMembers(res) {
   try {
@@ -1069,12 +1265,12 @@ async function handleCreatePullRequest(req, res) {
     let body = description || '';
     if (workItemId) {
       const adoUrl = `https://dev.azure.com/${cfg.AzureDevOpsOrg}/${encodeURIComponent(cfg.AzureDevOpsProject)}/_workitems/edit/${workItemId}`;
-      body += `${body ? '\n\n' : ''}AB#${workItemId} — [View in Azure DevOps](${adoUrl})`;
+      body += `${body ? '\n\n' : ''}AB#${workItemId} - [View in Azure DevOps](${adoUrl})`;
     }
 
     const pr = await ghRequest('POST', `/repos/${gh.owner}/${gh.repo}/pulls`, {
-      title,
-      body,
+      title: sanitizeText(title),
+      body: sanitizeText(body),
       head: source,
       base: target,
     });
@@ -1261,7 +1457,7 @@ async function handleGitHubAddComment(req, res) {
     if (!repo || !number || !body) return json(res, { error: 'repo, number, and body are required' }, 400);
     const gh = resolveGitHub(repo);
     if (gh.error) return json(res, gh, 400);
-    const result = await ghRequest('POST', `/repos/${gh.owner}/${gh.repo}/issues/${number}/comments`, { body });
+    const result = await ghRequest('POST', `/repos/${gh.owner}/${gh.repo}/issues/${number}/comments`, { body: sanitizeText(body) });
     json(res, { ok: true, id: result.id });
   } catch (e) { json(res, { error: e.message }, 500); }
 }
@@ -1273,7 +1469,7 @@ async function handleGitHubSubmitReview(req, res) {
     const gh = resolveGitHub(repo);
     if (gh.error) return json(res, gh, 400);
     const payload = { event };
-    if (body) payload.body = body;
+    if (body) payload.body = sanitizeText(body);
     const result = await ghRequest('POST', `/repos/${gh.owner}/${gh.repo}/pulls/${number}/reviews`, payload);
     json(res, { ok: true, state: result.state });
   } catch (e) { json(res, { error: e.message }, 500); }
@@ -2007,15 +2203,12 @@ const terminals = new Map(); // termId -> { pty, cols, rows }
 let defaultCols = 120, defaultRows = 30;
 
 function findShell() {
-  try { execSync('where pwsh.exe 2>nul', { encoding: 'utf8', timeout: 3000 }).trim(); return 'pwsh.exe'; } catch (_) {
-    try { execSync('where powershell.exe 2>nul', { encoding: 'utf8', timeout: 3000 }).trim(); return 'powershell.exe'; } catch (_2) {
-      const candidates = [
-        path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', '7', 'pwsh.exe'),
-      ];
-      for (const c of candidates) { if (fs.existsSync(c)) return c; }
-      return 'powershell.exe';
-    }
+  const pwsh = detectPwsh();
+  if (pwsh.installed) return pwsh.path;
+  try { execSync('where powershell.exe 2>nul', { encoding: 'utf8', timeout: 3000 }).trim(); return 'powershell.exe'; } catch (_) {
+    const fallback = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    if (fs.existsSync(fallback)) return fallback;
+    return 'powershell.exe';
   }
 }
 const shellPath = findShell();
