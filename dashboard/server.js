@@ -98,6 +98,7 @@ const server = http.createServer(async (req, res) => {
     // ── Azure DevOps: Teams & Members ─────────────────────────────────────
     if (url.pathname === '/api/teams' && req.method === 'GET') return handleTeams(res);
     if (url.pathname === '/api/team-members' && req.method === 'GET') return handleTeamMembers(res);
+    if (url.pathname === '/api/areas' && req.method === 'GET') return handleAreas(res);
 
     // ── Azure DevOps: Burndown ────────────────────────────────────────────
     if (url.pathname === '/api/burndown' && req.method === 'GET') return handleBurndown(url, res);
@@ -215,6 +216,7 @@ async function handleSaveConfig(req, res) {
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
   // Immediately clear all caches so the next request uses the new config
   teamAreasCache = { data: null, team: null, ts: 0 };
+  areasCache = { data: null, ts: 0 };
   iterationsCache = { data: null, ts: 0 };
   workItemsCache = { data: null, key: null, ts: 0 };
   json(res, { ok: true });
@@ -256,6 +258,7 @@ async function handleImportConfig(req, res) {
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
   teamAreasCache = { data: null, team: null, ts: 0 };
+  areasCache = { data: null, ts: 0 };
   iterationsCache = { data: null, ts: 0 };
   workItemsCache = { data: null, key: null, ts: 0 };
   json(res, { ok: true });
@@ -269,6 +272,7 @@ try {
       if (configWatchDebounce) clearTimeout(configWatchDebounce);
       configWatchDebounce = setTimeout(() => {
         teamAreasCache = { data: null, team: null, ts: 0 };
+        areasCache = { data: null, ts: 0 };
         iterationsCache = { data: null, ts: 0 };
         workItemsCache = { data: null, key: null, ts: 0 };
         broadcast({ type: 'config-changed' });
@@ -569,9 +573,11 @@ function ghRequest(method, apiPath, body, accept) {
 let iterationsCache = { data: null, ts: 0 };
 let workItemsCache = { data: null, key: null, ts: 0 };
 let teamAreasCache = { data: null, team: null, ts: 0 };
+let areasCache = { data: null, ts: 0 };
 const ITER_CACHE_TTL = 300000;
 const WI_CACHE_TTL = 30000;
 const TEAM_AREAS_TTL = 600000; // 10 min
+const AREAS_CACHE_TTL = 600000; // 10 min
 
 // ── Get team area paths (for scoping work items to a team) ──────────────────
 async function getTeamAreaPaths() {
@@ -643,43 +649,91 @@ async function handleWorkItems(url, res) {
   const state = url.searchParams.get('state') || '';
   const type = url.searchParams.get('type') || '';
   const assignedTo = url.searchParams.get('assignedTo') || '';
-  const cacheKey = `${iterationPath}|${state}|${type}|${assignedTo}`;
+  const areaPath = url.searchParams.get('area') || '';
+  const closedTopParam = url.searchParams.get('closedTop');
+  const closedTop = Math.min(parseInt(closedTopParam || '10', 10) || 10, 200);
+  // When closedTop is explicitly passed (by the dashboard), fetch closed items separately
+  // When not passed (by scripts), use legacy behavior (exclude closed entirely)
+  const noClosedFilter = !iterationPath && !state;
+  const fetchClosedSeparately = noClosedFilter && closedTopParam !== null;
+  const cacheKey = `${iterationPath}|${state}|${type}|${assignedTo}|${areaPath}|ct${closedTopParam !== null ? closedTop : '-'}`;
 
   try {
     if (!refresh && workItemsCache.data && workItemsCache.key === cacheKey && Date.now() - workItemsCache.ts < WI_CACHE_TTL) {
       return json(res, workItemsCache.data);
     }
 
-    // Get team area paths to scope work items
-    const teamAreas = await getTeamAreaPaths();
+    // Build area path clause (reused for both queries)
+    // If an explicit area is selected, use it; otherwise fall back to team area paths
+    let areaClause = '';
+    if (areaPath) {
+      areaClause = ` AND [System.AreaPath] UNDER '${areaPath}'`;
+    } else {
+      const teamAreas = await getTeamAreaPaths();
+      if (teamAreas && teamAreas.length > 0) {
+        const areaConditions = teamAreas.map(a => `[System.AreaPath] UNDER '${a}'`).join(' OR ');
+        areaClause = ` AND (${areaConditions})`;
+      }
+    }
 
     let wiqlQuery = `SELECT [System.Id] FROM WorkItems WHERE [System.State] NOT IN ('Removed')`;
     // Without an iteration filter, exclude Closed to avoid 20k+ results
-    if (!iterationPath && !state) wiqlQuery += ` AND [System.State] NOT IN ('Closed', 'Done')`;
-    // Scope to team's area paths
-    if (teamAreas && teamAreas.length > 0) {
-      const areaConditions = teamAreas.map(a => `[System.AreaPath] UNDER '${a}'`).join(' OR ');
-      wiqlQuery += ` AND (${areaConditions})`;
-    }
+    if (noClosedFilter) wiqlQuery += ` AND [System.State] NOT IN ('Closed', 'Done')`;
+    wiqlQuery += areaClause;
     if (iterationPath) wiqlQuery += ` AND [System.IterationPath] = '${iterationPath}'`;
     if (state)         wiqlQuery += ` AND [System.State] = '${state}'`;
     if (type)          wiqlQuery += ` AND [System.WorkItemType] = '${type}'`;
     if (assignedTo)    wiqlQuery += ` AND [System.AssignedTo] = '${assignedTo}'`;
     wiqlQuery += ` ORDER BY [System.ChangedDate] DESC`;
 
-    const wiql = await adoRequest('POST', '/wit/wiql?$top=200&api-version=7.1', { query: wiqlQuery });
-    const ids = (wiql.workItems || []).map(w => w.id).slice(0, 200);
+    // Run main query (and closed query in parallel when needed)
+    const mainPromise = adoRequest('POST', '/wit/wiql?$top=200&api-version=7.1', { query: wiqlQuery });
 
-    if (ids.length === 0) {
-      workItemsCache = { data: [], key: cacheKey, ts: Date.now() };
-      return json(res, []);
+    let closedPromise = null;
+    if (fetchClosedSeparately) {
+      // Fetch all closed IDs (lightweight -- just IDs, no details) to get total count
+      let closedQuery = `SELECT [System.Id] FROM WorkItems WHERE [System.State] IN ('Closed', 'Done') AND [System.State] NOT IN ('Removed')`;
+      closedQuery += areaClause;
+      if (type)       closedQuery += ` AND [System.WorkItemType] = '${type}'`;
+      if (assignedTo) closedQuery += ` AND [System.AssignedTo] = '${assignedTo}'`;
+      closedQuery += ` ORDER BY [System.ChangedDate] DESC`;
+      closedPromise = adoRequest('POST', '/wit/wiql?api-version=7.1', { query: closedQuery });
     }
 
-    const details = await adoRequest('GET',
-      `/wit/workitems?ids=${ids.join(',')}&fields=System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.Tags,System.CreatedDate,System.ChangedDate,Microsoft.VSTS.Common.Priority,System.IterationPath,Microsoft.VSTS.Scheduling.StoryPoints,Microsoft.VSTS.Scheduling.Effort,System.Parent&api-version=7.1`
-    );
+    const [wiql, closedWiql] = await Promise.all([mainPromise, closedPromise]);
 
-    const result = (details.value || []).map(wi => {
+    const mainIds = (wiql.workItems || []).map(w => w.id).slice(0, 200);
+    let closedIds = [];
+    let hasMoreClosed = false;
+    let totalClosed = 0;
+
+    if (closedWiql) {
+      const allClosedIds = (closedWiql.workItems || []).map(w => w.id);
+      totalClosed = allClosedIds.length;
+      hasMoreClosed = totalClosed > closedTop;
+      closedIds = allClosedIds.slice(0, closedTop);
+    }
+
+    const allIds = [...new Set([...mainIds, ...closedIds])];
+
+    if (allIds.length === 0) {
+      const emptyResult = fetchClosedSeparately ? { items: [], hasMoreClosed: false, totalClosed: 0 } : [];
+      workItemsCache = { data: emptyResult, key: cacheKey, ts: Date.now() };
+      return json(res, emptyResult);
+    }
+
+    // Fetch details in batches of 200 (API limit)
+    const batches = [];
+    for (let i = 0; i < allIds.length; i += 200) {
+      batches.push(allIds.slice(i, i + 200));
+    }
+    const detailResults = await Promise.all(batches.map(batch =>
+      adoRequest('GET',
+        `/wit/workitems?ids=${batch.join(',')}&fields=System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.Tags,System.CreatedDate,System.ChangedDate,Microsoft.VSTS.Common.Priority,System.IterationPath,Microsoft.VSTS.Scheduling.StoryPoints,Microsoft.VSTS.Scheduling.Effort,System.Parent&api-version=7.1`
+      )
+    ));
+
+    const items = detailResults.flatMap(d => (d.value || []).map(wi => {
       const f = wi.fields;
       return {
         id: wi.id,
@@ -695,8 +749,11 @@ async function handleWorkItems(url, res) {
         createdDate: f['System.CreatedDate'] || '',
         parentId: f['System.Parent'] || null,
       };
-    });
+    }));
 
+    // When excluding closed (no iteration/state filter), return wrapped format with pagination info
+    // Otherwise return flat array for backward compat with scripts
+    const result = fetchClosedSeparately ? { items, hasMoreClosed, totalClosed } : items;
     workItemsCache = { data: result, key: cacheKey, ts: Date.now() };
     json(res, result);
   } catch (e) {
@@ -1026,6 +1083,38 @@ async function handleTeams(res) {
       description: t.description || '',
     }));
     json(res, teams);
+  } catch (e) {
+    json(res, { error: e.message }, 502);
+  }
+}
+
+// ── Area Paths ──────────────────────────────────────────────────────────────
+async function handleAreas(res) {
+  try {
+    if (areasCache.data && Date.now() - areasCache.ts < AREAS_CACHE_TTL) {
+      return json(res, areasCache.data);
+    }
+
+    const cfg = getConfig();
+    const project = cfg.AzureDevOpsProject;
+    // Fetch the area tree from the classification nodes API
+    const data = await adoRequest('GET',
+      `/wit/classificationnodes/Areas?$depth=10&api-version=7.1`, null, null, true
+    );
+
+    // Flatten the tree into a list of area paths
+    const areas = [];
+    function walk(node, prefix) {
+      const path = prefix ? `${prefix}\\${node.name}` : node.name;
+      areas.push(path);
+      if (node.children) {
+        for (const child of node.children) walk(child, path);
+      }
+    }
+    if (data.name) walk(data, '');
+
+    areasCache = { data: areas, ts: Date.now() };
+    json(res, areas);
   } catch (e) {
     json(res, { error: e.message }, 502);
   }

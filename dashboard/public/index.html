@@ -362,6 +362,11 @@
     .child-rollup-bar { display: flex; height: 4px; border-radius: 2px; overflow: hidden; flex: 1; background: var(--surface1); }
     .child-rollup-bar > span { display: block; height: 100%; }
     .child-rollup-label { font-size: 9px; color: var(--subtext0); white-space: nowrap; }
+    /* Show more closed items button */
+    .show-more-closed-btn { display: block; width: 100%; padding: 8px 12px; margin-top: 4px; background: var(--surface0); border: 1px dashed var(--surface2); border-radius: var(--radius); color: var(--subtext0); font-size: 11px; cursor: pointer; text-align: center; transition: all 0.15s; }
+    .show-more-closed-btn:hover { background: var(--surface1); color: var(--text); border-color: var(--overlay0); }
+    .show-more-closed-row td { padding: 0 !important; }
+    .show-more-closed-row .show-more-closed-btn { margin: 0; border-radius: 0; border: none; border-top: 1px dashed var(--surface2); padding: 10px; }
     .child-rollup-complete { color: var(--green) !important; font-weight: 600; }
     /* Child cards in other columns — parent reference */
     .child-parent-ref { font-size: 9px; color: var(--overlay1); margin-bottom: 2px; display: flex; align-items: center; gap: 3px; }
@@ -1720,6 +1725,12 @@
         </select>
       </div>
       <div class="field-group">
+        <label class="field-label">Area</label>
+        <select class="field-select" id="areaSelect" onchange="onAreaChange()">
+          <option value="">Team Default</option>
+        </select>
+      </div>
+      <div class="field-group">
         <label class="field-label">Iteration</label>
         <select class="field-select" id="sprintSelect" onchange="onSprintChange()">
           <option value="">All Iterations</option>
@@ -2534,6 +2545,9 @@ let activeCli = localStorage.getItem('devops-pilot-cli') || 'claude';
 let aiLaunched = false;
 let ws = null;
 let workItems = [];
+let hasMoreClosed = false;
+let totalClosedCount = 0;
+let closedItemsLimit = 10;
 let currentWiDetail = null;
 let configData = {};
 let lastCols = 0, lastRows = 0;
@@ -5228,6 +5242,7 @@ async function loadConfig(autoSelectSprint) {
     document.getElementById('prsTabBtn').style.display = hasGh ? '' : 'none';
     if (hasAdo) {
       loadTeams();
+      loadAreas();
       await loadIterations(autoSelectSprint);
       loadRepoList();
       loadTeamMembers();
@@ -5273,6 +5288,7 @@ async function loadIterations(autoSelectCurrent) {
 }
 
 function onSprintChange() {
+  closedItemsLimit = 10; // reset pagination when switching iterations
   loadWorkItems();
   const path = document.getElementById('sprintSelect').value;
   if (path) loadBurndown(path);
@@ -5281,9 +5297,12 @@ function onSprintChange() {
 
 function pushUiContext() {
   const sel = document.getElementById('sprintSelect');
+  const areaSel = document.getElementById('areaSelect');
   const ctx = {
     selectedIteration: sel.value || null,
     selectedIterationName: sel.selectedOptions[0]?.textContent || 'All Iterations',
+    selectedArea: areaSel?.value || null,
+    selectedAreaName: areaSel?.selectedOptions[0]?.textContent?.trim() || 'Team Default',
     activeRepo: activeRepo || filesCurrentRepo || null,
   };
   fetch('/api/ui/context', {
@@ -5295,15 +5314,27 @@ function pushUiContext() {
 // ── Work Items ──────────────────────────────────────────────────────────
 async function loadWorkItems(refresh = false) {
   const iteration = document.getElementById('sprintSelect').value;
+  const area = document.getElementById('areaSelect')?.value || '';
   const params = new URLSearchParams();
   if (iteration) params.set('iteration', iteration);
+  if (area) params.set('area', area);
   if (refresh) params.set('refresh', '1');
+  params.set('closedTop', String(closedItemsLimit));
 
   try {
     const res = await fetch(`/api/workitems?${params}`);
     const data = await res.json();
     if (data.error) { toast(data.error, 'error'); return; }
-    workItems = data;
+    // Support both new { items, hasMoreClosed, totalClosed } and legacy array format
+    if (Array.isArray(data)) {
+      workItems = data;
+      hasMoreClosed = false;
+      totalClosedCount = 0;
+    } else {
+      workItems = data.items || [];
+      hasMoreClosed = data.hasMoreClosed || false;
+      totalClosedCount = data.totalClosed || 0;
+    }
     populateTagFilters();
     document.querySelectorAll('.multi-select').forEach(ms => updateMultiSelectLabel(ms));
     renderBoard();
@@ -5314,6 +5345,11 @@ async function loadWorkItems(refresh = false) {
   } catch (e) {
     toast('Failed to load work items', 'error');
   }
+}
+
+function loadMoreClosed() {
+  closedItemsLimit += 15;
+  loadWorkItems(true);
 }
 
 function populateTagFilters() {
@@ -5545,7 +5581,8 @@ function renderBoard() {
     const container = document.getElementById(`board${state}`);
     const count = document.getElementById(`boardCount${state}`);
     if (!container) continue;
-    count.textContent = items.length;
+    // For Closed column, show total count (from API) when available, not just loaded count
+    count.textContent = (state === 'Closed' && totalClosedCount > items.length) ? totalClosedCount : items.length;
 
     // Identify same-column children (parent is in this same column)
     const colItemMap = new Map(items.map(wi => [wi.id, wi]));
@@ -5586,6 +5623,11 @@ function renderBoard() {
         html += boardCardHtml(wi);
       }
     }
+    // Add "Show more" button to Closed column when there are more items
+    if (state === 'Closed' && hasMoreClosed) {
+      html += `<button class="show-more-closed-btn" onclick="event.stopPropagation(); loadMoreClosed();">Showing ${items.length} of ${totalClosedCount} -- load more...</button>`;
+    }
+
     container.innerHTML = html;
 
     // Add drop handlers to column
@@ -5683,6 +5725,12 @@ function renderBacklog() {
         </tr>`;
     }
   }
+  // Add "Show more" row when there are more closed items
+  if (hasMoreClosed) {
+    const loadedClosed = workItems.filter(wi => wi.state === 'Closed' || wi.state === 'Done').length;
+    html += `<tr class="show-more-closed-row"><td colspan="7"><button class="show-more-closed-btn" onclick="event.stopPropagation(); loadMoreClosed();">Showing ${loadedClosed} of ${totalClosedCount} closed items -- load more...</button></td></tr>`;
+  }
+
   body.innerHTML = html;
 }
 
@@ -6356,10 +6404,46 @@ async function switchTeam(teamName) {
     body: JSON.stringify({ DefaultTeam: teamName }),
   });
   configData.DefaultTeam = teamName;
+  // Reset child filters -- both Area and Iteration depend on the selected team
+  document.getElementById('areaSelect').value = '';
+  document.getElementById('sprintSelect').value = '';
+  closedItemsLimit = 10;
   // Reload everything for the new team
+  loadAreas();
   loadIterations();
   loadWorkItems(true);
   loadTeamMembers();
+  pushUiContext();
+}
+
+// ── Area Paths ──────────────────────────────────────────────────────────
+async function loadAreas() {
+  try {
+    const res = await fetch('/api/areas');
+    const areas = await res.json();
+    if (areas.error) return;
+
+    const select = document.getElementById('areaSelect');
+    const prev = select.value;
+    select.innerHTML = '<option value="">Team Default</option>';
+    for (const area of areas) {
+      const opt = document.createElement('option');
+      opt.value = area;
+      // Show indented name: strip project prefix for readability
+      const parts = area.split('\\');
+      const indent = parts.length > 1 ? '\u00A0\u00A0'.repeat(parts.length - 1) : '';
+      opt.textContent = indent + parts[parts.length - 1];
+      opt.title = area;
+      if (area === prev) opt.selected = true;
+      select.appendChild(opt);
+    }
+  } catch (_) {}
+}
+
+function onAreaChange() {
+  closedItemsLimit = 10;
+  loadWorkItems(true);
+  pushUiContext();
 }
 
 async function loadTeamMembers() {
