@@ -1,0 +1,4 @@
+{
+  "secretPatterns": "PASSWORD,SECRET,TOKEN,KEY,API_KEY,PRIVATE,CREDENTIAL",
+  "scanExtensions": ".js,.ts,.jsx,.tsx,.cs,.py"
+}
