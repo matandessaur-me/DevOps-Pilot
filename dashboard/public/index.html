@@ -1762,6 +1762,8 @@
         <button class="btn" onclick="openGitModal('compare')"><i data-lucide="git-compare"></i> Compare Branches</button>
       </div>
 
+      <div id="sidebarPluginSections"></div>
+
       <div class="divider"></div>
       <div class="section-title">Repos</div>
       <div id="repoList"></div>
@@ -8321,6 +8323,28 @@ function injectAiAction(plugin, action) {
   container.appendChild(btn);
 }
 
+// Inject a custom sidebar section with its own title and buttons
+function injectSidebarSection(plugin, section) {
+  var container = document.getElementById('sidebarPluginSections');
+  if (!container) return;
+
+  var wrapper = document.createElement('div');
+  wrapper.innerHTML = '<div class="divider"></div><div class="section-title">' + (section.title || plugin.name) + '</div>';
+
+  var items = section.items || [];
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var btn = document.createElement('button');
+    btn.className = 'btn';
+    btn.innerHTML = '<i data-lucide="' + (item.icon || 'puzzle') + '"></i> ' + item.label;
+    (function (it) {
+      btn.onclick = function () { executePluginAction(plugin, it.action); };
+    })(item);
+    wrapper.appendChild(btn);
+  }
+  container.appendChild(wrapper);
+}
+
 // Inject a center tab with iframe panel
 function injectCenterTab(plugin, tab) {
   var tabBar = document.querySelector('.tab-bar');
@@ -8389,6 +8413,7 @@ var _loadedPlugins = [];
     var c = p.contributions || {};
     if (c.sidebarActions) c.sidebarActions.forEach(function (a) { injectSidebarAction(p, a); });
     if (c.aiActions) c.aiActions.forEach(function (a) { injectAiAction(p, a); });
+    if (c.sidebarSections) c.sidebarSections.forEach(function (s) { injectSidebarSection(p, s); });
     if (c.centerTabs) c.centerTabs.forEach(function (t) { injectCenterTab(p, t); });
     if (c.intelPanels) c.intelPanels.forEach(function (ip) { injectIntelPanel(p, ip); });
     if (c.contextMenuItems) c.contextMenuItems.forEach(function (m) { registerContextMenuItem(p, m); });
