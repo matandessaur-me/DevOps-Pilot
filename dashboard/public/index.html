@@ -7959,7 +7959,58 @@ function getCmdActions() {
       category: 'Work Item',
     });
   }
+  // Plugin-contributed navigation (tabs)
+  if (_loadedPlugins && _loadedPlugins.length) {
+    for (const p of _loadedPlugins) {
+      const tabs = (p.contributions || {}).centerTabs || [];
+      for (const t of tabs) {
+        actions.push({
+          label: 'Go to ' + (t.label || p.name),
+          icon: t.icon || p.icon || 'puzzle',
+          action: () => switchTab('plugin-' + p.id + '-' + t.id),
+          category: 'Plugin',
+        });
+      }
+    }
+  }
+  // Plugin-contributed cached items (loaded async)
+  if (_pluginCmdItems && _pluginCmdItems.length) {
+    for (const item of _pluginCmdItems) actions.push(item);
+  }
   return actions;
+}
+
+// Async-load plugin items for command palette (called after plugins init)
+var _pluginCmdItems = [];
+async function loadPluginCmdItems() {
+  _pluginCmdItems = [];
+  if (!_loadedPlugins) return;
+  for (const p of _loadedPlugins) {
+    if (p.id === 'wrike') {
+      try {
+        const cfg = await (await fetch('/api/plugins/wrike/config')).json();
+        if (!cfg.configured) continue;
+        const tasks = await (await fetch('/api/plugins/wrike/tasks?limit=15')).json();
+        if (Array.isArray(tasks)) {
+          for (const t of tasks) {
+            _pluginCmdItems.push({
+              label: t.title,
+              icon: 'check-square',
+              action: () => {
+                switchTab('plugin-wrike-board');
+                // Send postMessage to the wrike iframe to view this task
+                var iframes = document.querySelectorAll('iframe[data-plugin-id="wrike"]');
+                iframes.forEach(function(f) {
+                  f.contentWindow.postMessage({ __devopsPilot: true, type: 'viewTask', taskId: t.id }, location.origin);
+                });
+              },
+              category: 'Wrike Task',
+            });
+          }
+        }
+      } catch (_) {}
+    }
+  }
 }
 
 function openCmdPalette() {
@@ -8427,6 +8478,9 @@ var _loadedPlugins = [];
   }
 
   lucide.createIcons();
+
+  // Load plugin items for command palette (async, non-blocking)
+  loadPluginCmdItems();
 })();
 
 // Render plugin settings fields in the Settings > Plugins tab
