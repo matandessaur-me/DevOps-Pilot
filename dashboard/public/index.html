@@ -8630,7 +8630,14 @@ function renderPluginSettings(plugins) {
       nav += '<div class="modal-field">';
       nav += '<label>' + (s.label || s.key) + '</label>';
       if (s.description) nav += '<div style="font-size:11px;color:var(--subtext0);margin-bottom:4px;">' + s.description + '</div>';
-      nav += '<input id="' + fieldId + '" type="' + inputType + '" placeholder="' + (s.placeholder || '') + '" data-plugin="' + p.id + '" data-key="' + s.key + '" class="plugin-setting-input">';
+      if (s.secret) {
+        nav += '<div style="display:flex;gap:0;">';
+        nav += '<input id="' + fieldId + '" type="password" placeholder="' + (s.placeholder || '') + '" data-plugin="' + p.id + '" data-key="' + s.key + '" class="plugin-setting-input" style="border-radius:var(--radius) 0 0 var(--radius);flex:1;">';
+        nav += '<button type="button" onclick="toggleSecretField(\'' + fieldId + '\',this)" style="background:var(--surface0);border:1px solid var(--surface1);border-left:none;border-radius:0 var(--radius) var(--radius) 0;padding:0 10px;cursor:pointer;color:var(--subtext0);display:flex;align-items:center;" title="Show/hide"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button>';
+        nav += '</div>';
+      } else {
+        nav += '<input id="' + fieldId + '" type="text" placeholder="' + (s.placeholder || '') + '" data-plugin="' + p.id + '" data-key="' + s.key + '" class="plugin-setting-input">';
+      }
       nav += '</div>';
     }
     nav += '</div>';
@@ -8645,8 +8652,8 @@ function renderPluginSettings(plugins) {
       (p.settings || []).forEach(function (s) {
         var el = document.getElementById('pluginSetting_' + p.id + '_' + s.key);
         if (!el) return;
-        if (s.secret && cfg[s.key + 'Set']) el.placeholder = '(configured)';
-        else if (cfg[s.key] !== undefined && !s.secret) el.value = cfg[s.key];
+        if (cfg[s.key] !== undefined) el.value = cfg[s.key];
+        else if (s.secret && cfg[s.key + 'Set']) el.placeholder = '(configured)';
       });
     }).catch(function () {});
   });
@@ -8658,6 +8665,12 @@ function switchPluginSettingsTab(pluginId, btn) {
   btn.classList.add('active');
   var panel = document.getElementById('ps_' + pluginId);
   if (panel) panel.style.display = '';
+}
+
+function toggleSecretField(fieldId, btn) {
+  var el = document.getElementById(fieldId);
+  if (el.type === 'password') { el.type = 'text'; btn.style.color = 'var(--accent)'; }
+  else { el.type = 'password'; btn.style.color = 'var(--subtext0)'; }
 }
 
 function installPluginPrompt() {
