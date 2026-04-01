@@ -198,6 +198,51 @@ function loadPlugins(pluginsDir, { addRoute, getConfig, broadcast, json }) {
     } catch (e) { json(res, { error: e.message }, 500); }
   });
 
+  // GET /api/plugins/registry -- fetch available plugins from the online registry
+  const REGISTRY_URL = 'https://raw.githubusercontent.com/matandessaur-me/devops-pilot-plugins/main/registry.json';
+  addRoute('GET', '/api/plugins/registry', async (req, res) => {
+    try {
+      const https = require('https');
+      const data = await new Promise((resolve, reject) => {
+        https.get(REGISTRY_URL, (resp) => {
+          let d = '';
+          resp.on('data', c => { d += c; });
+          resp.on('end', () => { try { resolve(JSON.parse(d)); } catch (e) { reject(e); } });
+        }).on('error', reject);
+      });
+      // Mark which plugins are already installed
+      const installed = plugins.map(p => p.id);
+      (data.plugins || []).forEach(p => { p.installed = installed.includes(p.id); });
+      json(res, data);
+    } catch (e) { json(res, { error: e.message }, 500); }
+  });
+
+  // POST /api/plugins/install-from-registry -- clone a plugin repo into dashboard/plugins/
+  addRoute('POST', '/api/plugins/install-from-registry', async (req, res) => {
+    try {
+      const body = await new Promise((resolve, reject) => {
+        let d = '';
+        req.on('data', c => { d += c; });
+        req.on('end', () => { try { resolve(JSON.parse(d)); } catch (e) { reject(e); } });
+        req.on('error', reject);
+      });
+      const { id, repo } = body;
+      if (!id || !repo) { json(res, { error: 'id and repo required' }, 400); return; }
+      const destDir = path.join(pluginsDir, id);
+      if (fs.existsSync(destDir)) { json(res, { error: 'Plugin "' + id + '" already installed' }, 409); return; }
+      // Clone the repo
+      const { execSync } = require('child_process');
+      execSync('git clone "' + repo + '.git" "' + destDir + '"', { encoding: 'utf8', timeout: 60000, stdio: ['pipe', 'pipe', 'pipe'] });
+      // Verify plugin.json exists
+      if (!fs.existsSync(path.join(destDir, 'plugin.json'))) {
+        fs.rmSync(destDir, { recursive: true, force: true });
+        json(res, { error: 'Cloned repo has no plugin.json' }, 400);
+        return;
+      }
+      json(res, { ok: true, id: id, message: 'Installed. Restart app to activate.' });
+    } catch (e) { json(res, { error: e.message }, 500); }
+  });
+
   return plugins;
 }
 

@@ -25,7 +25,7 @@ node_modules\rcedit\bin\rcedit-x64.exe node_modules\electron\dist\electron.exe -
 
 echo.
 echo Creating desktop shortcut...
-powershell -NoProfile -ExecutionPolicy Bypass -File dashboard\create-shortcut.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Create-Shortcut.ps1
 
 echo.
 echo ========================================

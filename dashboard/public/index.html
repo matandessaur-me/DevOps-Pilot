@@ -2318,10 +2318,9 @@
 
         <!-- Plugins Tab -->
         <div class="settings-tab" id="settingsTab-plugins">
-          <div style="display:flex;align-items:center;margin-bottom:12px;">
-            <div style="font-size:12px;color:var(--subtext0);">Drop plugin folders into <code style="background:var(--surface0);padding:1px 6px;border-radius:3px;font-size:11px;">dashboard/plugins/</code> and restart</div>
+          <div style="display:flex;align-items:center;margin-bottom:14px;">
             <div style="flex:1;"></div>
-            <button class="modal-btn" onclick="installPluginPrompt()" style="font-size:11px;padding:5px 12px;">Install Plugin</button>
+            <button onclick="browsePlugins()" style="font-size:11px;padding:6px 14px;background:var(--surface1);border:1px solid var(--overlay0);color:var(--text);border-radius:var(--radius);cursor:pointer;">Browse Plugins</button>
           </div>
           <div id="pluginSettingsContainer"><div style="color:var(--subtext0);padding:12px;">No plugins installed.</div></div>
         </div>
@@ -2350,6 +2349,31 @@
     <div class="modal-actions">
       <button class="modal-btn" onclick="closeSettings()">Cancel</button>
       <button class="modal-btn modal-btn-primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Plugin Registry Modal ══════════════════════════════════════════════ -->
+<div class="modal-overlay" id="registryModal" style="z-index:201;">
+  <div class="modal" style="width:820px;max-width:90vw;height:60vh;display:flex;flex-direction:column;">
+    <div class="modal-title" style="display:flex;align-items:center;gap:10px;">
+      <span>Plugin Registry</span>
+      <div style="flex:1;"></div>
+      <button onclick="closeRegistryModal()" style="background:none;border:none;color:var(--subtext0);cursor:pointer;padding:4px;display:flex;" title="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <div style="padding:10px 16px;border-bottom:1px solid var(--surface0);display:flex;gap:8px;align-items:center;">
+      <input type="text" id="registrySearch" placeholder="Search plugins..." oninput="filterRegistry()" style="flex:1;padding:6px 10px;background:var(--surface0);border:1px solid var(--surface1);border-radius:var(--radius);color:var(--text);font:12px var(--font-ui);outline:none;">
+      <select id="registryFilter" onchange="filterRegistry()" style="padding:5px 8px;background:var(--surface0);border:1px solid var(--surface1);border-radius:var(--radius);color:var(--text);font:11px var(--font-ui);outline:none;">
+        <option value="">All</option>
+        <option value="installed">Installed</option>
+        <option value="available">Not Installed</option>
+      </select>
+    </div>
+    <div id="registryList" style="flex:1;overflow-y:auto;padding:12px 16px;"></div>
+    <div style="padding:10px 16px;border-top:1px solid var(--surface0);display:flex;align-items:center;gap:8px;">
+      <button class="btn" onclick="installPluginPrompt()" style="font-size:11px;padding:5px 12px;">Install from Local Path</button>
+      <div style="flex:1;"></div>
+      <span id="registryCount" style="font-size:10px;color:var(--subtext0);"></span>
     </div>
   </div>
 </div>
@@ -8673,16 +8697,106 @@ function toggleSecretField(fieldId, btn) {
   else { el.type = 'password'; btn.style.color = 'var(--subtext0)'; }
 }
 
-function installPluginPrompt() {
-  var folderPath = prompt('Enter the full path to the plugin folder:');
-  if (!folderPath) return;
-  fetch('/api/plugins/install', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: folderPath.trim() })
-  }).then(function(r) { return r.json(); }).then(function(data) {
+var _registryPlugins = [];
+
+async function browsePlugins() {
+  document.getElementById('registryModal').classList.add('open');
+  document.getElementById('registrySearch').value = '';
+  document.getElementById('registryFilter').value = '';
+  document.getElementById('registryList').innerHTML = '<div style="text-align:center;padding:40px;color:var(--subtext0);font-size:12px;">Loading registry...</div>';
+
+  try {
+    var res = await fetch('/api/plugins/registry');
+    var data = await res.json();
+    if (data.error) { document.getElementById('registryList').innerHTML = '<div style="padding:20px;color:var(--red);font-size:12px;">Error: ' + data.error + '</div>'; return; }
+    _registryPlugins = data.plugins || [];
+    filterRegistry();
+  } catch (e) {
+    document.getElementById('registryList').innerHTML = '<div style="padding:20px;color:var(--red);font-size:12px;">Failed to load: ' + e.message + '</div>';
+  }
+}
+
+function closeRegistryModal() { document.getElementById('registryModal').classList.remove('open'); }
+
+function filterRegistry() {
+  var q = (document.getElementById('registrySearch').value || '').toLowerCase();
+  var filter = document.getElementById('registryFilter').value;
+  var visible = _registryPlugins.filter(function(p) {
+    if (q && p.name.toLowerCase().indexOf(q) === -1 && p.description.toLowerCase().indexOf(q) === -1 && !(p.tags || []).some(function(t) { return t.toLowerCase().indexOf(q) !== -1; })) return false;
+    if (filter === 'installed' && !p.installed) return false;
+    if (filter === 'available' && p.installed) return false;
+    return true;
+  });
+  document.getElementById('registryCount').textContent = visible.length + ' of ' + _registryPlugins.length + ' plugins';
+  renderRegistryList(visible);
+}
+
+function renderRegistryList(plugins) {
+  if (!plugins.length) {
+    document.getElementById('registryList').innerHTML = '<div style="text-align:center;padding:40px;color:var(--subtext0);font-size:13px;">No plugins match your search</div>';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < plugins.length; i++) {
+    var p = plugins[i];
+    var borderColor = p.tint ? 'rgba(' + p.tint + ',0.4)' : 'var(--surface1)';
+    html += '<div style="background:var(--surface0);border:1px solid ' + borderColor + ';border-radius:var(--radius-lg);padding:14px 16px;margin-bottom:8px;">';
+    html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">';
+    html += '<span style="font-size:15px;font-weight:600;">' + esc(p.name) + '</span>';
+    html += '<span style="font-size:10px;color:var(--subtext0);background:var(--surface1);padding:1px 6px;border-radius:3px;">v' + esc(p.version) + '</span>';
+    html += '<div style="flex:1;"></div>';
+    if (p.installed) {
+      html += '<span style="font-size:11px;color:var(--green);font-weight:600;display:flex;align-items:center;gap:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Installed</span>';
+    } else {
+      html += '<button class="btn" onclick="installFromRegistry(\'' + esc(p.id) + '\',\'' + esc(p.repo) + '\',\'' + esc(p.name) + '\')" style="font-size:11px;padding:4px 14px;">Install</button>';
+    }
+    html += '</div>';
+    html += '<div style="font-size:12px;color:var(--subtext1);line-height:1.5;margin-bottom:8px;">' + esc(p.description) + '</div>';
+    html += '<div style="display:flex;align-items:center;gap:8px;">';
+    html += '<span style="font-size:10px;color:var(--overlay1);">by ' + esc(p.author) + '</span>';
+    if (p.tags && p.tags.length) {
+      p.tags.forEach(function(t) { html += '<span style="font-size:9px;padding:1px 6px;border-radius:99px;background:var(--surface1);color:var(--subtext0);">' + esc(t) + '</span>'; });
+    }
+    html += '</div>';
+    html += '</div>';
+  }
+  document.getElementById('registryList').innerHTML = html;
+}
+
+async function installFromRegistry(id, repo, name) {
+  if (!confirm('Install "' + name + '" plugin?')) return;
+  try {
+    var res = await fetch('/api/plugins/install-from-registry', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id, repo: repo })
+    });
+    var data = await res.json();
+    if (data.ok) {
+      toast('Plugin "' + name + '" installed. Restart to activate.', 'success');
+      // Refresh registry to show "Installed"
+      var r = await fetch('/api/plugins/registry');
+      var d = await r.json();
+      _registryPlugins = d.plugins || [];
+      filterRegistry();
+    } else {
+      toast(data.error || 'Install failed', 'error');
+    }
+  } catch (e) { toast('Install failed: ' + e.message, 'error'); }
+}
+
+async function installPluginPrompt() {
+  try {
+    var browse = await fetch('/api/browse-folder', { method: 'POST' });
+    var result = await browse.json();
+    if (result.canceled || !result.path) return;
+    var res = await fetch('/api/plugins/install', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: result.path })
+    });
+    var data = await res.json();
     if (data.ok) { toast('Plugin "' + data.name + '" installed. Restart to activate.', 'success'); }
     else { toast(data.error || 'Install failed', 'error'); }
-  }).catch(function() { toast('Install failed', 'error'); });
+  } catch (e) { toast('Install failed', 'error'); }
 }
 
 // Save plugin settings (called from saveSettings)
