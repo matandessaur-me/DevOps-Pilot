@@ -22,7 +22,7 @@ function checkActivation(manifest, getConfig) {
   return true;
 }
 
-function loadPlugins(pluginsDir, { addRoute, getConfig, broadcast, json }) {
+function loadPlugins(pluginsDir, { addRoute, getConfig, broadcast, json, writePluginHints }) {
   const plugins = [];
   if (!fs.existsSync(pluginsDir)) {
     fs.mkdirSync(pluginsDir, { recursive: true });
@@ -174,6 +174,7 @@ function loadPlugins(pluginsDir, { addRoute, getConfig, broadcast, json }) {
 
       // Copy the folder recursively
       copyDirSync(sourcePath, destDir);
+      if (writePluginHints) writePluginHints();
       json(res, { ok: true, id: manifest.id, name: manifest.name, message: 'Installed. Restart app to activate.' });
     } catch (e) { json(res, { error: e.message }, 500); }
   });
@@ -194,25 +195,47 @@ function loadPlugins(pluginsDir, { addRoute, getConfig, broadcast, json }) {
       if (!fs.existsSync(pluginDir)) { json(res, { error: 'Plugin not found' }, 404); return; }
 
       fs.rmSync(pluginDir, { recursive: true, force: true });
+      if (writePluginHints) writePluginHints();
       json(res, { ok: true, message: 'Uninstalled. Restart app to apply.' });
     } catch (e) { json(res, { error: e.message }, 500); }
   });
 
   // GET /api/plugins/registry -- fetch available plugins from the online registry
-  const REGISTRY_URL = 'https://raw.githubusercontent.com/matandessaur-me/devops-pilot-plugins/main/registry.json';
+  const REGISTRY_API_URL = 'https://api.github.com/repos/matandessaur-me/devops-pilot-plugins/contents/registry.json';
   addRoute('GET', '/api/plugins/registry', async (req, res) => {
     try {
       const https = require('https');
-      const data = await new Promise((resolve, reject) => {
-        https.get(REGISTRY_URL, (resp) => {
+      const raw = await new Promise((resolve, reject) => {
+        https.get(REGISTRY_API_URL, { headers: { 'User-Agent': 'DevOps-Pilot', 'Accept': 'application/vnd.github.v3+json' } }, (resp) => {
           let d = '';
           resp.on('data', c => { d += c; });
           resp.on('end', () => { try { resolve(JSON.parse(d)); } catch (e) { reject(e); } });
         }).on('error', reject);
       });
-      // Mark which plugins are already installed
-      const installed = plugins.map(p => p.id);
-      (data.plugins || []).forEach(p => { p.installed = installed.includes(p.id); });
+      if (!raw.content) throw new Error(raw.message || 'Failed to fetch registry');
+      const data = JSON.parse(Buffer.from(raw.content, 'base64').toString());
+      // Read installed versions fresh from disk (not the in-memory array)
+      const installedMap = {};
+      try {
+        const dirs = fs.readdirSync(pluginsDir);
+        for (const dir of dirs) {
+          if (dir === 'sdk') continue;
+          const mf = path.join(pluginsDir, dir, 'plugin.json');
+          if (fs.existsSync(mf)) {
+            try {
+              const m = JSON.parse(fs.readFileSync(mf, 'utf8'));
+              if (m.id) installedMap[m.id] = m.version || '0.0.0';
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+      (data.plugins || []).forEach(p => {
+        p.installed = !!installedMap[p.id];
+        if (p.installed) {
+          p.installedVersion = installedMap[p.id];
+          p.updateAvailable = p.version !== installedMap[p.id];
+        }
+      });
       json(res, data);
     } catch (e) { json(res, { error: e.message }, 500); }
   });
@@ -239,7 +262,45 @@ function loadPlugins(pluginsDir, { addRoute, getConfig, broadcast, json }) {
         json(res, { error: 'Cloned repo has no plugin.json' }, 400);
         return;
       }
+      if (writePluginHints) writePluginHints();
       json(res, { ok: true, id: id, message: 'Installed. Restart app to activate.' });
+    } catch (e) { json(res, { error: e.message }, 500); }
+  });
+
+  // POST /api/plugins/update -- re-clone a plugin while preserving its config.json
+  addRoute('POST', '/api/plugins/update', async (req, res) => {
+    try {
+      const body = await new Promise((resolve, reject) => {
+        let d = '';
+        req.on('data', c => { d += c; });
+        req.on('end', () => { try { resolve(JSON.parse(d)); } catch (e) { reject(e); } });
+        req.on('error', reject);
+      });
+      const { id, repo } = body;
+      if (!id || !repo) { json(res, { error: 'id and repo required' }, 400); return; }
+      const destDir = path.join(pluginsDir, id);
+      if (!fs.existsSync(destDir)) { json(res, { error: 'Plugin "' + id + '" is not installed' }, 404); return; }
+      // Backup config.json if it exists
+      const configFile = path.join(destDir, 'config.json');
+      let configBackup = null;
+      if (fs.existsSync(configFile)) {
+        try { configBackup = fs.readFileSync(configFile, 'utf8'); } catch (_) {}
+      }
+      // Remove old version and re-clone
+      fs.rmSync(destDir, { recursive: true, force: true });
+      const { execSync } = require('child_process');
+      execSync('git clone "' + repo + '.git" "' + destDir + '"', { encoding: 'utf8', timeout: 60000, stdio: ['pipe', 'pipe', 'pipe'] });
+      if (!fs.existsSync(path.join(destDir, 'plugin.json'))) {
+        fs.rmSync(destDir, { recursive: true, force: true });
+        json(res, { error: 'Cloned repo has no plugin.json' }, 400);
+        return;
+      }
+      // Restore config.json
+      if (configBackup) {
+        try { fs.writeFileSync(configFile, configBackup, 'utf8'); } catch (_) {}
+      }
+      if (writePluginHints) writePluginHints();
+      json(res, { ok: true, id: id, message: 'Updated. Restart app to activate.' });
     } catch (e) { json(res, { error: e.message }, 500); }
   });
 

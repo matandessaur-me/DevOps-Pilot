@@ -1709,6 +1709,7 @@
   <div class="header-right">
     <div class="status-dot" id="statusDot"></div>
     <span id="connectionStatus">Connecting...</span>
+    <button onclick="restartApp()" title="Restart App" style="background:none;border:none;color:var(--subtext0);cursor:pointer;padding:4px;display:flex;align-items:center;transition:color 0.15s;margin-left:4px;" onmouseenter="this.style.color='var(--text)'" onmouseleave="this.style.color='var(--subtext0)'"><i data-lucide="rotate-cw" style="width:14px;height:14px;"></i></button>
   </div>
 </header>
 
@@ -1799,7 +1800,7 @@
       <div class="tab-bar-right">
         <span class="tab-bar-status" id="termStatus"></span>
         <button class="tab-bar-btn" onclick="toggleAi()" id="aiBtn">Launch AI</button>
-        <button class="tab-bar-btn" onclick="restartShell()">Restart</button>
+        <button class="tab-bar-btn" onclick="restartShell()">Restart Shell</button>
       </div>
     </div>
 
@@ -2232,7 +2233,7 @@
         <button class="settings-nav-btn" data-settings-tab="other" onclick="switchSettingsTab('other', this)">
           <i data-lucide="sliders-horizontal" style="width:14px;height:14px;"></i> Other
         </button>
-        <button class="settings-nav-btn" data-settings-tab="plugins" onclick="switchSettingsTab('plugins', this)" id="settingsPluginsBtn" style="display:none;">
+        <button class="settings-nav-btn" data-settings-tab="plugins" onclick="switchSettingsTab('plugins', this)" id="settingsPluginsBtn">
           <i data-lucide="puzzle" style="width:14px;height:14px;"></i> Plugins
         </button>
         <div style="flex:1;"></div>
@@ -2367,11 +2368,13 @@
         <option value="">All</option>
         <option value="installed">Installed</option>
         <option value="available">Not Installed</option>
+        <option value="updates">Updates Available</option>
       </select>
+      <button onclick="browsePlugins()" title="Refresh" style="background:none;border:none;color:var(--subtext0);cursor:pointer;padding:4px;display:flex;align-items:center;transition:color 0.15s;" onmouseenter="this.style.color='var(--text)'" onmouseleave="this.style.color='var(--subtext0)'"><i data-lucide="refresh-cw" style="width:14px;height:14px;"></i></button>
     </div>
     <div id="registryList" style="flex:1;overflow-y:auto;padding:12px 16px;"></div>
     <div style="padding:10px 16px;border-top:1px solid var(--surface0);display:flex;align-items:center;gap:8px;">
-      <button class="btn" onclick="installPluginPrompt()" style="font-size:11px;padding:5px 12px;">Install from Local Path</button>
+      <button onclick="installPluginPrompt()" style="font-size:11px;padding:5px 12px;background:var(--surface1);color:var(--text);border:1px solid var(--overlay0);border-radius:var(--radius);cursor:pointer;font-family:var(--font-ui);">Install from Local Path</button>
       <div style="flex:1;"></div>
       <span id="registryCount" style="font-size:10px;color:var(--subtext0);"></span>
     </div>
@@ -5218,6 +5221,12 @@ function sendCommand(cmd, termId) {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', termId: tid, data: cmd + '\r' }));
 }
 
+async function restartApp() {
+  try {
+    await fetch('/api/restart-app', { method: 'POST' });
+  } catch (_) { /* connection drops as app restarts */ }
+}
+
 function restartShell() {
   aiLaunched = false;
   document.getElementById('termStatus').textContent = 'Restarting...';
@@ -5361,6 +5370,22 @@ function handleUiAction(msg) {
   if (msg.action === 'switch-backlog-view' && msg.view) {
     switchTab('backlog');
     setTimeout(() => switchBacklogView(msg.view), 100);
+  }
+  // Open a plugin tab and optionally send a message to its iframe
+  if (msg.action === 'view-plugin' && msg.plugin) {
+    var tabPrefix = 'plugin-' + msg.plugin + '-';
+    // Find the first tab for this plugin
+    var pluginPanel = document.querySelector('.tab-panel[id^="panel-' + tabPrefix + '"]');
+    if (pluginPanel) {
+      switchTab(pluginPanel.id.replace('panel-', ''));
+      // Forward any extra data to the plugin iframe via postMessage
+      if (msg.message) {
+        setTimeout(function() {
+          var iframes = document.querySelectorAll('iframe[data-plugin-id="' + msg.plugin + '"]');
+          iframes.forEach(function(f) { f.contentWindow.postMessage(Object.assign({ __devopsPilot: true }, msg.message), location.origin); });
+        }, 300);
+      }
+    }
   }
 }
 
@@ -8594,23 +8619,22 @@ var _loadedPlugins = [];
     plugins = await res.json();
   } catch (_) { return; }
   _loadedPlugins = plugins;
-  if (!plugins.length) return;
 
-  for (var i = 0; i < plugins.length; i++) {
-    var p = plugins[i];
-    var c = p.contributions || {};
-    if (c.sidebarActions) c.sidebarActions.forEach(function (a) { injectSidebarAction(p, a); });
-    if (c.aiActions) c.aiActions.forEach(function (a) { injectAiAction(p, a); });
-    if (c.sidebarSections) c.sidebarSections.forEach(function (s) { injectSidebarSection(p, s); });
-    if (c.centerTabs) c.centerTabs.forEach(function (t) { injectCenterTab(p, t); });
-    if (c.intelPanels) c.intelPanels.forEach(function (ip) { injectIntelPanel(p, ip); });
-    if (c.contextMenuItems) c.contextMenuItems.forEach(function (m) { registerContextMenuItem(p, m); });
-  }
+  // Always show Plugins tab in settings so users can browse/install plugins
+  document.getElementById('settingsPluginsBtn').style.display = '';
 
-  // Show Plugins tab in settings if any plugins have settings
-  var hasSettings = plugins.some(function (p) { return p.settings && p.settings.length; });
-  if (hasSettings || plugins.length) {
-    document.getElementById('settingsPluginsBtn').style.display = '';
+  if (plugins.length) {
+    for (var i = 0; i < plugins.length; i++) {
+      var p = plugins[i];
+      var c = p.contributions || {};
+      if (c.sidebarActions) c.sidebarActions.forEach(function (a) { injectSidebarAction(p, a); });
+      if (c.aiActions) c.aiActions.forEach(function (a) { injectAiAction(p, a); });
+      if (c.sidebarSections) c.sidebarSections.forEach(function (s) { injectSidebarSection(p, s); });
+      if (c.centerTabs) c.centerTabs.forEach(function (t) { injectCenterTab(p, t); });
+      if (c.intelPanels) c.intelPanels.forEach(function (ip) { injectIntelPanel(p, ip); });
+      if (c.contextMenuItems) c.contextMenuItems.forEach(function (m) { registerContextMenuItem(p, m); });
+    }
+
     renderPluginSettings(plugins);
   }
 
@@ -8725,6 +8749,7 @@ function filterRegistry() {
     if (q && p.name.toLowerCase().indexOf(q) === -1 && p.description.toLowerCase().indexOf(q) === -1 && !(p.tags || []).some(function(t) { return t.toLowerCase().indexOf(q) !== -1; })) return false;
     if (filter === 'installed' && !p.installed) return false;
     if (filter === 'available' && p.installed) return false;
+    if (filter === 'updates' && !p.updateAvailable) return false;
     return true;
   });
   document.getElementById('registryCount').textContent = visible.length + ' of ' + _registryPlugins.length + ' plugins';
@@ -8744,11 +8769,8 @@ function renderRegistryList(plugins) {
     html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">';
     html += '<span style="font-size:15px;font-weight:600;">' + esc(p.name) + '</span>';
     html += '<span style="font-size:10px;color:var(--subtext0);background:var(--surface1);padding:1px 6px;border-radius:3px;">v' + esc(p.version) + '</span>';
-    html += '<div style="flex:1;"></div>';
-    if (p.installed) {
-      html += '<span style="font-size:11px;color:var(--green);font-weight:600;display:flex;align-items:center;gap:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Installed</span>';
-    } else {
-      html += '<button class="btn" onclick="installFromRegistry(\'' + esc(p.id) + '\',\'' + esc(p.repo) + '\',\'' + esc(p.name) + '\')" style="font-size:11px;padding:4px 14px;">Install</button>';
+    if (p.updateAvailable) {
+      html += '<span style="font-size:10px;color:var(--yellow);background:rgba(249,206,108,0.1);padding:1px 6px;border-radius:3px;">v' + esc(p.installedVersion) + ' installed</span>';
     }
     html += '</div>';
     html += '<div style="font-size:12px;color:var(--subtext1);line-height:1.5;margin-bottom:8px;">' + esc(p.description) + '</div>';
@@ -8756,6 +8778,20 @@ function renderRegistryList(plugins) {
     html += '<span style="font-size:10px;color:var(--overlay1);">by ' + esc(p.author) + '</span>';
     if (p.tags && p.tags.length) {
       p.tags.forEach(function(t) { html += '<span style="font-size:9px;padding:1px 6px;border-radius:99px;background:var(--surface1);color:var(--subtext0);">' + esc(t) + '</span>'; });
+    }
+    html += '<div style="flex:1;"></div>';
+    if (p.installed && p.updateAvailable) {
+      var btnBg = p.tint ? 'rgba(' + p.tint + ',0.15)' : 'var(--surface1)';
+      var btnColor = p.tint ? 'rgb(' + p.tint + ')' : 'var(--text)';
+      var btnBorder = p.tint ? 'rgba(' + p.tint + ',0.3)' : 'var(--overlay0)';
+      html += '<button onclick="updatePlugin(\'' + esc(p.id) + '\',\'' + esc(p.repo) + '\',\'' + esc(p.name) + '\')" style="font-size:11px;padding:4px 14px;background:' + btnBg + ';color:' + btnColor + ';border:1px solid ' + btnBorder + ';border-radius:var(--radius);cursor:pointer;font-weight:600;font-family:var(--font-ui);">Update</button>';
+    } else if (p.installed) {
+      html += '<span style="font-size:11px;color:var(--green);font-weight:600;display:flex;align-items:center;gap:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Installed</span>';
+    } else {
+      var btnBg = p.tint ? 'rgba(' + p.tint + ',0.15)' : 'var(--surface1)';
+      var btnColor = p.tint ? 'rgb(' + p.tint + ')' : 'var(--text)';
+      var btnBorder = p.tint ? 'rgba(' + p.tint + ',0.3)' : 'var(--overlay0)';
+      html += '<button onclick="installFromRegistry(\'' + esc(p.id) + '\',\'' + esc(p.repo) + '\',\'' + esc(p.name) + '\')" style="font-size:11px;padding:4px 14px;background:' + btnBg + ';color:' + btnColor + ';border:1px solid ' + btnBorder + ';border-radius:var(--radius);cursor:pointer;font-weight:600;font-family:var(--font-ui);">Install</button>';
     }
     html += '</div>';
     html += '</div>';
@@ -8782,6 +8818,26 @@ async function installFromRegistry(id, repo, name) {
       toast(data.error || 'Install failed', 'error');
     }
   } catch (e) { toast('Install failed: ' + e.message, 'error'); }
+}
+
+async function updatePlugin(id, repo, name) {
+  if (!confirm('Update "' + name + '"? Your settings will be preserved.')) return;
+  try {
+    var res = await fetch('/api/plugins/update', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id, repo: repo })
+    });
+    var data = await res.json();
+    if (data.ok) {
+      toast('Plugin "' + name + '" updated. Restart to activate.', 'success');
+      var r = await fetch('/api/plugins/registry');
+      var d = await r.json();
+      _registryPlugins = d.plugins || [];
+      filterRegistry();
+    } else {
+      toast(data.error || 'Update failed', 'error');
+    }
+  } catch (e) { toast('Update failed: ' + e.message, 'error'); }
 }
 
 async function installPluginPrompt() {
