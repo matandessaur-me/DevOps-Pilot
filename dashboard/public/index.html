@@ -8413,15 +8413,13 @@ function executePluginAction(plugin, action) {
       });
       break;
     case 'script':
-      switchTab('terminal');
       var scriptPath = 'dashboard/plugins/' + plugin.id + '/' + action.path;
-      if (scriptPath.endsWith('.js')) {
-        sendCommand('node ' + scriptPath);
-      } else if (scriptPath.endsWith('.ps1')) {
-        sendCommand('powershell.exe -ExecutionPolicy Bypass -NoProfile -File "./' + scriptPath + '"');
-      } else {
-        sendCommand('./' + scriptPath);
-      }
+      var cmd = scriptPath.endsWith('.js') ? 'node ' + scriptPath
+        : scriptPath.endsWith('.ps1') ? 'powershell.exe -ExecutionPolicy Bypass -NoProfile -File "./' + scriptPath + '"'
+        : './' + scriptPath;
+      var aiPrompt = 'Run this command: ' + cmd;
+      if (action.analyze) aiPrompt += ' and then ' + action.analyze;
+      askAi(aiPrompt);
       break;
   }
 }
