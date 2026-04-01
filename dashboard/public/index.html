@@ -8458,7 +8458,8 @@ function injectSidebarSection(plugin, section) {
   if (!container) return;
 
   var wrapper = document.createElement('div');
-  wrapper.innerHTML = '<div class="divider"></div><div class="section-title">' + (section.title || plugin.name) + '</div>';
+  var titleStyle = plugin.tint ? ' style="color: rgba(' + plugin.tint + ', 0.8);"' : '';
+  wrapper.innerHTML = '<div class="divider"></div><div class="section-title"' + titleStyle + '>' + (section.title || plugin.name) + '</div>';
 
   var items = section.items || [];
   for (var i = 0; i < items.length; i++) {
@@ -8484,6 +8485,7 @@ function injectCenterTab(plugin, tab) {
   btn.className = 'tab-btn';
   btn.dataset.tab = tabId;
   btn.textContent = tab.label;
+  if (plugin.tint) btn.style.cssText = 'border-bottom: 2px solid rgba(' + plugin.tint + ', 0.4);';
   btn.onclick = function () { switchTab(tabId); };
   tabBar.insertBefore(btn, rightSection);
 
@@ -8507,6 +8509,7 @@ function injectIntelPanel(plugin, ip) {
   btn.className = 'intel-tab';
   btn.dataset.itab = panelId;
   btn.textContent = ip.label;
+  if (plugin.tint) btn.style.cssText = 'border-bottom: 2px solid rgba(' + plugin.tint + ', 0.4);';
   btn.onclick = function () { switchIntelTab(panelId); };
   tabBar.appendChild(btn);
 
@@ -8568,34 +8571,42 @@ function renderPluginSettings(plugins) {
   var container = document.getElementById('pluginSettingsContainer');
   if (!plugins.length) { container.innerHTML = '<div style="color:var(--subtext0);padding:12px;">No plugins installed.</div>'; return; }
 
-  // Build sub-nav + panels per plugin
-  var nav = '<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">';
-  var panels = '';
+  // Vertical nav column + settings panel (matching main settings pattern)
+  var nav = '<div style="display:flex;gap:0;height:100%;">';
+  nav += '<div style="min-width:140px;border-right:1px solid var(--surface0);padding:8px 0;display:flex;flex-direction:column;gap:2px;">';
   for (var i = 0; i < plugins.length; i++) {
     var p = plugins[i];
     var active = i === 0 ? ' active' : '';
-    nav += '<button class="settings-nav-btn plugin-settings-nav' + active + '" data-plugin-tab="ps_' + p.id + '" onclick="switchPluginSettingsTab(\'' + p.id + '\',this)" style="font-size:12px;padding:6px 14px;">' + (p.name || p.id) + '</button>';
-    panels += '<div class="plugin-settings-panel" id="ps_' + p.id + '" style="' + (i === 0 ? '' : 'display:none;') + '">';
-    panels += '<div class="settings-section">';
-    if (p.description) panels += '<div class="settings-section-desc" style="margin-bottom:12px;">' + p.description + '</div>';
+    var tintStyle = p.tint ? 'border-left:2px solid rgba(' + p.tint + ',0.5);' : '';
+    nav += '<button class="settings-nav-btn plugin-settings-nav' + active + '" data-plugin-tab="ps_' + p.id + '" onclick="switchPluginSettingsTab(\'' + p.id + '\',this)" style="text-align:left;padding:8px 14px;font-size:12px;border-radius:0;' + tintStyle + '">'
+      + '<i data-lucide="' + (p.icon || 'puzzle') + '" style="width:14px;height:14px;"></i> ' + (p.name || p.id) + '</button>';
+  }
+  nav += '</div><div style="flex:1;padding:16px;overflow-y:auto;">';
+
+  // Panels
+  for (var i = 0; i < plugins.length; i++) {
+    var p = plugins[i];
+    nav += '<div class="plugin-settings-panel" id="ps_' + p.id + '" style="' + (i === 0 ? '' : 'display:none;') + '">';
+    nav += '<div class="settings-section-title">' + (p.name || p.id) + '</div>';
+    if (p.description) nav += '<div class="settings-section-desc" style="margin-bottom:16px;">' + p.description + '</div>';
     var settings = p.settings || [];
     if (!settings.length) {
-      panels += '<div style="font-size:12px;color:var(--subtext0);padding:4px 0;">No configurable settings for this plugin.</div>';
+      nav += '<div style="font-size:12px;color:var(--subtext0);">No configurable settings.</div>';
     }
     for (var j = 0; j < settings.length; j++) {
       var s = settings[j];
       var fieldId = 'pluginSetting_' + p.id + '_' + s.key;
       var inputType = s.secret ? 'password' : 'text';
-      panels += '<div class="modal-field">';
-      panels += '<label>' + (s.label || s.key) + '</label>';
-      if (s.description) panels += '<div style="font-size:11px;color:var(--subtext0);margin-bottom:4px;">' + s.description + '</div>';
-      panels += '<input id="' + fieldId + '" type="' + inputType + '" placeholder="' + (s.placeholder || '') + '" data-plugin="' + p.id + '" data-key="' + s.key + '" class="plugin-setting-input">';
-      panels += '</div>';
+      nav += '<div class="modal-field">';
+      nav += '<label>' + (s.label || s.key) + '</label>';
+      if (s.description) nav += '<div style="font-size:11px;color:var(--subtext0);margin-bottom:4px;">' + s.description + '</div>';
+      nav += '<input id="' + fieldId + '" type="' + inputType + '" placeholder="' + (s.placeholder || '') + '" data-plugin="' + p.id + '" data-key="' + s.key + '" class="plugin-setting-input">';
+      nav += '</div>';
     }
-    panels += '</div></div>';
+    nav += '</div>';
   }
-  nav += '</div>';
-  container.innerHTML = nav + panels;
+  nav += '</div></div>';
+  container.innerHTML = nav;
 
   // Load current values
   plugins.forEach(function (p) {
