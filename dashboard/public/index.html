@@ -91,7 +91,7 @@
     .header {
       display: flex; align-items: center; justify-content: space-between;
       padding: 0 20px; padding-right: 140px;
-      background: var(--mantle); border-bottom: 1px solid var(--surface0); z-index: 10;
+      background: var(--mantle); border-bottom: 1px solid var(--surface0); z-index: 20;
     }
     .header-left { display: flex; align-items: center; gap: 8px; }
     .header-logo { width: 28px; height: 28px; border-radius: 6px; }
@@ -220,13 +220,15 @@
       display: grid;
       grid-template-rows: var(--term-bar-h) 1fr;
       overflow: hidden;
+      min-width: 0;
     }
 
     /* ── Tab bar ───────────────────────────────────────────────────────────── */
     .tab-bar {
       display: flex; align-items: center; gap: 0;
-      height: var(--term-bar-h); padding: 0 12px;
+      height: var(--term-bar-h); padding: 0 0 0 4px;
       background: var(--mantle); border-bottom: 1px solid var(--surface0); flex-shrink: 0;
+      min-width: 0; overflow: visible; position: relative; z-index: 10;
     }
     .tab-bar-scroll {
       display: flex; align-items: center; gap: 0; flex: 1; min-width: 0;
@@ -237,11 +239,11 @@
       display: inline-flex; align-items: center; gap: 0;
       padding: 0 14px; height: 100%; background: transparent; border: none;
       color: var(--subtext0); font: 12px var(--font-ui); cursor: pointer;
-      border-bottom: 2px solid transparent; transition: all 0.12s;
+      transition: all 0.12s;
       white-space: nowrap; flex-shrink: 0;
     }
     .tab-btn:hover { color: var(--text); }
-    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+    .tab-btn.active { color: var(--accent); font-weight: 600; }
     .tab-btn .tab-close {
       display: none; margin-left: 8px; padding: 0;
       font-size: 16px; line-height: 1; color: var(--overlay1);
@@ -249,25 +251,29 @@
     }
     .tab-btn .tab-close:hover { color: var(--red); }
     .tab-btn.closable:hover .tab-close { display: flex; align-items: center; }
-    .tab-bar-middle { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; }
+    .tab-bar-middle { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; overflow: hidden; }
     .tab-scroll-arrow {
       display: none; align-items: center; justify-content: center;
-      position: absolute; top: 0; bottom: 0; width: 28px; z-index: 3;
-      background: linear-gradient(to right, var(--mantle) 60%, transparent);
-      border: none; color: var(--subtext0); font-size: 12px; cursor: pointer;
-      transition: color 0.12s;
+      position: absolute; top: 0; bottom: 0; width: 24px; z-index: 3;
+      background: linear-gradient(to right, var(--mantle) 70%, transparent);
+      border: none; color: var(--overlay1); cursor: pointer;
+      transition: color 0.12s; padding: 0;
     }
-    .tab-scroll-arrow:hover { color: var(--accent); }
+    .tab-scroll-arrow svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .tab-scroll-arrow:hover { color: var(--text); }
     .tab-scroll-arrow.visible { display: flex; }
-    .tab-scroll-arrow.left { left: 0; padding-right: 6px; }
+    .tab-scroll-arrow.left { left: 0; }
     .tab-scroll-arrow.right {
-      right: 0; padding-left: 6px;
-      background: linear-gradient(to left, var(--mantle) 60%, transparent);
+      right: 0;
+      background: linear-gradient(to left, var(--mantle) 70%, transparent);
     }
     .tab-btn.closable .tab-dot {
       width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-right: 6px;
     }
-    .tab-open-wrap { position: relative; flex-shrink: 0; display: flex; align-items: center; margin: 0 8px; }
+    .tab-open-wrap {
+      position: relative; flex-shrink: 0; display: flex; align-items: center;
+      margin: 0 12px; border-left: 1px solid var(--surface0); padding-left: 12px;
+    }
     .tab-open-btn {
       padding: 4px 10px; background: transparent; border: 1px solid var(--surface1);
       border-radius: var(--radius); color: var(--subtext1); font: 11px var(--font-ui);
@@ -276,9 +282,9 @@
     }
     .tab-open-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--surface0); }
     .tab-open-menu {
-      display: none; position: absolute; top: 100%; right: 0; z-index: 200; min-width: 200px;
+      display: none; position: absolute; top: 100%; right: 0; z-index: 99999; min-width: 200px;
       background: var(--base); border: 1px solid var(--overlay0); border-radius: var(--radius);
-      box-shadow: 0 6px 20px rgba(0,0,0,0.35); padding: 4px 0; margin-top: 4px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5); padding: 4px 0; margin-top: 4px;
     }
     .tab-open-menu.open { display: block; }
     .tab-open-item {
@@ -328,7 +334,7 @@
       display: flex; align-items: center; gap: 4px;
       padding: 0 14px; height: 100%; background: transparent; border: none;
       color: var(--subtext0); font: 12px var(--font-ui); cursor: pointer;
-      border-bottom: 2px solid transparent; transition: all 0.12s;
+      transition: all 0.12s;
     }
     .term-tab:hover { color: var(--text); }
     .term-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
@@ -683,7 +689,7 @@
     .files-stab {
       flex: 1; padding: 7px 0; background: transparent; border: none;
       color: var(--subtext0); font: 11px var(--font-ui); cursor: pointer;
-      border-bottom: 2px solid transparent; transition: all 0.12s; text-align: center;
+      transition: all 0.12s; text-align: center;
     }
     .files-stab:hover { color: var(--text); }
     .files-stab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
@@ -857,7 +863,7 @@
     .tab-panel#panel-prs.active { display: flex; }
     .prs-container { display: flex; width: 100%; height: 100%; }
     .prs-sidebar {
-      width: 300px; flex-shrink: 0; background: var(--mantle);
+      width: 320px; flex-shrink: 0; background: var(--mantle);
       border-right: 1px solid var(--surface0); display: flex; flex-direction: column;
     }
     .prs-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -1157,7 +1163,7 @@
     .intel-tab {
       flex: 0 0 auto; padding: 10px 8px; background: transparent; border: none;
       color: var(--subtext0); font: 11px var(--font-ui); cursor: pointer;
-      border-bottom: 2px solid transparent; transition: all 0.12s; text-align: center;
+      transition: all 0.12s; text-align: center;
       white-space: nowrap; position: relative;
     }
     .intel-tab:hover { color: var(--text); }
@@ -1857,7 +1863,7 @@
   <div class="center">
     <div class="tab-bar">
       <div class="tab-bar-middle">
-        <button class="tab-scroll-arrow left" id="tabScrollLeft" onclick="scrollTabs(-200)">&#9664;</button>
+        <button class="tab-scroll-arrow left" id="tabScrollLeft" onclick="scrollTabs(-200)"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
         <div class="tab-bar-scroll" id="tabBarScroll">
           <button class="tab-btn active" data-tab="terminal" onclick="switchTab('terminal')">Terminal</button>
           <button class="tab-btn" data-tab="backlog" id="backlogTabBtn" onclick="switchTab('backlog')" style="display:none;">Backlog</button>
@@ -1868,7 +1874,7 @@
           <button class="tab-btn" data-tab="diffview" id="diffviewTabBtn" onclick="switchTab('diffview')" style="display:none;">Diff</button>
           <button class="tab-btn" data-tab="notes" onclick="switchTab('notes')">Notes</button>
         </div>
-        <button class="tab-scroll-arrow right" id="tabScrollRight" onclick="scrollTabs(200)">&#9654;</button>
+        <button class="tab-scroll-arrow right" id="tabScrollRight" onclick="scrollTabs(200)"><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
       </div>
       <div class="tab-open-wrap" id="tabOpenWrap">
         <button class="tab-bar-btn" onclick="toggleOpenTabMenu()" title="Open a plugin tab">+ Open Tab</button>
@@ -2093,14 +2099,14 @@
     <div class="tab-panel" id="panel-prs">
       <div class="prs-container">
         <div class="prs-sidebar">
-          <div style="padding:0 8px;height:38px;display:flex;align-items:center;border-bottom:1px solid var(--surface0);gap:6px;">
+          <div style="padding:0 8px 0 8px;height:38px;display:flex;align-items:center;border-bottom:1px solid var(--surface0);gap:6px;">
             <select class="view-filter" id="prsRepoSelect" onchange="loadPRs()" style="flex:1;font-weight:600;color:var(--text);"></select>
             <select class="view-filter" id="prsStateSelect" onchange="loadPRs()" style="width:80px;">
               <option value="open">Open</option>
               <option value="closed">Closed</option>
               <option value="all">All</option>
             </select>
-            <button class="tab-bar-btn" onclick="loadPRs()" title="Refresh" style="padding:4px 6px;display:flex;align-items:center;justify-content:center;"><i data-lucide="refresh-cw" style="width:13px;height:13px;"></i></button>
+            <button class="tab-bar-btn" onclick="loadPRs()" title="Refresh" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;"><i data-lucide="refresh-cw" style="width:13px;height:13px;"></i></button>
           </div>
           <div id="prsList" style="overflow-y:auto;flex:1;">
             <div class="empty-state" style="padding:20px;"><div class="empty-state-text">Select a repository</div></div>
@@ -8544,6 +8550,9 @@ window.addEventListener('message', function (event) {
       break;
     case 'viewWorkItem':
       viewWorkItem(msg.id);
+      break;
+    case 'openSettings':
+      openSettings(msg.tab || 'plugins');
       break;
   }
 });
