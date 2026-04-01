@@ -2260,7 +2260,7 @@
             </div>
             <div class="modal-field">
               <label>Personal Access Token</label>
-              <input id="settingsPAT" type="password" placeholder="Your PAT with work item read/write scope">
+              <div style="display:flex;gap:0;"><input id="settingsPAT" type="password" placeholder="Your PAT with work item read/write scope" style="border-radius:var(--radius) 0 0 var(--radius);flex:1;"><button type="button" onclick="toggleSecretField('settingsPAT',this)" style="background:var(--surface0);border:1px solid var(--surface1);border-left:none;border-radius:0 var(--radius) var(--radius) 0;padding:0 10px;cursor:pointer;color:var(--subtext0);display:flex;align-items:center;" title="Show/hide"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
             </div>
             <div class="modal-field">
               <label>Default Team</label>
@@ -2333,7 +2333,7 @@
             <div class="settings-section-desc">Connect to GitHub to view and review pull requests from the dashboard.</div>
             <div class="modal-field">
               <label>Personal Access Token</label>
-              <input id="settingsGitHubPAT" type="password" placeholder="ghp_...">
+              <div style="display:flex;gap:0;"><input id="settingsGitHubPAT" type="password" placeholder="ghp_..." style="border-radius:var(--radius) 0 0 var(--radius);flex:1;"><button type="button" onclick="toggleSecretField('settingsGitHubPAT',this)" style="background:var(--surface0);border:1px solid var(--surface1);border-left:none;border-radius:0 var(--radius) var(--radius) 0;padding:0 10px;cursor:pointer;color:var(--subtext0);display:flex;align-items:center;" title="Show/hide"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
             </div>
           </div>
           <div class="settings-section">
@@ -2341,7 +2341,7 @@
             <div class="settings-section-desc">Enable voice-to-text input. Hold Ctrl+Shift to talk, release to transcribe.</div>
             <div class="modal-field">
               <label>API Key</label>
-              <input id="settingsWispr" type="password" placeholder="fl-...">
+              <div style="display:flex;gap:0;"><input id="settingsWispr" type="password" placeholder="fl-..." style="border-radius:var(--radius) 0 0 var(--radius);flex:1;"><button type="button" onclick="toggleSecretField('settingsWispr',this)" style="background:var(--surface0);border:1px solid var(--surface1);border-left:none;border-radius:0 var(--radius) var(--radius) 0;padding:0 10px;cursor:pointer;color:var(--subtext0);display:flex;align-items:center;" title="Show/hide"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
             </div>
           </div>
         </div>
