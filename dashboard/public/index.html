@@ -8413,7 +8413,15 @@ function executePluginAction(plugin, action) {
       });
       break;
     case 'script':
-      askAi('Run this command: powershell.exe -ExecutionPolicy Bypass -NoProfile -File "./dashboard/plugins/' + plugin.id + '/' + action.path + '"');
+      switchTab('terminal');
+      var scriptPath = 'dashboard/plugins/' + plugin.id + '/' + action.path;
+      if (scriptPath.endsWith('.js')) {
+        sendCommand('node ' + scriptPath);
+      } else if (scriptPath.endsWith('.ps1')) {
+        sendCommand('powershell.exe -ExecutionPolicy Bypass -NoProfile -File "./' + scriptPath + '"');
+      } else {
+        sendCommand('./' + scriptPath);
+      }
       break;
   }
 }
