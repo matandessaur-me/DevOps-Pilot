@@ -44,6 +44,8 @@ You are running inside a PowerShell terminal with access to:
 4. **NEVER use Invoke-RestMethod inline** with `$_` or pipeline variables — bash eats `$_`. Always put complex queries in a `.ps1` file first.
 5. **All scripts run with** `-ExecutionPolicy Bypass -NoProfile` already set.
 6. **Clean up after yourself** — when done with temp files in `.ai-workspace\`, delete them.
+7. **NEVER pipe to `node -e` using stdin.** On Windows, Node.js cannot read `/dev/stdin` -- it resolves to `C:\dev\stdin` which doesn't exist. Write data to a temp file first (`.ai-workspace\`), then have node read the file.
+8. **NEVER use `/tmp/` paths.** `/tmp/` doesn't exist on Windows. Use `$env:TEMP\` or `.ai-workspace\` instead.
 
 ## CRITICAL: Speed Rules
 

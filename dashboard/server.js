@@ -2641,16 +2641,16 @@ function writePluginHints() {
   const END = '<!-- PLUGIN_INSTRUCTIONS_END -->';
   for (const { base, out } of templateFiles) {
     try {
-      if (!fs.existsSync(base)) continue;
+      if (!fs.existsSync(base)) { console.warn(`  [writePluginHints] template not found: ${base}`); continue; }
       let content = fs.readFileSync(base, 'utf8');
       const startIdx = content.indexOf(START);
       const endIdx = content.indexOf(END);
-      if (startIdx === -1 || endIdx === -1) continue;
+      if (startIdx === -1 || endIdx === -1) { console.warn(`  [writePluginHints] markers not found in ${base}`); continue; }
       const before = content.substring(0, startIdx + START.length);
       const after = content.substring(endIdx);
       content = before + '\n' + block + '\n' + after;
       atomicWriteSync(out, content);
-    } catch (_) {}
+    } catch (err) { console.error(`  [writePluginHints] failed to generate ${out}:`, err.message); }
   }
 }
 
