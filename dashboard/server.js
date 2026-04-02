@@ -2576,26 +2576,21 @@ function writePluginHints() {
     }
   } catch (_) {}
 
-  // Build the plugin instructions block
+  // Build a lightweight plugin keyword index (full instructions are fetched dynamically via /api/plugins/instructions)
   let block = '';
   if (pluginData.length) {
     block += '\n## Installed Plugins\n\n';
-    block += 'The following plugins are installed in DevOps Pilot. They provide dedicated API endpoints and workflows -- do NOT try to handle these tasks with generic code or by searching the repo.\n\n';
+    block += 'The following plugins are installed. **Do NOT embed full plugin instructions here** -- they are loaded dynamically.\n\n';
     block += '### IMPORTANT: Always Ask Before Using a Plugin\n\n';
     block += 'When the user\'s request matches any of the keywords below, **ASK the user if they want to use the plugin** before proceeding. For example: "Would you like to use the Builder.io plugin for this?"\n\n';
-    block += 'Do NOT silently use a plugin. Do NOT ignore plugins and search the repo instead. Ask first, then use the plugin instructions below.\n\n';
+    block += 'Do NOT silently use a plugin. Do NOT ignore plugins and search the repo instead. Ask first, then fetch the plugin\'s instructions via `curl -s http://127.0.0.1:3800/api/plugins/instructions` to learn its API routes and capabilities.\n\n';
     for (const p of pluginData) {
       if (p.keywords.length) {
         block += `- **${p.name}** (${p.description}): ${p.keywords.join(', ')}\n`;
       }
     }
-    for (const p of pluginData) {
-      if (p.instructions) {
-        block += '\n---\n\n';
-        block += `### Plugin: ${p.name}\n\n`;
-        block += p.instructions + '\n';
-      }
-    }
+    block += '\nTo get detailed plugin instructions (API routes, scripts, workflows), run:\n';
+    block += '```bash\ncurl -s http://127.0.0.1:3800/api/plugins/instructions\n```\n';
   }
 
   // Write to all AI instruction files using markers
