@@ -12,15 +12,49 @@ const HOST = '127.0.0.1';
 
 let win = null;
 
+function killZombiesAndRelaunch() {
+  const { execSync } = require('child_process');
+  try {
+    const myPid = process.pid;
+    const out = execSync('tasklist /FI "IMAGENAME eq electron.exe" /FO CSV /NH', { encoding: 'utf8' });
+    const pids = [];
+    for (const line of out.trim().split('\n')) {
+      const m = line.match(/"electron\.exe","(\d+)"/i);
+      if (m && Number(m[1]) !== myPid) pids.push(m[1]);
+    }
+    if (pids.length) {
+      execSync(`taskkill /F ${pids.map(p => '/PID ' + p).join(' ')}`, { encoding: 'utf8' });
+    }
+  } catch (_) { /* best effort */ }
+  setTimeout(() => { app.relaunch(); app.exit(0); }, 500);
+}
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
-  console.log('Another instance is running — focusing it.');
-  app.quit();
+  const http = require('http');
+  const req = http.get(`http://${HOST}:${PORT}/api/ui/context`, { timeout: 2000 }, (res) => {
+    // Server is alive -- the real instance is running, just focus it
+    console.log('Another instance is running -- focusing it.');
+    app.quit();
+  });
+  req.on('error', () => {
+    // Server not responding -- zombie processes, kill and relaunch
+    console.log('Stale instance detected -- killing zombies and relaunching...');
+    killZombiesAndRelaunch();
+  });
+  req.on('timeout', () => {
+    req.destroy();
+    console.log('Stale instance detected -- killing zombies and relaunching...');
+    killZombiesAndRelaunch();
+  });
 } else {
   app.on('second-instance', () => {
     if (win) {
       if (win.isMinimized()) win.restore();
+      win.show();
+      win.setAlwaysOnTop(true);
       win.focus();
+      win.setAlwaysOnTop(false);
     }
   });
 
