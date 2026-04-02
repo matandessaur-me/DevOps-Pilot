@@ -1120,6 +1120,28 @@
     }
     .pr-tl-commit-sha { font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
     .pr-tl-commit-msg { color: var(--subtext1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pr-tl-review-comments { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+    .pr-tl-review-comment {
+      background: var(--surface0); border-radius: var(--radius); border: 1px solid var(--surface1);
+      overflow: hidden;
+    }
+    .pr-tl-review-comment-file {
+      display: flex; align-items: center; gap: 4px;
+      padding: 6px 10px; font-size: 11px; font-family: var(--font-mono);
+      color: var(--accent); background: var(--mantle); border-bottom: 1px solid var(--surface1);
+    }
+    .pr-tl-review-comment-file svg { width: 12px; height: 12px; flex-shrink: 0; }
+    .pr-tl-review-comment-file-inline {
+      font-family: var(--font-mono); font-size: 11px; color: var(--accent);
+    }
+    .pr-tl-review-comment-hunk {
+      border-bottom: 1px solid var(--surface1);
+    }
+    .pr-tl-review-comment-hunk pre {
+      margin: 0; padding: 6px 10px; font-size: 11px; line-height: 1.5;
+      background: var(--mantle); color: var(--subtext0); overflow-x: auto;
+      border-radius: 0;
+    }
     /* PR Comment Modal */
     .pr-comment-modal {
       display: none; position: fixed; inset: 0; z-index: 300;
@@ -4741,9 +4763,19 @@ function renderPRTimeline(events) {
         } else {
           html += `<div class="pr-tl-event"><strong>${esc(e.author)}</strong> ${label} ${timeAgo(e.createdAt)} <span class="pr-tl-review-badge pr-tl-review-${cls}">${esc(e.state)}</span></div>`;
         }
+        // Render inline review comments attached to this review
+        if (e.comments && e.comments.length) {
+          html += '<div class="pr-tl-review-comments">';
+          for (const c of e.comments) {
+            html += renderReviewComment(c);
+          }
+          html += '</div>';
+        }
         html += '</div></div>';
         return html;
       }
+      case 'review_comment':
+        return renderReviewCommentItem(e);
       case 'committed': {
         const sha = (e.sha || '').substring(0, 7);
         return renderTimelineEvent(_li('git-commit'), `<strong>${esc(e.author)}</strong> committed <span class="pr-tl-commit-sha">${sha}</span> <span class="pr-tl-commit-msg">${esc((e.message || '').split('\n')[0])}</span>`);
@@ -4770,6 +4802,38 @@ function renderPRTimeline(events) {
         return '';
     }
   }).join('');
+}
+
+function renderReviewComment(c) {
+  const fileLine = c.line ? `${esc(c.path)}:${c.line}` : esc(c.path);
+  let html = `<div class="pr-tl-review-comment">
+    <div class="pr-tl-review-comment-file">${_li('file')} ${fileLine}</div>`;
+  if (c.diffHunk) {
+    // Show last 3 lines of diff hunk for context
+    const hunkLines = c.diffHunk.split('\n').slice(-3).join('\n');
+    html += `<div class="pr-tl-review-comment-hunk"><pre>${esc(hunkLines)}</pre></div>`;
+  }
+  html += `<div class="pr-tl-comment-body">${c.bodyHtml ? renderHtmlBody(c.bodyHtml) : renderMarkdown(c.body)}</div>
+  </div>`;
+  return html;
+}
+
+function renderReviewCommentItem(e) {
+  const fileLine = e.line ? `${esc(e.path)}:${e.line}` : esc(e.path);
+  let html = `<div class="pr-tl-item">
+    <div class="pr-tl-avatar">${e.avatar ? `<img src="${esc(e.avatar)}" alt="">` : `<div class="pr-tl-avatar-icon">${_li('message-square')}</div>`}</div>
+    <div class="pr-tl-content">
+      <div class="pr-tl-comment-box">
+        <div class="pr-tl-comment-header"><strong>${esc(e.author)}</strong> commented on <span class="pr-tl-review-comment-file-inline">${fileLine}</span> ${timeAgo(e.createdAt)}</div>`;
+  if (e.diffHunk) {
+    const hunkLines = e.diffHunk.split('\n').slice(-3).join('\n');
+    html += `<div class="pr-tl-review-comment-hunk"><pre>${esc(hunkLines)}</pre></div>`;
+  }
+  html += `<div class="pr-tl-comment-body">${e.bodyHtml ? renderHtmlBody(e.bodyHtml) : renderMarkdown(e.body)}</div>
+      </div>
+    </div>
+  </div>`;
+  return html;
 }
 
 function selectPRFile(idx) {

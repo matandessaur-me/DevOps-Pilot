@@ -1471,7 +1471,25 @@ async function handleGitHubPullTimeline(url, res) {
     const gh = resolveGitHub(url.searchParams.get('repo'));
     if (gh.error) return json(res, gh, 400);
     const num = url.searchParams.get('number');
-    const data = await ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/issues/${num}/timeline?per_page=100`, null, 'application/vnd.github.html+json');
+    // Fetch timeline and review comments in parallel
+    const [data, reviewComments] = await Promise.all([
+      ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/issues/${num}/timeline?per_page=100`, null, 'application/vnd.github.html+json'),
+      ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls/${num}/comments?per_page=100`),
+    ]);
+    // Group review comments by pull_request_review_id
+    const reviewCommentsMap = {};
+    for (const c of reviewComments) {
+      const rid = c.pull_request_review_id;
+      if (!rid) continue;
+      if (!reviewCommentsMap[rid]) reviewCommentsMap[rid] = [];
+      reviewCommentsMap[rid].push({
+        id: c.id, author: c.user?.login || '', avatar: c.user?.avatar_url || '',
+        body: c.body || '', bodyHtml: c.body_html || '',
+        path: c.path || '', line: c.line || c.original_line || null,
+        createdAt: c.created_at || '',
+        diffHunk: c.diff_hunk || '',
+      });
+    }
     const events = [];
     for (const e of data) {
       const ev = { type: e.event || e.node_id?.split('/')[0] || 'unknown', createdAt: e.created_at || e.submitted_at || e.timestamp || '' };
@@ -1487,6 +1505,12 @@ async function handleGitHubPullTimeline(url, res) {
         ev.state = e.state; // APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED
         ev.body = e.body || '';
         ev.bodyHtml = e.body_html || '';
+        // Attach inline review comments to this review event
+        const rid = e.id;
+        if (rid && reviewCommentsMap[rid]) {
+          ev.comments = reviewCommentsMap[rid];
+          delete reviewCommentsMap[rid]; // mark as used
+        }
       } else if (e.event === 'committed') {
         ev.sha = e.sha;
         ev.message = e.message;
@@ -1513,6 +1537,19 @@ async function handleGitHubPullTimeline(url, res) {
       }
       events.push(ev);
     }
+    // Add any orphaned review comments (not attached to a timeline review event)
+    for (const [, comments] of Object.entries(reviewCommentsMap)) {
+      for (const c of comments) {
+        events.push({
+          type: 'review_comment', createdAt: c.createdAt,
+          author: c.author, avatar: c.avatar,
+          body: c.body, bodyHtml: c.bodyHtml,
+          path: c.path, line: c.line, diffHunk: c.diffHunk,
+        });
+      }
+    }
+    // Re-sort by createdAt to keep chronological order
+    events.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
     json(res, { events });
   } catch (e) { json(res, { error: e.message }, 500); }
 }
