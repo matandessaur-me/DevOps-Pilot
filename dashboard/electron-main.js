@@ -12,15 +12,69 @@ const HOST = '127.0.0.1';
 
 let win = null;
 
+function killZombiesAndRelaunch() {
+  if (process.platform !== 'win32') {
+    // Non-Windows: can't reliably detect/kill zombie processes, just quit
+    dialog.showErrorBox('DevOps Pilot', 'Another instance appears to be running but is unresponsive.\nPlease close it manually and try again.');
+    app.exit(1);
+    return;
+  }
+  const { execSync } = require('child_process');
+  const myPid = process.pid;
+  const exeName = path.basename(process.execPath);
+  let killed = false;
+  try {
+    const out = execSync(`tasklist /FI "IMAGENAME eq ${exeName}" /FO CSV /NH`, { encoding: 'utf8' });
+    const pids = [];
+    for (const line of out.trim().split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const m = trimmed.match(/^"[^"]+","(\d+)"/);
+      if (m) {
+        const pid = Number(m[1]);
+        if (pid && pid !== myPid) pids.push(String(pid));
+      }
+    }
+    if (pids.length) {
+      execSync(`taskkill /F ${pids.map(p => '/PID ' + p).join(' ')}`, { encoding: 'utf8' });
+      killed = true;
+    }
+  } catch (_) { /* best effort */ }
+  if (killed) {
+    setTimeout(() => { app.relaunch(); app.exit(0); }, 500);
+  } else {
+    dialog.showErrorBox('DevOps Pilot', 'Could not recover from a stale instance.\nPlease close any remaining DevOps Pilot processes and try again.');
+    app.exit(1);
+  }
+}
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
-  console.log('Another instance is running — focusing it.');
-  app.quit();
+  const http = require('http');
+  const req = http.get(`http://${HOST}:${PORT}/api/ui/context`, { timeout: 2000 }, (res) => {
+    // Server is alive -- the real instance is running, just focus it
+    console.log('Another instance is running -- focusing it.');
+    res.resume();
+    res.on('end', () => { app.quit(); });
+  });
+  req.on('error', () => {
+    // Server not responding -- zombie processes, kill and relaunch
+    console.log('Stale instance detected -- killing zombies and relaunching...');
+    killZombiesAndRelaunch();
+  });
+  req.on('timeout', () => {
+    req.destroy();
+    console.log('Stale instance detected -- killing zombies and relaunching...');
+    killZombiesAndRelaunch();
+  });
 } else {
   app.on('second-instance', () => {
     if (win) {
       if (win.isMinimized()) win.restore();
+      win.show();
+      win.setAlwaysOnTop(true);
       win.focus();
+      win.setAlwaysOnTop(false);
     }
   });
 

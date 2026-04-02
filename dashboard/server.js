@@ -2558,11 +2558,19 @@ function writePluginHints() {
       if (!fs.existsSync(mf)) continue;
       try {
         const manifest = JSON.parse(fs.readFileSync(mf, 'utf8'));
+        const instrFile = manifest.instructions
+          ? path.join(pluginsDir, dir, manifest.instructions)
+          : path.join(pluginsDir, dir, 'instructions.md');
+        let instructions = '';
+        if (fs.existsSync(instrFile)) {
+          try { instructions = fs.readFileSync(instrFile, 'utf8'); } catch (_) {}
+        }
         pluginData.push({
           id: manifest.id,
           name: manifest.name,
           description: manifest.description || '',
           keywords: manifest.aiKeywords || [],
+          instructions,
         });
       } catch (_) {}
     }
@@ -2575,17 +2583,19 @@ function writePluginHints() {
     block += 'The following plugins are installed in DevOps Pilot. They provide dedicated API endpoints and workflows -- do NOT try to handle these tasks with generic code or by searching the repo.\n\n';
     block += '### IMPORTANT: Always Ask Before Using a Plugin\n\n';
     block += 'When the user\'s request matches any of the keywords below, **ASK the user if they want to use the plugin** before proceeding. For example: "Would you like to use the Builder.io plugin for this?"\n\n';
-    block += 'Do NOT silently use a plugin. Do NOT ignore plugins and search the repo instead. Ask first, then fetch the full plugin instructions from the API.\n\n';
+    block += 'Do NOT silently use a plugin. Do NOT ignore plugins and search the repo instead. Ask first, then use the plugin instructions below.\n\n';
     for (const p of pluginData) {
       if (p.keywords.length) {
         block += `- **${p.name}** (${p.description}): ${p.keywords.join(', ')}\n`;
       }
     }
-    block += '\n### How to Get Plugin Instructions\n\n';
-    block += 'Plugin instructions (API routes, scripts, workflows) are served dynamically by the app. Fetch them when you need to use a plugin:\n\n';
-    block += '```bash\n# From bash\ncurl -s http://127.0.0.1:3800/api/plugins/instructions\n```\n\n';
-    block += '```powershell\n# From PowerShell PTY\nInvoke-RestMethod http://127.0.0.1:3800/api/plugins/instructions\n```\n\n';
-    block += 'This returns markdown instructions from all active plugins describing their API routes, scripts, and capabilities. Fetch once per session or when you need a specific plugin\'s details.\n';
+    for (const p of pluginData) {
+      if (p.instructions) {
+        block += '\n---\n\n';
+        block += `### Plugin: ${p.name}\n\n`;
+        block += p.instructions + '\n';
+      }
+    }
   }
 
   // Write to all AI instruction files using markers
