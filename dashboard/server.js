@@ -11,6 +11,12 @@ const { WebSocketServer } = require('ws');
 const pty = require('node-pty');
 const { exec, execSync } = require('child_process');
 
+// ── New utility modules ────────────────────────────────────────────────────
+const { gitAsync, gitSync } = require('./utils/git-async');
+const { SWRCache } = require('./utils/swr-cache');
+const { atomicWriteSync, createDebouncedWriter } = require('./utils/atomic-write');
+const { BusyGuard } = require('./utils/busy-guard');
+
 const PORT = 3800;
 const HOST = '127.0.0.1';
 const repoRoot = path.resolve(__dirname, '..');
@@ -201,6 +207,10 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/ui/context' && req.method === 'GET')         return json(res, getUiContextWithPath());
     if (url.pathname === '/api/ui/context' && req.method === 'POST')        return handleUiContextUpdate(req, res);
 
+    // ── System Health & Diagnostics ─────────────────────────────────────
+    if (url.pathname === '/api/health' && req.method === 'GET')              return handleHealthCheck(res);
+    if (url.pathname === '/api/busy' && req.method === 'GET')                return json(res, guard.activeLocks());
+
     // ── Static files ──────────────────────────────────────────────────────
     const route = ROUTES[url.pathname];
     if (route && fs.existsSync(route.file)) {
@@ -234,12 +244,13 @@ async function handleSaveConfig(req, res) {
   try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch (_) {}
   const config = { ...template, ...existing, ...incoming };
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+  atomicWriteSync(configPath, JSON.stringify(config, null, 2));
   // Immediately clear all caches so the next request uses the new config
   teamAreasCache = { data: null, team: null, ts: 0 };
   areasCache = { data: null, ts: 0 };
   iterationsCache = { data: null, ts: 0 };
   workItemsCache = { data: null, key: null, ts: 0 };
+  swrIterations.clear(); swrWorkItems.clear(); swrTeamAreas.clear(); swrAreas.clear(); swrGit.clear(); swrGitHub.clear(); swrPlugins.clear();
   json(res, { ok: true });
 }
 
@@ -302,11 +313,12 @@ async function handleImportConfig(req, res) {
     if (!incoming[key] && existing[key]) config[key] = existing[key];
   }
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+  atomicWriteSync(configPath, JSON.stringify(config, null, 2));
   teamAreasCache = { data: null, team: null, ts: 0 };
   areasCache = { data: null, ts: 0 };
   iterationsCache = { data: null, ts: 0 };
   workItemsCache = { data: null, key: null, ts: 0 };
+  swrIterations.clear(); swrWorkItems.clear(); swrTeamAreas.clear(); swrAreas.clear(); swrGit.clear(); swrGitHub.clear(); swrPlugins.clear();
   json(res, { ok: true });
 }
 
@@ -615,7 +627,9 @@ function ghRequest(method, apiPath, body, accept) {
   });
 }
 
-// ── Caches ──────────────────────────────────────────────────────────────────
+// ── SWR Caches (stale-while-revalidate) ─────────────────────────────────────
+// Legacy cache vars kept for backward compatibility with cache invalidation code.
+// New SWR caches provide better UX: return stale data instantly, refresh in background.
 let iterationsCache = { data: null, ts: 0 };
 let workItemsCache = { data: null, key: null, ts: 0 };
 let teamAreasCache = { data: null, team: null, ts: 0 };
@@ -625,63 +639,70 @@ const WI_CACHE_TTL = 30000;
 const TEAM_AREAS_TTL = 600000; // 10 min
 const AREAS_CACHE_TTL = 600000; // 10 min
 
-// ── Get team area paths (for scoping work items to a team) ──────────────────
+const swrIterations = new SWRCache({ staleTTL: 60000, maxAge: 300000, onRevalidate: (key, data) => broadcast({ type: 'cache-updated', cache: 'iterations', data }) });
+const swrWorkItems = new SWRCache({ staleTTL: 15000, maxAge: 60000, onRevalidate: (key, data) => broadcast({ type: 'cache-updated', cache: 'workitems', data }) });
+const swrTeamAreas = new SWRCache({ staleTTL: 300000, maxAge: 600000 });
+const swrAreas = new SWRCache({ staleTTL: 300000, maxAge: 600000 });
+const swrGit = new SWRCache({ staleTTL: 10000, maxAge: 60000 });        // git branches/status (10s fresh, 60s max)
+const swrGitHub = new SWRCache({ staleTTL: 30000, maxAge: 120000 });    // github PRs (30s fresh, 2min max)
+const swrPlugins = new SWRCache({ staleTTL: 30000, maxAge: 300000 });   // general purpose for plugins
+
+// ── Busy Guards ─────────────────────────────────────────────────────────────
+const guard = new BusyGuard();
+
+// ── Debounced Writer (for config saves) ─────────────────────────────────────
+const debouncedConfigWrite = createDebouncedWriter(1000);
+
+// ── Get team area paths (SWR cached) ────────────────────────────────────────
 async function getTeamAreaPaths() {
   const cfg = getConfig();
   const team = cfg.DefaultTeam;
-  if (!team) return null; // no team configured, don't filter
-
-  if (teamAreasCache.data && teamAreasCache.team === team && Date.now() - teamAreasCache.ts < TEAM_AREAS_TTL) {
-    return teamAreasCache.data;
-  }
+  if (!team) return null;
 
   try {
-    const data = await adoRequest('GET',
-      `/work/teamsettings/teamfieldvalues?api-version=7.1`
-    );
-    // The team field values contain the area paths assigned to this team
-    const areas = (data.values || []).map(v => v.value).filter(Boolean);
-    teamAreasCache = { data: areas, team, ts: Date.now() };
-    return areas;
+    return await swrTeamAreas.get('teamAreas:' + team, async () => {
+      const data = await adoRequest('GET', `/work/teamsettings/teamfieldvalues?api-version=7.1`);
+      const areas = (data.values || []).map(v => v.value).filter(Boolean);
+      teamAreasCache = { data: areas, team, ts: Date.now() };
+      return areas;
+    });
   } catch (_) {
     return null;
   }
 }
 
-// ── Iterations ──────────────────────────────────────────────────────────────
+// ── Iterations (SWR cached -- returns stale data instantly, refreshes in background) ──
+async function fetchIterations() {
+  const data = await adoRequest('GET', '/work/teamsettings/iterations?api-version=7.1');
+  const now = new Date();
+  const iterations = (data.value || []).map(it => {
+    const startDate = it.attributes?.startDate ? new Date(it.attributes.startDate) : null;
+    const finishDate = it.attributes?.finishDate ? new Date(it.attributes.finishDate) : null;
+    const isCurrent = startDate && finishDate && now >= startDate && now <= finishDate;
+    return {
+      id: it.id, name: it.name, path: it.path,
+      startDate: it.attributes?.startDate || null,
+      finishDate: it.attributes?.finishDate || null,
+      timeFrame: it.attributes?.timeFrame || null,
+      isCurrent,
+    };
+  });
+  iterations.sort((a, b) => {
+    if (a.isCurrent && !b.isCurrent) return -1;
+    if (!a.isCurrent && b.isCurrent) return 1;
+    const da = a.startDate ? new Date(a.startDate) : new Date(0);
+    const db = b.startDate ? new Date(b.startDate) : new Date(0);
+    return db - da;
+  });
+  // Also update legacy cache for backward compat
+  iterationsCache = { data: iterations, ts: Date.now() };
+  return iterations;
+}
+
 async function handleIterations(res, url) {
   try {
     const forceRefresh = url && url.searchParams.get('refresh') === '1';
-    if (!forceRefresh && iterationsCache.data && Date.now() - iterationsCache.ts < ITER_CACHE_TTL) {
-      return json(res, iterationsCache.data);
-    }
-
-    const data = await adoRequest('GET', '/work/teamsettings/iterations?api-version=7.1');
-    const now = new Date();
-    const iterations = (data.value || []).map(it => {
-      const startDate = it.attributes?.startDate ? new Date(it.attributes.startDate) : null;
-      const finishDate = it.attributes?.finishDate ? new Date(it.attributes.finishDate) : null;
-      const isCurrent = startDate && finishDate && now >= startDate && now <= finishDate;
-      return {
-        id: it.id,
-        name: it.name,
-        path: it.path,
-        startDate: it.attributes?.startDate || null,
-        finishDate: it.attributes?.finishDate || null,
-        timeFrame: it.attributes?.timeFrame || null,
-        isCurrent,
-      };
-    });
-
-    iterations.sort((a, b) => {
-      if (a.isCurrent && !b.isCurrent) return -1;
-      if (!a.isCurrent && b.isCurrent) return 1;
-      const da = a.startDate ? new Date(a.startDate) : new Date(0);
-      const db = b.startDate ? new Date(b.startDate) : new Date(0);
-      return db - da;
-    });
-
-    iterationsCache = { data: iterations, ts: Date.now() };
+    const iterations = await swrIterations.get('iterations', fetchIterations, { forceRefresh });
     json(res, iterations);
   } catch (e) {
     json(res, { error: e.message }, e.message.includes('not configured') ? 400 : 502);
@@ -705,10 +726,14 @@ async function handleWorkItems(url, res) {
   const cacheKey = `${iterationPath}|${state}|${type}|${assignedTo}|${areaPath}|ct${closedTopParam !== null ? closedTop : '-'}`;
 
   try {
-    if (!refresh && workItemsCache.data && workItemsCache.key === cacheKey && Date.now() - workItemsCache.ts < WI_CACHE_TTL) {
-      return json(res, workItemsCache.data);
-    }
+    const result = await swrWorkItems.get('wi:' + cacheKey, () => fetchWorkItemsData(iterationPath, state, type, assignedTo, areaPath, closedTop, fetchClosedSeparately, noClosedFilter, cacheKey), { forceRefresh: refresh });
+    return json(res, result);
+  } catch (e) {
+    json(res, { error: e.message }, e.message.includes('not configured') ? 400 : 502);
+  }
+}
 
+async function fetchWorkItemsData(iterationPath, state, type, assignedTo, areaPath, closedTop, fetchClosedSeparately, noClosedFilter, cacheKey) {
     // Build area path clause (reused for both queries)
     // If an explicit area is selected, use it; otherwise fall back to team area paths
     let areaClause = '';
@@ -801,10 +826,7 @@ async function handleWorkItems(url, res) {
     // Otherwise return flat array for backward compat with scripts
     const result = fetchClosedSeparately ? { items, hasMoreClosed, totalClosed } : items;
     workItemsCache = { data: result, key: cacheKey, ts: Date.now() };
-    json(res, result);
-  } catch (e) {
-    json(res, { error: e.message }, e.message.includes('not configured') ? 400 : 502);
-  }
+    return result;
 }
 
 // ── Work Item Detail ────────────────────────────────────────────────────────
@@ -879,9 +901,12 @@ async function handleWorkItemDetail(id, res) {
   }
 }
 
-// ── Update Work Item ────────────────────────────────────────────────────────
+// ── Update Work Item (with busy guard) ──────────────────────────────────────
 async function handleUpdateWorkItem(id, req, res) {
   try {
+    if (guard.isBusy(`workitem:${id}`)) {
+      return json(res, { error: `Work item ${id} update already in progress. Please wait.` }, 409);
+    }
     const body = await readBody(req);
     const patchDoc = [];
 
@@ -1137,29 +1162,22 @@ async function handleTeams(res) {
 // ── Area Paths ──────────────────────────────────────────────────────────────
 async function handleAreas(res) {
   try {
-    if (areasCache.data && Date.now() - areasCache.ts < AREAS_CACHE_TTL) {
-      return json(res, areasCache.data);
-    }
-
-    const cfg = getConfig();
-    const project = cfg.AzureDevOpsProject;
-    // Fetch the area tree from the classification nodes API
-    const data = await adoRequest('GET',
-      `/wit/classificationnodes/Areas?$depth=10&api-version=7.1`, null, null, true
-    );
-
-    // Flatten the tree into a list of area paths
-    const areas = [];
-    function walk(node, prefix) {
-      const path = prefix ? `${prefix}\\${node.name}` : node.name;
-      areas.push(path);
-      if (node.children) {
-        for (const child of node.children) walk(child, path);
+    const areas = await swrAreas.get('areas', async () => {
+      const data = await adoRequest('GET',
+        `/wit/classificationnodes/Areas?$depth=10&api-version=7.1`, null, null, true
+      );
+      const result = [];
+      function walk(node, prefix) {
+        const p = prefix ? `${prefix}\\${node.name}` : node.name;
+        result.push(p);
+        if (node.children) {
+          for (const child of node.children) walk(child, p);
+        }
       }
-    }
-    if (data.name) walk(data, '');
-
-    areasCache = { data: areas, ts: Date.now() };
+      if (data.name) walk(data, '');
+      areasCache = { data: result, ts: Date.now() };
+      return result;
+    });
     json(res, areas);
   } catch (e) {
     json(res, { error: e.message }, 502);
@@ -1219,7 +1237,7 @@ async function handleSaveRepo(req, res) {
   const cfg = getConfig();
   cfg.Repos = cfg.Repos || {};
   cfg.Repos[name] = repoPath;
-  fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf8');
+  atomicWriteSync(configPath, JSON.stringify(cfg, null, 2));
   broadcast({ type: 'config-changed' });
   json(res, { ok: true });
 }
@@ -1347,34 +1365,37 @@ async function handleGitHubPulls(url, res) {
     const gh = resolveGitHub(url.searchParams.get('repo'));
     if (gh.error) return json(res, gh, 400);
     const state = url.searchParams.get('state') || 'open';
-    const data = await ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls?state=${state}&per_page=30&sort=updated&direction=desc`);
-    // Fetch reviews for each PR in parallel to get approval status
-    const reviewResults = await Promise.all(data.map(pr =>
-      ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls/${pr.number}/reviews`).catch(() => [])
-    ));
-    const pulls = data.map((pr, i) => {
-      const reviews = reviewResults[i] || [];
-      // Determine latest review state per reviewer (last review wins)
-      const byUser = {};
-      for (const r of reviews) {
-        if (r.state && r.state !== 'PENDING' && r.state !== 'COMMENTED') byUser[r.user?.login] = r.state;
-      }
-      const reviewStates = Object.values(byUser);
-      const reviewStatus = reviewStates.includes('CHANGES_REQUESTED') ? 'changes_requested'
-        : reviewStates.includes('APPROVED') ? 'approved' : null;
-      return {
-        number: pr.number, title: pr.title, state: pr.state, draft: pr.draft,
-        author: pr.user?.login || '', authorAvatar: pr.user?.avatar_url || '',
-        createdAt: pr.created_at, updatedAt: pr.updated_at,
-        headRef: pr.head?.ref || '', baseRef: pr.base?.ref || '',
-        labels: (pr.labels || []).map(l => ({ name: l.name, color: l.color })),
-        reviewers: (pr.requested_reviewers || []).map(r => r.login),
-        additions: pr.additions, deletions: pr.deletions,
-        comments: (pr.comments || 0) + (pr.review_comments || 0),
-        reviewStatus,
-      };
+    const cacheKey = `pulls:${gh.owner}/${gh.repo}:${state}`;
+
+    const result = await swrGitHub.get(cacheKey, async () => {
+      const data = await ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls?state=${state}&per_page=30&sort=updated&direction=desc`);
+      const reviewResults = await Promise.all(data.map(pr =>
+        ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls/${pr.number}/reviews`).catch(() => [])
+      ));
+      const pulls = data.map((pr, i) => {
+        const reviews = reviewResults[i] || [];
+        const byUser = {};
+        for (const r of reviews) {
+          if (r.state && r.state !== 'PENDING' && r.state !== 'COMMENTED') byUser[r.user?.login] = r.state;
+        }
+        const reviewStates = Object.values(byUser);
+        const reviewStatus = reviewStates.includes('CHANGES_REQUESTED') ? 'changes_requested'
+          : reviewStates.includes('APPROVED') ? 'approved' : null;
+        return {
+          number: pr.number, title: pr.title, state: pr.state, draft: pr.draft,
+          author: pr.user?.login || '', authorAvatar: pr.user?.avatar_url || '',
+          createdAt: pr.created_at, updatedAt: pr.updated_at,
+          headRef: pr.head?.ref || '', baseRef: pr.base?.ref || '',
+          labels: (pr.labels || []).map(l => ({ name: l.name, color: l.color })),
+          reviewers: (pr.requested_reviewers || []).map(r => r.login),
+          additions: pr.additions, deletions: pr.deletions,
+          comments: (pr.comments || 0) + (pr.review_comments || 0),
+          reviewStatus,
+        };
+      });
+      return { pulls };
     });
-    json(res, { pulls });
+    json(res, result);
   } catch (e) { json(res, { error: e.message }, 500); }
 }
 
@@ -1806,12 +1827,9 @@ async function handleFileSave(req, res) {
 }
 
 // ── Git Integration ─────────────────────────────────────────────────────────
+// Legacy sync wrapper (kept for non-critical reads; async preferred for new code)
 function gitExec(repoPath, cmd, timeoutMs) {
-  try {
-    return execSync(`git -C "${repoPath}" ${cmd}`, { encoding: 'utf8', timeout: timeoutMs || 10000, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-  } catch (e) {
-    return (e.stdout || e.stderr || e.message || '').trim();
-  }
+  return gitSync(repoPath, cmd, timeoutMs);
 }
 
 function handleGitStatus(url, res) {
@@ -1901,16 +1919,18 @@ function handleGitDiff(url, res) {
   json(res, { diff: diff || 'No changes', filePath });
 }
 
-function handleGitBranches(url, res) {
+async function handleGitBranches(url, res) {
   const repoName = url.searchParams.get('repo');
   const repoPath = getRepoPath(repoName);
   if (!repoPath) return json(res, { error: 'Repo not found' }, 400);
 
-  const current = gitExec(repoPath, 'rev-parse --abbrev-ref HEAD');
-  const output = gitExec(repoPath, 'branch --format="%(refname:short)"');
-  const branches = output ? output.split('\n').filter(Boolean) : [];
-
-  json(res, { current, branches });
+  const data = await swrGit.get('branches:' + repoPath, async () => {
+    const current = await gitAsync(repoPath, 'rev-parse --abbrev-ref HEAD');
+    const output = await gitAsync(repoPath, 'branch --format="%(refname:short)"');
+    const branches = output ? output.split('\n').filter(Boolean) : [];
+    return { current, branches };
+  });
+  json(res, data);
 }
 
 function handleGitLog(url, res) {
@@ -1944,7 +1964,7 @@ function handleCommitDiff(url, res) {
   json(res, { diff: diff || 'No changes', stat, message: msg, hash });
 }
 
-// ── Git Actions (checkout, pull, push, fetch) ───────────────────────────────
+// ── Git Actions (checkout, pull, push, fetch) -- async with busy guards ────
 async function handleGitCheckout(req, res) {
   try {
     const body = await readBody(req);
@@ -1952,28 +1972,34 @@ async function handleGitCheckout(req, res) {
     if (!repoPath) return json(res, { error: 'Repo not found' }, 400);
     if (!body.branch) return json(res, { error: 'branch required' }, 400);
 
-    // Check for uncommitted changes
-    const status = gitExec(repoPath, 'status --porcelain');
-    if (status && status.trim()) {
-      return json(res, { error: 'You have uncommitted changes. Commit or stash them before switching branches.', dirty: true }, 400);
-    }
+    await guard.run(`git:${repoPath}`, 'checkout', async () => {
+      // Check for uncommitted changes
+      const status = await gitAsync(repoPath, 'status --porcelain');
+      if (status && status.trim()) {
+        throw Object.assign(new Error('You have uncommitted changes. Commit or stash them before switching branches.'), { dirty: true });
+      }
 
-    // Fetch latest from remote before switching
-    gitExec(repoPath, 'fetch --prune', 30000);
+      // Fetch latest from remote before switching
+      await gitAsync(repoPath, 'fetch --prune', { timeout: 30000 });
 
-    const result = gitExec(repoPath, `checkout ${body.branch}`);
-    const current = gitExec(repoPath, 'rev-parse --abbrev-ref HEAD');
+      const result = await gitAsync(repoPath, `checkout ${body.branch}`);
+      const current = await gitAsync(repoPath, 'rev-parse --abbrev-ref HEAD');
 
-    // Pull latest changes after switching
-    let pullMsg = '';
-    const pullResult = gitExec(repoPath, 'pull', 30000);
-    if (pullResult && !pullResult.includes('error') && !pullResult.includes('fatal')) {
-      pullMsg = pullResult;
-    }
+      // Pull latest changes after switching
+      let pullMsg = '';
+      const pullResult = await gitAsync(repoPath, 'pull', { timeout: 30000 });
+      if (pullResult && !pullResult.includes('error') && !pullResult.includes('fatal')) {
+        pullMsg = pullResult;
+      }
 
-    json(res, { ok: true, branch: current, message: result, pullMessage: pullMsg });
+      // Notify UI of branch change
+      swrGit.clear();
+      broadcast({ type: 'git-changed', repo: body.repo, branch: current });
+      json(res, { ok: true, branch: current, message: result, pullMessage: pullMsg });
+    }, 60000);
   } catch (e) {
-    json(res, { error: e.message }, 500);
+    const status = e.dirty ? 400 : (e.message.includes('busy') ? 409 : 500);
+    json(res, { error: e.message, dirty: e.dirty || false }, status);
   }
 }
 
@@ -1983,14 +2009,16 @@ async function handleGitPull(req, res) {
     const repoPath = getRepoPath(body.repo);
     if (!repoPath) return json(res, { error: 'Repo not found' }, 400);
 
-    // Fetch first to ensure we know about all remote changes
-    gitExec(repoPath, 'fetch --prune', 30000);
-
-    const result = gitExec(repoPath, 'pull', 30000);
-    const branch = gitExec(repoPath, 'rev-parse --abbrev-ref HEAD');
-    json(res, { ok: true, branch, message: result });
+    await guard.run(`git:${repoPath}`, 'pull', async () => {
+      await gitAsync(repoPath, 'fetch --prune', { timeout: 30000 });
+      const result = await gitAsync(repoPath, 'pull', { timeout: 30000 });
+      const branch = await gitAsync(repoPath, 'rev-parse --abbrev-ref HEAD');
+      swrGit.clear();
+      broadcast({ type: 'git-changed', repo: body.repo, branch });
+      json(res, { ok: true, branch, message: result });
+    }, 60000);
   } catch (e) {
-    json(res, { error: e.message }, 500);
+    json(res, { error: e.message }, e.message.includes('busy') ? 409 : 500);
   }
 }
 
@@ -2000,25 +2028,27 @@ async function handleGitPush(req, res) {
     const repoPath = getRepoPath(body.repo);
     if (!repoPath) return json(res, { error: 'Repo not found' }, 400);
 
-    const branch = gitExec(repoPath, 'rev-parse --abbrev-ref HEAD');
+    await guard.run(`git:${repoPath}`, 'push', async () => {
+      const branch = await gitAsync(repoPath, 'rev-parse --abbrev-ref HEAD');
+      await gitAsync(repoPath, 'fetch --prune', { timeout: 30000 });
 
-    // Fetch first to check if we're behind
-    gitExec(repoPath, 'fetch --prune', 30000);
+      const behind = await gitAsync(repoPath, `rev-list --count HEAD..origin/${branch}`);
+      const behindCount = parseInt(behind, 10);
+      if (behindCount > 0) {
+        throw Object.assign(
+          new Error(`Your branch is ${behindCount} commit(s) behind origin/${branch}. Pull first, then push.`),
+          { needsPull: true }
+        );
+      }
 
-    // Check if branch is behind remote
-    const behind = gitExec(repoPath, `rev-list --count HEAD..origin/${branch}`);
-    const behindCount = parseInt(behind, 10);
-    if (behindCount > 0) {
-      return json(res, {
-        error: `Your branch is ${behindCount} commit(s) behind origin/${branch}. Pull first, then push.`,
-        needsPull: true
-      }, 409);
-    }
-
-    const result = gitExec(repoPath, `push -u origin ${branch}`, 30000);
-    json(res, { ok: true, branch, message: result || 'Pushed successfully' });
+      const result = await gitAsync(repoPath, `push -u origin ${branch}`, { timeout: 30000 });
+      swrGit.clear();
+      broadcast({ type: 'git-changed', repo: body.repo, branch });
+      json(res, { ok: true, branch, message: result || 'Pushed successfully' });
+    }, 60000);
   } catch (e) {
-    json(res, { error: e.message }, 500);
+    const status = e.needsPull ? 409 : (e.message.includes('busy') ? 409 : 500);
+    json(res, { error: e.message, needsPull: e.needsPull || false }, status);
   }
 }
 
@@ -2028,21 +2058,21 @@ async function handleGitFetch(req, res) {
     const repoPath = getRepoPath(body.repo);
     if (!repoPath) return json(res, { error: 'Repo not found' }, 400);
 
-    gitExec(repoPath, 'fetch --prune', 30000);
-    // Return both local and remote branches after fetch
-    const current = gitExec(repoPath, 'rev-parse --abbrev-ref HEAD');
-    const localOut = gitExec(repoPath, 'branch --format="%(refname:short)"');
-    const remoteOut = gitExec(repoPath, 'branch -r --format="%(refname:short)"');
-    const local = localOut ? localOut.split('\n').filter(Boolean) : [];
-    const remote = remoteOut ? remoteOut.split('\n').filter(Boolean)
-      .filter(b => !b.includes('/HEAD'))
-      .map(b => b.replace(/^origin\//, '')) : [];
-    // Remote-only branches (not checked out locally)
-    const remoteOnly = remote.filter(r => !local.includes(r));
+    await guard.run(`git:${repoPath}`, 'fetch', async () => {
+      await gitAsync(repoPath, 'fetch --prune', { timeout: 30000 });
+      const current = await gitAsync(repoPath, 'rev-parse --abbrev-ref HEAD');
+      const localOut = await gitAsync(repoPath, 'branch --format="%(refname:short)"');
+      const remoteOut = await gitAsync(repoPath, 'branch -r --format="%(refname:short)"');
+      const local = localOut ? localOut.split('\n').filter(Boolean) : [];
+      const remote = remoteOut ? remoteOut.split('\n').filter(Boolean)
+        .filter(b => !b.includes('/HEAD'))
+        .map(b => b.replace(/^origin\//, '')) : [];
+      const remoteOnly = remote.filter(r => !local.includes(r));
 
-    json(res, { ok: true, current, local, remoteOnly });
+      json(res, { ok: true, current, local, remoteOnly });
+    }, 60000);
   } catch (e) {
-    json(res, { error: e.message }, 500);
+    json(res, { error: e.message }, e.message.includes('busy') ? 409 : 500);
   }
 }
 
@@ -2327,7 +2357,7 @@ async function handleSaveNote(req, res) {
   const resolved = path.resolve(filePath);
   if (!resolved.startsWith(path.resolve(notesDir))) return json(res, { error: 'Invalid path' }, 403);
   fs.mkdirSync(notesDir, { recursive: true });
-  fs.writeFileSync(resolved, content || '', 'utf8');
+  atomicWriteSync(resolved, content || '');
   broadcast({ type: 'ui-action', action: 'refresh-notes' });
   json(res, { ok: true });
 }
@@ -2340,7 +2370,7 @@ async function handleCreateNote(req, res) {
   const filePath = path.join(notesDir, safeName + '.md');
   if (fs.existsSync(filePath)) return json(res, { error: 'Note already exists' }, 409);
   fs.mkdirSync(notesDir, { recursive: true });
-  fs.writeFileSync(filePath, `# ${safeName}\n\n`, 'utf8');
+  atomicWriteSync(filePath, `# ${safeName}\n\n`);
   broadcast({ type: 'ui-action', action: 'refresh-notes' });
   json(res, { ok: true, name: safeName });
 }
@@ -2374,6 +2404,15 @@ function formatAge(date) {
   const hrs = mins / 60;
   if (hrs < 24) return `${hrs.toFixed(1)}h ago`;
   return `${(hrs / 24).toFixed(1)}d ago`;
+}
+
+function handleHealthCheck(res) {
+  json(res, {
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    terminals: terminals.size,
+    activeLocks: guard.activeLocks().length,
+  });
 }
 
 // ── Multi-PTY management ────────────────────────────────────────────────────
@@ -2509,19 +2548,11 @@ function writePluginHints() {
       if (!fs.existsSync(mf)) continue;
       try {
         const manifest = JSON.parse(fs.readFileSync(mf, 'utf8'));
-        const instrFile = manifest.instructions
-          ? path.join(pluginsDir, dir, manifest.instructions)
-          : path.join(pluginsDir, dir, 'instructions.md');
-        let instructions = '';
-        if (fs.existsSync(instrFile)) {
-          try { instructions = fs.readFileSync(instrFile, 'utf8'); } catch (_) {}
-        }
         pluginData.push({
           id: manifest.id,
           name: manifest.name,
           description: manifest.description || '',
           keywords: manifest.aiKeywords || [],
-          instructions,
         });
       } catch (_) {}
     }
@@ -2534,19 +2565,17 @@ function writePluginHints() {
     block += 'The following plugins are installed in DevOps Pilot. They provide dedicated API endpoints and workflows -- do NOT try to handle these tasks with generic code or by searching the repo.\n\n';
     block += '### IMPORTANT: Always Ask Before Using a Plugin\n\n';
     block += 'When the user\'s request matches any of the keywords below, **ASK the user if they want to use the plugin** before proceeding. For example: "Would you like to use the Builder.io plugin for this?"\n\n';
-    block += 'Do NOT silently use a plugin. Do NOT ignore plugins and search the repo instead. Ask first, then use the plugin instructions below.\n\n';
+    block += 'Do NOT silently use a plugin. Do NOT ignore plugins and search the repo instead. Ask first, then fetch the full plugin instructions from the API.\n\n';
     for (const p of pluginData) {
       if (p.keywords.length) {
         block += `- **${p.name}** (${p.description}): ${p.keywords.join(', ')}\n`;
       }
     }
-    for (const p of pluginData) {
-      if (p.instructions) {
-        block += '\n---\n\n';
-        block += `### Plugin: ${p.name}\n\n`;
-        block += p.instructions + '\n';
-      }
-    }
+    block += '\n### How to Get Plugin Instructions\n\n';
+    block += 'Plugin instructions (API routes, scripts, workflows) are served dynamically by the app. Fetch them when you need to use a plugin:\n\n';
+    block += '```bash\n# From bash\ncurl -s http://127.0.0.1:3800/api/plugins/instructions\n```\n\n';
+    block += '```powershell\n# From PowerShell PTY\nInvoke-RestMethod http://127.0.0.1:3800/api/plugins/instructions\n```\n\n';
+    block += 'This returns markdown instructions from all active plugins describing their API routes, scripts, and capabilities. Fetch once per session or when you need a specific plugin\'s details.\n';
   }
 
   // Write to all AI instruction files using markers
@@ -2568,13 +2597,13 @@ function writePluginHints() {
       const before = content.substring(0, startIdx + START.length);
       const after = content.substring(endIdx);
       content = before + '\n' + block + '\n' + after;
-      fs.writeFileSync(file, content, 'utf8');
+      atomicWriteSync(file, content);
     } catch (_) {}
   }
 }
 
 // ── Load plugins ─────────────────────────────────────────────────────────────
-loadedPlugins = loadPlugins(pluginsDir, { addRoute, getConfig, broadcast, json, writePluginHints });
+loadedPlugins = loadPlugins(pluginsDir, { addRoute, getConfig, broadcast, json, writePluginHints, swrCache: swrPlugins });
 if (loadedPlugins.length) console.log(`  Loaded ${loadedPlugins.length} plugin(s)`);
 writePluginHints();
 
@@ -2604,4 +2633,7 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
-module.exports = { server, startServer, addRoute, loadedPlugins };
+module.exports = {
+  server, startServer, addRoute, loadedPlugins,
+  guard, broadcast,
+};
