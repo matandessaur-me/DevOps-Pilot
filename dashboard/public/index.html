@@ -6204,9 +6204,9 @@ async function orchDoDispatch() {
       await fetch('/api/orchestrator/spawn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cli, prompt, visible: true }),
+        body: JSON.stringify({ cli, prompt }),
       });
-      toast(cli + ' spawned in new terminal', 'success');
+      toast('Task dispatched to ' + cli, 'success');
     } else {
       await fetch('/api/orchestrator/dispatch', {
         method: 'POST',
@@ -6281,6 +6281,10 @@ function setOrchestrationMode(active) {
       badge.className = 'orch-mode-badge';
       badge.textContent = 'Orchestrating';
       mainTab.appendChild(badge);
+    }
+    // Auto-switch to Orchestrator tab so user can see tasks starting
+    if (orchBtn && orchBtn.style.display !== 'none') {
+      switchTab('orchestrator');
     }
   } else {
     // Remove orchestrator badge

@@ -522,7 +522,7 @@ curl -s -X POST http://127.0.0.1:3800/api/orchestrator/spawn \
   -H "Content-Type: application/json" \
   -d '{"cli":"gemini","prompt":"Research the top 10 bathroom remodel trends for 2025-2026. Give bullet points with details.","from":"main"}'
 ```
-The system automatically picks the best mode (pipe or terminal). You do NOT need to specify `visible`.
+**Always use headless pipe mode (the default).** Do NOT pass `"visible": true` unless you have asked the user for permission first. If you believe a task genuinely requires a visible PTY terminal (e.g., the CLI has no headless flag, the task requires interactive mid-session input, or you need to debug a failing worker), you MUST explain to the user why pipe mode is insufficient and get explicit approval before adding `"visible": true`. The Orchestrator tab already shows live output for headless tasks, so visibility alone is not a reason to use PTY.
 
 **Dispatch rules:**
 1. Always include `"from": "main"` so results return to your inbox
