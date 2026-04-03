@@ -4,6 +4,28 @@
   <meta charset="utf-8">
   <title>DevOps Pilot</title>
   <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <script>
+    // Apply saved theme BEFORE CSS loads to prevent flash of default theme
+    (function() {
+      try {
+        var s = localStorage.getItem('devops-pilot-active-theme');
+        if (s && s.startsWith('__builtin_')) {
+          var id = s.replace('__builtin_', '');
+          var m = { claude:'warm-metallic', gemini:'industrial-blue', codex:'futuristic-green', copilot:'warm-metallic', grok:'warm-metallic' };
+          if (m[id]) id = m[id];
+          document.documentElement.setAttribute('data-theme', id);
+        } else if (s) {
+          // Custom theme -- apply inline vars from localStorage
+          var themes = JSON.parse(localStorage.getItem('devops-pilot-themes') || '[]');
+          var t = themes.find(function(x) { return x.name === s; });
+          if (t && t.vars) {
+            document.documentElement.setAttribute('data-theme', 'custom');
+            for (var k in t.vars) { if (k.startsWith('--') && !k.startsWith('--term-')) document.documentElement.style.setProperty(k, t.vars[k]); }
+          }
+        }
+      } catch(_) {}
+    })();
+  </script>
   <link rel="stylesheet" href="/xterm.css">
   <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
@@ -79,6 +101,14 @@
     /* ── Theme: Custom (set via inline CSS vars) ──────────────────────────── */
     [data-theme="custom"] { /* vars applied inline by theme system */ }
 
+    /* ── Area-specific overrides (set by advanced theme editor) ─────────── */
+    :root {
+      --sidebar-bg: var(--mantle);
+      --header-bg: var(--mantle);
+      --content-bg: var(--base);
+      --tab-bar-bg: var(--mantle);
+    }
+
     /* ── Reset ────────────────────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; overflow: hidden; }
@@ -99,13 +129,14 @@
 
     /* ── Terminal padding ─────────────────────────────────────────────────── */
     .xterm { padding: 15px; box-sizing: border-box; }
+    .xterm .xterm-viewport { background-color: transparent !important; }
 
 
     /* ── Header ───────────────────────────────────────────────────────────── */
     .header {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 0 20px; padding-right: 140px;
-      background: var(--mantle); border-bottom: 1px solid var(--surface0); z-index: 20;
+      padding: 0 20px;
+      background: var(--header-bg); border-bottom: 1px solid var(--surface0); z-index: 20;
     }
     .header-left { display: flex; align-items: center; gap: 8px; }
     .header-logo { width: 28px; height: 28px; border-radius: 6px; }
@@ -122,6 +153,19 @@
     .status-dot.connected { background: var(--green); box-shadow: 0 0 8px rgba(126,198,153,0.4); }
     .status-dot.error { background: var(--red); box-shadow: 0 0 8px rgba(242,139,130,0.4); }
     #connectionStatus { font-size: 11px; color: var(--subtext0); transition: color 0.3s; }
+
+    /* ── Window controls (custom title bar) ──────────────────────────── */
+    .header { -webkit-app-region: drag; }
+    .header button, .header .cmd-trigger, .header select, .header input,
+    .header .project-selector, .header a { -webkit-app-region: no-drag; }
+    .window-controls { display: flex; align-items: center; gap: 0; -webkit-app-region: no-drag; margin-left: 8px; }
+    .window-controls button {
+      background: none; border: none; color: var(--subtext0); cursor: pointer;
+      width: 46px; height: var(--header-h); display: flex; align-items: center; justify-content: center;
+      transition: background 0.12s, color 0.12s;
+    }
+    .window-controls button:hover { background: var(--surface1); color: var(--text); }
+    .window-controls button.win-close:hover { background: #c42b1c; color: #fff; }
 
     /* ── Project Selector ─────────────────────────────────────────────────── */
     .project-selector {
@@ -142,7 +186,7 @@
 
     /* ── Sidebar ──────────────────────────────────────────────────────────── */
     .sidebar {
-      background: var(--mantle); border-right: 1px solid var(--surface0);
+      background: var(--sidebar-bg); border-right: 1px solid var(--surface0);
       display: flex; flex-direction: column; overflow: hidden;
     }
     .sidebar-fixed { flex-shrink: 0; padding: 10px 10px 6px; border-bottom: 1px solid var(--surface0); }
@@ -217,7 +261,7 @@
     .tab-bar {
       display: flex; align-items: center; gap: 0;
       height: var(--term-bar-h); padding: 0 0 0 4px;
-      background: var(--mantle); border-bottom: 1px solid var(--surface0); flex-shrink: 0;
+      background: var(--tab-bar-bg); border-bottom: 1px solid var(--surface0); flex-shrink: 0;
       min-width: 0; overflow: visible; position: relative; z-index: 10;
     }
     .tab-bar-scroll {
@@ -384,6 +428,14 @@
     .tab-panel.active { display: flex; flex-direction: column; }
     .tab-panel#panel-terminal.active { display: flex; flex-direction: column; }
 
+    /* ── Orchestration mode badge ────────────────────────────────────────── */
+    .orch-mode-badge {
+      font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+      color: var(--yellow); background: color-mix(in srgb, var(--yellow) 12%, transparent);
+      padding: 1px 6px; border-radius: 4px; margin-left: 6px;
+      animation: pulse 2s ease infinite;
+    }
+
     /* ── Terminal sub-tabs ────────────────────────────────────────────────── */
     .term-tabs {
       display: flex; align-items: center; gap: 0; height: 34px; flex-shrink: 0;
@@ -406,6 +458,12 @@
       position: relative; z-index: 10;
     }
     .term-tab-close:hover { color: var(--red); background: rgba(242,139,130,0.15); }
+    .term-tab .orch-dot {
+      display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--yellow); animation: pulse 1.5s ease infinite;
+      margin-left: 4px; vertical-align: middle; flex-shrink: 0;
+    }
+    .term-tab .orch-dot.done { background: var(--green); animation: none; }
     .term-tab-add {
       background: none; border: none; color: var(--overlay1); font-size: 16px;
       cursor: pointer; padding: 0 8px; height: 100%; transition: color 0.12s;
@@ -436,6 +494,173 @@
     .term-instance.active { display: block; }
     .tab-panel#panel-files.active { display: flex; }
     .tab-panel#panel-notes.active { display: flex; }
+    .tab-panel#panel-orchestrator.active { display: flex; flex-direction: column; }
+
+    /* ── Orchestrator panel ─────────────────────────────────────────────── */
+    .orch-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 16px; border-bottom: 1px solid var(--surface0);
+      background: var(--mantle); flex-shrink: 0;
+    }
+    .orch-header h3 { font-size: 13px; font-weight: 600; color: var(--text); margin: 0; }
+    .orch-header .orch-status {
+      font-size: 11px; color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent);
+      padding: 2px 8px; border-radius: 10px;
+    }
+    .orch-body { display: flex; flex: 1; overflow: hidden; }
+    .orch-sidebar {
+      width: 260px; min-width: 220px; border-right: 1px solid var(--surface0);
+      display: flex; flex-direction: column; background: var(--crust);
+    }
+    .orch-section-title {
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+      color: var(--overlay1); padding: 10px 12px 4px; flex-shrink: 0;
+    }
+    .orch-agent-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
+    .orch-agent {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px; border-radius: var(--radius); cursor: pointer;
+      transition: background 0.1s;
+    }
+    .orch-agent:hover { background: var(--surface0); }
+    .orch-agent-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+    .orch-agent-dot.idle { background: var(--overlay1); }
+    .orch-agent-dot.ai { background: var(--green); }
+    .orch-agent-dot.busy { background: var(--yellow); animation: pulse 1.5s ease infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .orch-agent-info { flex: 1; min-width: 0; }
+    .orch-agent-name { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .orch-agent-sub { font-size: 10px; color: var(--subtext0); }
+    .orch-main {
+      flex: 1; display: flex; flex-direction: column; overflow: hidden;
+    }
+    .orch-main-toolbar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 16px; border-bottom: 1px solid var(--surface0);
+      background: var(--mantle); flex-shrink: 0;
+    }
+    .orch-task-list { flex: 1; overflow-y: auto; padding: 12px 16px; }
+    .orch-task {
+      display: flex; flex-direction: column;
+      border-radius: var(--radius); background: var(--surface0); margin-bottom: 6px;
+      cursor: pointer; transition: background 0.1s; overflow: hidden;
+    }
+    .orch-task:hover { background: color-mix(in srgb, var(--surface0) 80%, var(--surface1)); }
+    .orch-task-header {
+      display: flex; align-items: center; gap: 0;
+      padding: 10px 14px; min-height: 36px;
+    }
+    .orch-task-left {
+      display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1;
+    }
+    .orch-task-left-top {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; font-family: var(--font-mono); color: var(--subtext1);
+    }
+    .orch-task-left-top .cli-name { color: var(--text); font-weight: 600; }
+    .orch-task-left-bottom {
+      font-size: 10px; color: var(--overlay1); font-family: var(--font-mono);
+    }
+    .orch-task-right {
+      display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
+      flex-shrink: 0; margin-left: 12px;
+    }
+    .orch-task-state {
+      font-size: 10px; font-weight: 600; text-transform: uppercase; flex-shrink: 0;
+    }
+    .orch-task-state.pending { color: var(--subtext0); }
+    .orch-task-state.running { color: var(--yellow); }
+    .orch-task-state.completed { color: var(--green); }
+    .orch-task-state.failed { color: var(--red); }
+    .orch-task-state.timeout { color: var(--peach); }
+    .orch-task-state.cancelled { color: var(--overlay1); }
+    .orch-task-timer {
+      font-size: 10px; font-family: var(--font-mono); color: var(--subtext0);
+    }
+    .orch-task-timer.live { color: var(--text); }
+    .orch-task-expand {
+      display: none; padding: 0 14px 12px;
+    }
+    .orch-task.expanded .orch-task-expand { display: block; }
+    .orch-task-body { flex: 1; min-width: 0; }
+    .orch-task-prompt {
+      font-size: 12px; color: var(--text); margin: 4px 0;
+      white-space: pre-wrap; word-break: break-word; line-height: 1.5;
+    }
+    .orch-task-section {
+      font-size: 10px; color: var(--overlay1); text-transform: uppercase;
+      letter-spacing: 0.5px; margin-top: 10px; margin-bottom: 4px;
+    }
+    .orch-task-id { font-size: 10px; color: var(--overlay1); font-family: var(--font-mono); }
+    .orch-empty-state {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      flex: 1; color: var(--overlay0); gap: 8px;
+    }
+    .orch-empty-state i { width: 48px; height: 48px; stroke-width: 1; }
+    .orch-task-result {
+      padding: 8px 10px; background: var(--crust);
+      border-radius: var(--radius); font-size: 11px; color: var(--subtext1);
+      font-family: var(--font-mono); max-height: 200px; overflow-y: auto;
+      white-space: pre-wrap; word-break: break-word; line-height: 1.5;
+    }
+    .orch-task-result.orch-task-md {
+      font-family: var(--font-ui); font-size: 12px; color: var(--text);
+      white-space: normal; max-height: 400px;
+    }
+    .orch-task-md h1, .orch-task-md h2, .orch-task-md h3 {
+      font-size: 13px; font-weight: 600; color: var(--text); margin: 8px 0 4px;
+    }
+    .orch-task-md h1 { font-size: 15px; }
+    .orch-task-md h2 { font-size: 14px; }
+    .orch-task-md ul, .orch-task-md ol { padding-left: 18px; margin: 4px 0; }
+    .orch-task-md li { margin: 2px 0; }
+    .orch-task-md a { color: var(--accent); text-decoration: none; }
+    .orch-task-md a:hover { text-decoration: underline; }
+    .orch-task-md strong { color: var(--text); }
+    .orch-task-md pre { margin: 6px 0; }
+    .orch-task-output {
+      padding: 8px 10px; background: var(--crust);
+      border-radius: var(--radius); font-size: 11px; color: var(--subtext0);
+      font-family: var(--font-mono); max-height: 150px; overflow-y: auto;
+      white-space: pre-wrap; word-break: break-word; line-height: 1.4;
+    }
+    .orch-task-actions-row {
+      display: flex; gap: 8px; margin-top: 10px;
+    }
+    .orch-task-btn {
+      padding: 6px 14px; border-radius: var(--radius); font: 11px var(--font-ui);
+      cursor: pointer; transition: all 0.12s; border: none; display: inline-flex;
+      align-items: center; gap: 5px;
+    }
+    .orch-task-btn.view {
+      background: var(--surface1); color: var(--text);
+    }
+    .orch-task-btn.view:hover { background: var(--surface2); }
+    .orch-task-btn.cancel {
+      background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red);
+    }
+    .orch-task-btn.cancel:hover { background: color-mix(in srgb, var(--red) 22%, transparent); }
+    .orch-inbox-badge {
+      background: var(--accent); color: var(--crust); font-size: 9px; font-weight: 700;
+      padding: 1px 5px; border-radius: 8px; margin-left: 4px;
+    }
+    /* ── Dispatch dialog agent cards ──────────────────────────────────────── */
+    .orch-dispatch-agent {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px; background: var(--surface0); border: 1px solid transparent;
+      border-radius: var(--radius); cursor: pointer; text-align: left;
+      transition: all 0.12s; width: 100%;
+    }
+    .orch-dispatch-agent:hover { background: var(--surface1); }
+    .orch-dispatch-agent.selected {
+      border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 8%, var(--surface0));
+    }
+    .orch-dispatch-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .orch-dispatch-label { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; }
+    .orch-dispatch-sub { font-size: 10px; color: var(--subtext0); margin-left: auto; white-space: nowrap; }
     #terminal { width: 100%; height: 100%; padding: 8px 12px 8px 12px; box-sizing: border-box; overflow: hidden; position: relative; }
     .scroll-bottom-btn {
       display: none; position: absolute; bottom: 16px; right: 20px; z-index: 10;
@@ -1327,8 +1552,10 @@
     .modal-overlay {
       display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
       z-index: 200; align-items: center; justify-content: center;
+      transition: background 0.3s;
     }
     .modal-overlay.open { display: flex; }
+    .modal-overlay.theme-preview { background: rgba(0,0,0,0.25); }
     .modal {
       background: var(--mantle); border: 1px solid var(--surface1);
       border-radius: var(--radius-lg); box-shadow: 0 20px 60px rgba(0,0,0,0.6);
@@ -1868,6 +2095,10 @@
     <div class="status-dot" id="statusDot"></div>
     <span id="connectionStatus">Connecting...</span>
     <button onclick="restartApp()" title="Restart App" style="background:none;border:none;color:var(--subtext0);cursor:pointer;padding:4px;display:flex;align-items:center;transition:color 0.15s;margin-left:4px;" onmouseenter="this.style.color='var(--text)'" onmouseleave="this.style.color='var(--subtext0)'"><i data-lucide="rotate-cw" style="width:14px;height:14px;"></i></button>
+    <div class="window-controls">
+      <button onclick="fetch('/api/window/minimize',{method:'POST'})" title="Minimize"><i data-lucide="minus" style="width:16px;height:16px;"></i></button>
+      <button class="win-close" onclick="fetch('/api/window/close',{method:'POST'})" title="Close"><i data-lucide="x" style="width:16px;height:16px;"></i></button>
+    </div>
   </div>
 </header>
 
@@ -1955,6 +2186,7 @@
         <button class="tab-scroll-arrow left" id="tabScrollLeft" onclick="scrollTabs(-200)"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
         <div class="tab-bar-scroll" id="tabBarScroll">
           <button class="tab-btn active" data-tab="terminal" onclick="switchTab('terminal')">Terminal</button>
+          <button class="tab-btn" data-tab="orchestrator" id="orchestratorTabBtn" onclick="switchTab('orchestrator')">Orchestrator</button>
           <button class="tab-btn" data-tab="backlog" id="backlogTabBtn" onclick="switchTab('backlog')" style="display:none;">Backlog</button>
           <button class="tab-btn" data-tab="workitem" id="workitemTabBtn" onclick="switchTab('workitem')" style="display:none;">Work Item</button>
           <button class="tab-btn" data-tab="activity" id="activityTabBtn" onclick="switchTab('activity')" style="display:none;">Activity Timeline</button>
@@ -1986,6 +2218,8 @@
             <button class="ai-picker-item" onclick="launchAiWith('gemini')"><span class="cli-dot" style="background:#078efa"></span> Gemini CLI</button>
             <button class="ai-picker-item" onclick="launchAiWith('copilot')"><span class="cli-dot" style="background:#8534f3"></span> Copilot CLI</button>
             <button class="ai-picker-item" onclick="launchAiWith('codex')"><span class="cli-dot" style="background:#10a37f"></span> Codex CLI</button>
+
+            <button class="ai-picker-item" onclick="launchAiWith('grok')"><span class="cli-dot" style="background:#ef4444"></span> Grok Code</button>
           </div>
         </div>
         <button class="tab-bar-btn" onclick="restartShell()">Restart Shell</button>
@@ -2308,6 +2542,51 @@
         </div>
       </div>
     </div>
+    <!-- Orchestrator -->
+    <div class="tab-panel" id="panel-orchestrator">
+      <div class="orch-header">
+        <h3>Orchestrator</h3>
+        <span class="orch-status" id="orchStatusBadge">Bus Active</span>
+        <div style="flex:1;"></div>
+        <button class="tab-bar-btn" onclick="orchRefresh()" title="Refresh">Refresh</button>
+        <button class="tab-bar-btn" onclick="orchCleanup()" title="Clean up old tasks">Cleanup</button>
+      </div>
+      <div class="orch-body">
+        <div class="orch-sidebar">
+          <div class="orch-section-title">Active Agents</div>
+          <div class="orch-agent-list" id="orchAgentList">
+            <div style="padding:20px;text-align:center;color:var(--overlay0);font-size:11px;">Loading...</div>
+          </div>
+          <div style="border-top:1px solid var(--surface0);padding:8px;">
+            <button class="btn btn-sm" onclick="orchShowDispatchDialog()" style="width:100%;justify-content:center;gap:4px;">
+              <i data-lucide="send" style="width:12px;height:12px;"></i> Dispatch Task
+            </button>
+          </div>
+        </div>
+        <div class="orch-main">
+          <div class="orch-main-toolbar">
+            <span style="font-size:11px;font-weight:600;color:var(--overlay1);text-transform:uppercase;letter-spacing:0.5px;">Task Queue</span>
+            <div style="flex:1;"></div>
+            <select id="orchTaskFilter" onchange="orchRefreshTasks()" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface1);border-radius:var(--radius);font-size:11px;padding:3px 8px;outline:none;">
+              <option value="">All</option>
+              <option value="running">Running</option>
+              <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
+              <option value="pending">Pending</option>
+            </select>
+            <span id="orchTaskCount" style="font-size:10px;color:var(--subtext0);"></span>
+          </div>
+          <div class="orch-task-list" id="orchTaskList">
+            <div class="orch-empty-state" id="orchEmptyState">
+              <i data-lucide="radio-tower"></i>
+              <div style="font-size:13px;font-weight:500;">No tasks yet</div>
+              <div style="font-size:11px;">Dispatch a task to another AI agent or spawn a headless job</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ─── Background Task Pills (floating, bottom-right) ─────────────── -->
     <div class="task-float" id="taskPillsBar"></div>
   </div>
@@ -2481,6 +2760,8 @@
                 <option value="gemini">Gemini CLI</option>
                 <option value="copilot">Copilot CLI</option>
                 <option value="codex">Codex CLI</option>
+
+                <option value="grok">Grok Code</option>
               </select>
             </div>
           </div>
@@ -2525,9 +2806,13 @@
           <div class="settings-section">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
               <div class="settings-section-title" style="margin-bottom:0;">Custom Theme</div>
-              <span id="themeEditorStatus" style="font-size:10px;font-weight:600;color:var(--subtext0);display:none;">Custom (unsaved)</span>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span id="themeEditorStatus" style="font-size:10px;font-weight:600;color:var(--subtext0);display:none;">Custom (unsaved)</span>
+                <button class="modal-btn" id="themeNewBtn" onclick="toggleThemeEditor()" style="padding:4px 12px;font-size:11px;">New Theme</button>
+              </div>
             </div>
-            <div class="settings-section-desc">Pick a mode, tint, text color, and accent. Changes preview live.</div>
+            <div id="themeEditorPanel" style="display:none;">
+            <div class="settings-section-desc" style="margin-bottom:8px;">Pick a mode, tint, text color, and accent. Changes preview live.</div>
             <!-- Mode toggle -->
             <div style="display:flex;align-items:center;gap:10px;margin-top:8px;margin-bottom:10px;">
               <span style="font-size:11px;font-weight:600;color:var(--subtext1);width:50px;">Mode</span>
@@ -2568,6 +2853,55 @@
               <input id="themeNameInput" type="text" placeholder="Theme name..." style="flex:1;padding:8px 10px;background:var(--surface0);border:1px solid var(--surface1);border-radius:var(--radius);color:var(--text);font-size:12px;outline:none;">
               <button class="modal-btn modal-btn-primary" onclick="saveCustomThemeFromEditor()" style="padding:8px 16px;font-size:11px;white-space:nowrap;">Save Theme</button>
             </div>
+            <!-- Advanced section -->
+            <details style="margin-top:14px;">
+              <summary style="font-size:11px;font-weight:600;color:var(--subtext1);cursor:pointer;user-select:none;">Advanced</summary>
+              <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <div>
+                  <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--overlay1);margin-bottom:6px;">Sidebar (left)</div>
+                  <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                    <input type="color" id="themeAdvSidebar" value="#1a1a18" oninput="_onAdvancedThemeChange('--sidebar-bg', this.value)"
+                      style="width:24px;height:18px;border:1px solid var(--surface2);border-radius:3px;background:var(--surface0);cursor:pointer;padding:0;">
+                    <span style="font-size:10px;color:var(--subtext0);">Background</span>
+                  </label>
+                </div>
+                <div>
+                  <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--overlay1);margin-bottom:6px;">Header + Tab Bar</div>
+                  <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                    <input type="color" id="themeAdvHeader" value="#1a1a18" oninput="_onAdvancedHeaderChange(this.value)"
+                      style="width:24px;height:18px;border:1px solid var(--surface2);border-radius:3px;background:var(--surface0);cursor:pointer;padding:0;">
+                    <span style="font-size:10px;color:var(--subtext0);">Background</span>
+                  </label>
+                </div>
+                <div>
+                  <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--overlay1);margin-bottom:6px;">Terminal</div>
+                  <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                    <input type="color" id="themeAdvTermBg" value="#1e1e1c" oninput="_onAdvancedTermChange('background', this.value)"
+                      style="width:24px;height:18px;border:1px solid var(--surface2);border-radius:3px;background:var(--surface0);cursor:pointer;padding:0;">
+                    <span style="font-size:10px;color:var(--subtext0);">Background</span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                    <input type="color" id="themeAdvTermFg" value="#e8e4dc" oninput="_onAdvancedTermChange('foreground', this.value)"
+                      style="width:24px;height:18px;border:1px solid var(--surface2);border-radius:3px;background:var(--surface0);cursor:pointer;padding:0;">
+                    <span style="font-size:10px;color:var(--subtext0);">Text</span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:6px;">
+                    <input type="color" id="themeAdvTermCursor" value="#d97757" oninput="_onAdvancedTermChange('cursor', this.value)"
+                      style="width:24px;height:18px;border:1px solid var(--surface2);border-radius:3px;background:var(--surface0);cursor:pointer;padding:0;">
+                    <span style="font-size:10px;color:var(--subtext0);">Cursor</span>
+                  </label>
+                </div>
+                <div>
+                  <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--overlay1);margin-bottom:6px;">Content Area</div>
+                  <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                    <input type="color" id="themeAdvBase" value="#1e1e1c" oninput="_onAdvancedThemeChange('--content-bg', this.value)"
+                      style="width:24px;height:18px;border:1px solid var(--surface2);border-radius:3px;background:var(--surface0);cursor:pointer;padding:0;">
+                    <span style="font-size:10px;color:var(--subtext0);">Background</span>
+                  </label>
+                </div>
+              </div>
+            </details>
+            </div><!-- end themeEditorPanel -->
           </div>
           <div class="settings-section">
             <div class="settings-section-title">Share Themes</div>
@@ -2594,11 +2928,11 @@
             </div>
           </div>
           <div class="settings-section">
-            <div class="settings-section-title">Voice Input (Wispr Flow)</div>
-            <div class="settings-section-desc">Enable voice-to-text input. Hold Ctrl+Shift to talk, release to transcribe.</div>
+            <div class="settings-section-title">Voice Input (OpenAI Whisper)</div>
+            <div class="settings-section-desc">Hold Ctrl+Shift to talk, release to transcribe. Uses OpenAI Whisper API ($0.006/min).</div>
             <div class="modal-field">
-              <label>API Key</label>
-              <div style="display:flex;gap:0;"><input id="settingsWispr" type="password" placeholder="fl-..." style="border-radius:var(--radius) 0 0 var(--radius);flex:1;"><button type="button" onclick="toggleSecretField('settingsWispr',this)" style="background:var(--surface0);border:1px solid var(--surface1);border-left:none;border-radius:0 var(--radius) var(--radius) 0;padding:0 10px;cursor:pointer;color:var(--subtext0);display:flex;align-items:center;" title="Show/hide"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+              <label>OpenAI API Key</label>
+              <div style="display:flex;gap:0;"><input id="settingsWispr" type="password" placeholder="sk-..." style="border-radius:var(--radius) 0 0 var(--radius);flex:1;"><button type="button" onclick="toggleSecretField('settingsWispr',this)" style="background:var(--surface0);border:1px solid var(--surface1);border-left:none;border-radius:0 var(--radius) var(--radius) 0;padding:0 10px;cursor:pointer;color:var(--subtext0);display:flex;align-items:center;" title="Show/hide"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
             </div>
           </div>
         </div>
@@ -2826,6 +3160,8 @@ const CLI_CONFIG = {
   gemini:  { cmd: 'gemini',  label: 'Gemini CLI'   },
   copilot: { cmd: 'copilot', label: 'Copilot CLI'  },
   codex:   { cmd: 'codex',   label: 'Codex CLI'    },
+
+  grok:    { cmd: 'grok',    label: 'Grok Code'    },
 };
 
 // Terminal themes keyed by visual theme id (decoupled from AI selection)
@@ -3062,6 +3398,8 @@ function closeTerminal(termId) {
   renumberShells();
   // Switch to main
   if (activeTermId === termId) switchTerminal('main');
+  // Refresh orchestrator agent list
+  if (typeof orchRefreshAgents === 'function') orchRefreshAgents();
 }
 
 function getActiveTerm() {
@@ -3158,13 +3496,47 @@ requestAnimationFrame(fitTerminalNow);
             // Main already created in HTML
           }
           break;
+        case 'term-spawned': {
+          // Orchestrator spawned a visible terminal -- create tab for it
+          const tid = msg.termId;
+          if (!termInstances.has(tid)) {
+            createTermInstance(tid, msg.label || msg.cli);
+            const st = getTermAi(tid);
+            st.cli = msg.cli;
+            st.launched = true;
+            st.orchestrated = true;
+            st.taskId = msg.taskId;
+            switchTerminal(tid);
+            // Add orchestrated indicator dot to the tab
+            const tabEl = document.querySelector(`.term-tab[data-term="${tid}"]`);
+            if (tabEl) {
+              const dot = document.createElement('span');
+              dot.className = 'orch-dot';
+              dot.title = 'Orchestrator task ' + msg.taskId;
+              const closeBtn = tabEl.querySelector('.term-tab-close');
+              tabEl.insertBefore(dot, closeBtn);
+            }
+            if (typeof orchRefreshAgents === 'function') orchRefreshAgents();
+          }
+          break;
+        }
         case 'term-exited': {
           // Terminal process exited on its own (not from user clicking X)
-          // Only auto-close if the terminal still exists (wasn't already closed by user)
           const tid = msg.termId;
           if (tid !== 'main' && termInstances.has(tid)) {
-            closeTerminal(tid);
+            const st = termAiState.get(tid);
+            if (st && st.orchestrated) {
+              // Keep orchestrated tabs open so user can see the output
+              st.launched = false;
+              st.orchestrated = false;
+              const dot = document.querySelector(`.term-tab[data-term="${tid}"] .orch-dot`);
+              if (dot) dot.remove();
+            } else {
+              closeTerminal(tid);
+            }
           }
+          // Refresh orchestrator agent list since a terminal is gone
+          if (typeof orchRefreshAgents === 'function') orchRefreshAgents();
           break;
         }
         case 'config-changed':
@@ -3179,6 +3551,9 @@ requestAnimationFrame(fitTerminalNow);
           break;
         case 'git-changed':
           handleGitChanged(msg.repo, msg.branch);
+          break;
+        case 'orchestrator-event':
+          handleOrchestratorEvent(msg);
           break;
       }
     };
@@ -5293,7 +5668,7 @@ function playTone(freq, duration, type = 'sine', volume = 0.15) {
 }
 
 function playStartSound() {
-  // Rising two-tone chime (like Wispr's activation)
+  // Rising two-tone chime (voice activation)
   playTone(600, 0.12, 'sine', 0.12);
   setTimeout(() => playTone(900, 0.15, 'sine', 0.12), 80);
 }
@@ -5493,10 +5868,423 @@ document.addEventListener('keyup', async (e) => {
   }
 });
 
+// ── Orchestrator ────────────────────────────────────────────────────────
+let orchTasks = [];
+let orchAgents = [];
+
+async function orchRefresh() {
+  await Promise.all([orchRefreshAgents(), orchRefreshTasks()]);
+}
+
+async function orchRefreshAgents() {
+  try {
+    const agents = await fetch('/api/orchestrator/agents').then(r => r.json());
+    orchAgents = agents;
+    renderOrchAgents();
+  } catch (_) {}
+}
+
+async function orchRefreshTasks() {
+  try {
+    const filter = document.getElementById('orchTaskFilter')?.value || '';
+    const url = '/api/orchestrator/tasks' + (filter ? '?state=' + filter : '');
+    const tasks = await fetch(url).then(r => r.json());
+    orchTasks = tasks;
+    renderOrchTasks();
+  } catch (_) {}
+}
+
+function renderOrchAgents() {
+  const el = document.getElementById('orchAgentList');
+  if (!el) return;
+  // Only show terminals that have an AI running (not bare shells)
+  const aiAgents = orchAgents.filter(a => {
+    const aiState = typeof termAiState !== 'undefined' ? termAiState.get(a.termId) : null;
+    return aiState?.launched;
+  });
+  if (!aiAgents.length) {
+    el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--overlay0);font-size:11px;">No AI agents running</div>';
+    return;
+  }
+  el.innerHTML = aiAgents.map(a => {
+    const aiState = termAiState.get(a.termId);
+    const cli = aiState?.cli || null;
+    const label = CLI_CONFIG[cli]?.label || cli || 'AI';
+    const busyTask = orchTasks.find(t => t.state === 'running' && (t.targetTermId === a.termId || t.from === a.termId));
+    const finalDot = busyTask ? 'busy' : 'ai';
+
+    return '<div class="orch-agent" onclick="orchSelectAgent(\'' + a.termId + '\')">' +
+      '<div class="orch-agent-dot ' + finalDot + '"></div>' +
+      '<div class="orch-agent-info">' +
+        '<div class="orch-agent-name">' + label + '</div>' +
+        '<div class="orch-agent-sub">' + a.termId + (busyTask ? ' -- working on task' : '') + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+let _orchTimerInterval = null;
+
+function formatOrchDuration(ms) {
+  if (ms < 1000) return '0s';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  return m + 'm ' + (s % 60) + 's';
+}
+
+// Live output buffer per task (captured from headless stdout via server broadcast)
+const _orchTaskOutput = new Map(); // taskId -> string
+
+function renderOrchTasks() {
+  const el = document.getElementById('orchTaskList');
+  const emptyEl = document.getElementById('orchEmptyState');
+  const countEl = document.getElementById('orchTaskCount');
+  if (!el) return;
+
+  if (countEl) countEl.textContent = orchTasks.length + ' task' + (orchTasks.length === 1 ? '' : 's');
+
+  if (!orchTasks.length) {
+    el.innerHTML = '';
+    if (emptyEl) { emptyEl.style.display = ''; el.appendChild(emptyEl); }
+    if (_orchTimerInterval) { clearInterval(_orchTimerInterval); _orchTimerInterval = null; }
+    return;
+  }
+
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  // Preserve expanded state (running tasks default to expanded)
+  const expandedIds = new Set();
+  el.querySelectorAll('.orch-task.expanded').forEach(e => expandedIds.add(e.dataset.id));
+
+  el.innerHTML = orchTasks.map(t => {
+    const isRunning = t.state === 'running';
+    const isPending = t.state === 'pending';
+    const elapsed = t.completedAt
+      ? formatOrchDuration(t.completedAt - t.startedAt)
+      : t.startedAt
+        ? formatOrchDuration(Date.now() - t.startedAt)
+        : '--';
+    const cliLabel = t.cli ? (CLI_CONFIG[t.cli]?.label || t.cli) : t.type;
+    const fromLabel = t.from ? 'from ' + t.from : '';
+    const promptRaw = (t.prompt || '').replace(/\[ORCHESTRATOR TASK [^\]]*\]/g, '').trim();
+    const promptFull = promptRaw.replace(/</g, '&lt;');
+    // Extract a short title from the first sentence/line of the prompt
+    const titleRaw = promptRaw.split(/[.\n]/)[0].substring(0, 80);
+    const taskTitle = titleRaw.replace(/</g, '&lt;') || 'Task';
+    const liveOutput = _orchTaskOutput.get(t.id) || '';
+    const resultBlock = t.result
+      ? '<div class="orch-task-result orch-task-md">' + renderMarkdown(t.result) + '</div>'
+      : '';
+    const errorBlock = t.error
+      ? '<div class="orch-task-result" style="color:var(--red);">' + t.error.replace(/</g, '&lt;') + '</div>'
+      : '';
+    const outputBlock = isRunning && liveOutput
+      ? '<div class="orch-task-section">Live Output</div>' +
+        '<div class="orch-task-output" data-output-id="' + t.id + '">' + liveOutput.substring(liveOutput.length - 2000).replace(/</g, '&lt;') + '</div>'
+      : '';
+    // Running/pending tasks expanded by default, others respect user toggle
+    const expanded = isRunning || expandedIds.has(t.id) ? ' expanded' : '';
+
+    // Action buttons for visible spawns
+    const viewBtn = (t.type === 'visible' && t.targetTermId)
+      ? '<button class="orch-task-btn view" onclick="event.stopPropagation();orchSelectAgent(\'' + t.targetTermId + '\')">View Terminal</button>'
+      : '';
+
+    return '<div class="orch-task ' + t.state + expanded + '" data-id="' + t.id + '" onclick="orchToggleTask(this)">' +
+      '<div class="orch-task-header">' +
+        '<div class="orch-task-left">' +
+          '<div class="orch-task-left-top">' +
+            '<span class="cli-name">' + cliLabel + '</span>' +
+            (fromLabel ? '<span>' + fromLabel + '</span>' : '') +
+          '</div>' +
+          '<div style="font-size:12px;color:var(--text);font-weight:500;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:500px;">' + taskTitle + '</div>' +
+          '<div class="orch-task-left-bottom">' + t.type + ' / ' + t.id + '</div>' +
+          (isRunning ? '<div class="orch-watcher-status" style="font-size:10px;color:var(--yellow);font-family:var(--font-mono);margin-top:2px;display:none;"></div>' : '') +
+        '</div>' +
+        '<div class="orch-task-right">' +
+          '<span class="orch-task-state ' + t.state + '">' + t.state + '</span>' +
+          '<span class="orch-task-timer' + (isRunning ? ' live' : '') + '" data-started="' + (t.startedAt || '') + '">' + elapsed + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="orch-task-expand">' +
+        '<div class="orch-task-section">Prompt</div>' +
+        '<div class="orch-task-prompt">' + promptFull + '</div>' +
+        outputBlock +
+        (resultBlock ? '<div class="orch-task-section">Result</div>' + resultBlock : '') +
+        (errorBlock ? '<div class="orch-task-section">Error</div>' + errorBlock : '') +
+        ((viewBtn || isRunning) ? '<div class="orch-task-actions-row">' + viewBtn + (isRunning ? '<button class="orch-task-btn cancel" onclick="event.stopPropagation();orchCancelTask(\'' + t.id + '\')">Cancel Task</button>' : '') + '</div>' : '') +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  // Start/stop live timer for running tasks
+  const hasRunning = orchTasks.some(t => t.state === 'running');
+  if (hasRunning && !_orchTimerInterval) {
+    _orchTimerInterval = setInterval(updateOrchTimers, 1000);
+  } else if (!hasRunning && _orchTimerInterval) {
+    clearInterval(_orchTimerInterval);
+    _orchTimerInterval = null;
+  }
+}
+
+let _orchRefreshCounter = 0;
+function updateOrchTimers() {
+  document.querySelectorAll('.orch-task-timer.live').forEach(el => {
+    const started = parseInt(el.dataset.started);
+    if (started) el.textContent = formatOrchDuration(Date.now() - started);
+  });
+  // Auto-refresh task data every 5 seconds as a safety net
+  // (WebSocket events should handle most updates, but this catches missed ones)
+  _orchRefreshCounter++;
+  if (_orchRefreshCounter % 5 === 0) orchRefreshTasks();
+}
+
+function orchToggleTask(el) {
+  el.classList.toggle('expanded');
+}
+
+function orchSelectAgent(termId) {
+  switchTab('terminal');
+  if (typeof switchTerminal === 'function') switchTerminal(termId);
+}
+
+async function orchCancelTask(taskId) {
+  await fetch('/api/orchestrator/cancel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ taskId }),
+  });
+  orchRefreshTasks();
+}
+
+async function orchCleanup() {
+  const ok = await confirmDialog('Clear all completed, failed, and timed out tasks?', { confirmText: 'Clear All', danger: true });
+  if (!ok) return;
+  // Clean up everything (maxAgeMs=0 removes all non-running tasks)
+  const res = await fetch('/api/orchestrator/cleanup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ maxAgeMs: 0 }),
+  }).then(r => r.json());
+  _orchTaskOutput.clear();
+  if (res.cleaned > 0) toast(res.cleaned + ' task(s) cleaned up', 'success');
+  else toast('Nothing to clean up', 'info');
+  orchRefreshTasks();
+}
+
+const CLI_COLORS = { claude: '#d97757', gemini: '#078efa', copilot: '#8534f3', codex: '#10a37f', grok: '#ef4444' };
+
+async function orchShowDispatchDialog() {
+  // Collect running agents and all available CLIs for spawn
+  const agents = orchAgents.filter(a => {
+    const st = typeof termAiState !== 'undefined' ? termAiState.get(a.termId) : null;
+    return st?.launched;
+  });
+
+  // Fetch repos for the repo selector
+  let repos = {};
+  let activeRepo = '';
+  try {
+    const [repoData, ctxData] = await Promise.all([
+      fetch('/api/repos').then(r => r.json()),
+      fetch('/api/ui/context').then(r => r.json()),
+    ]);
+    repos = repoData || {};
+    activeRepo = ctxData.activeRepo || '';
+  } catch (_) {}
+
+  const repoOptions = Object.entries(repos).map(([name, repoPath]) =>
+    '<option value="' + name + '"' + (name === activeRepo ? ' selected' : '') + '>' + name + '</option>'
+  ).join('');
+
+  // Build agent option cards (running agents + spawn options)
+  let agentCards = '';
+  agents.forEach(a => {
+    const st = termAiState.get(a.termId);
+    const cli = st?.cli || 'unknown';
+    const label = CLI_CONFIG[cli]?.label || cli;
+    const color = CLI_COLORS[cli] || 'var(--overlay1)';
+    agentCards += '<button class="orch-dispatch-agent" data-value="' + a.termId + '" data-mode="dispatch" onclick="orchSelectDispatchTarget(this)">' +
+      '<span class="orch-dispatch-dot" style="background:' + color + '"></span>' +
+      '<span class="orch-dispatch-label">' + label + '</span>' +
+      '<span class="orch-dispatch-sub">' + a.termId + ' -- inject into running session</span>' +
+    '</button>';
+  });
+  // Spawn options (visible terminal)
+  Object.entries(CLI_CONFIG).forEach(([k, v]) => {
+    const color = CLI_COLORS[k] || 'var(--overlay1)';
+    agentCards += '<button class="orch-dispatch-agent" data-value="spawn:' + k + '" data-mode="spawn" onclick="orchSelectDispatchTarget(this)">' +
+      '<span class="orch-dispatch-dot" style="background:' + color + '"></span>' +
+      '<span class="orch-dispatch-label">' + v.label + '</span>' +
+      '<span class="orch-dispatch-sub">spawn new terminal</span>' +
+    '</button>';
+  });
+
+  const overlay = document.createElement('div');
+  overlay.id = 'orchDispatchOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);';
+  overlay.innerHTML =
+    '<div style="background:var(--base);border:1px solid var(--surface1);border-radius:var(--radius-lg);padding:0;width:520px;max-width:90vw;overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,0.6);">' +
+      '<div style="padding:16px 20px;border-bottom:1px solid var(--surface0);display:flex;align-items:center;gap:8px;">' +
+        '<i data-lucide="send" style="width:16px;height:16px;color:var(--accent);"></i>' +
+        '<span style="font-size:14px;font-weight:600;color:var(--text);">Dispatch Task</span>' +
+      '</div>' +
+      '<div style="padding:16px 20px;">' +
+        '<div style="display:flex;gap:12px;margin-bottom:16px;">' +
+          '<div style="flex:1;">' +
+            '<div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--overlay1);margin-bottom:6px;">Repository</div>' +
+            '<select id="orchDispatchRepo" style="width:100%;padding:8px 10px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);border-radius:var(--radius);font:12px var(--font-ui);outline:none;transition:border-color 0.15s;" onfocus="this.style.borderColor=\'var(--accent)\'" onblur="this.style.borderColor=\'var(--surface1)\'">' +
+              repoOptions +
+            '</select>' +
+          '</div>' +
+        '</div>' +
+        '<div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--overlay1);margin-bottom:8px;">Target</div>' +
+        '<div id="orchDispatchAgentList" style="display:flex;flex-direction:column;gap:4px;max-height:200px;overflow-y:auto;">' +
+          agentCards +
+        '</div>' +
+        '<div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--overlay1);margin:16px 0 8px;">Prompt</div>' +
+        '<textarea id="orchDispatchPrompt" rows="5" style="width:100%;padding:10px 12px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);border-radius:var(--radius);font:12px/1.5 var(--font-mono);resize:vertical;outline:none;box-sizing:border-box;transition:border-color 0.15s;" onfocus="this.style.borderColor=\'var(--accent)\'" onblur="this.style.borderColor=\'var(--surface1)\'" placeholder="Describe the task for the target AI..."></textarea>' +
+      '</div>' +
+      '<div style="padding:12px 20px;border-top:1px solid var(--surface0);display:flex;gap:8px;justify-content:flex-end;background:var(--mantle);">' +
+        '<button onclick="document.getElementById(\'orchDispatchOverlay\').remove()" style="padding:8px 16px;background:var(--surface1);color:var(--text);border:none;border-radius:var(--radius);font:12px var(--font-ui);cursor:pointer;transition:background 0.1s;" onmouseenter="this.style.background=\'var(--surface2)\'" onmouseleave="this.style.background=\'var(--surface1)\'">Cancel</button>' +
+        '<button onclick="orchDoDispatch()" style="padding:8px 16px;background:var(--accent);color:var(--crust);border:none;border-radius:var(--radius);font:12px var(--font-ui);font-weight:600;cursor:pointer;transition:opacity 0.1s;" onmouseenter="this.style.opacity=0.9" onmouseleave="this.style.opacity=1">Dispatch</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  try { lucide.createIcons({ attrs: { class: '' }, nameAttr: 'data-lucide' }); } catch (_) {}
+  // Auto-select first agent
+  const first = overlay.querySelector('.orch-dispatch-agent');
+  if (first) first.classList.add('selected');
+  setTimeout(() => document.getElementById('orchDispatchPrompt')?.focus(), 50);
+}
+
+function orchSelectDispatchTarget(el) {
+  el.closest('#orchDispatchAgentList').querySelectorAll('.orch-dispatch-agent').forEach(e => e.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+async function orchDoDispatch() {
+  const selected = document.querySelector('#orchDispatchAgentList .orch-dispatch-agent.selected');
+  const target = selected?.dataset.value;
+  const mode = selected?.dataset.mode;
+  const rawPrompt = document.getElementById('orchDispatchPrompt')?.value?.trim();
+  const repoSelect = document.getElementById('orchDispatchRepo');
+  const repoName = repoSelect?.value || '';
+  document.getElementById('orchDispatchOverlay')?.remove();
+
+  if (!target || !rawPrompt) return;
+
+  // Prepend repo context so the AI knows which repo to work on
+  let prompt = rawPrompt;
+  if (repoName) {
+    try {
+      const repos = await fetch('/api/repos').then(r => r.json());
+      const repoPath = repos[repoName];
+      if (repoPath) {
+        prompt = `[REPO CONTEXT] Work on the "${repoName}" repository located at: ${repoPath.replace(/\\/g, '/')}\nAll file reads, searches, and edits should target that directory. Do NOT cd there -- stay in your current directory but use the full path for file operations.\n\n${rawPrompt}`;
+      }
+    } catch (_) {}
+  }
+
+  try {
+    if (mode === 'spawn') {
+      const cli = target.replace('spawn:', '');
+      await fetch('/api/orchestrator/spawn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cli, prompt, visible: true }),
+      });
+      toast(cli + ' spawned in new terminal', 'success');
+    } else {
+      await fetch('/api/orchestrator/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetTermId: target, prompt }),
+      });
+      toast('Task dispatched to ' + target, 'success');
+    }
+    orchRefreshTasks();
+  } catch (err) {
+    toast('Dispatch failed: ' + err.message, 'error');
+  }
+}
+
+// Listen for orchestrator WebSocket events
+function handleOrchestratorEvent(msg) {
+  if (msg.event === 'task-update') {
+    orchRefreshTasks();
+    orchRefreshAgents();
+
+    // Update orchestrated terminal indicators on task completion
+    const task = msg.task;
+    if (task && task.targetTermId && task.type === 'visible') {
+      const st = termAiState.get(task.targetTermId);
+      if (st && st.orchestrated && task.state !== 'running' && task.state !== 'pending') {
+        const dot = document.querySelector(`.term-tab[data-term="${task.targetTermId}"] .orch-dot`);
+        if (dot) {
+          dot.classList.add('done');
+          setTimeout(() => dot.remove(), 3000);
+        }
+        st.orchestrated = false;
+      }
+    }
+  }
+  // Live output streaming for headless tasks
+  if (msg.event === 'task-output' && msg.taskId) {
+    const prev = _orchTaskOutput.get(msg.taskId) || '';
+    _orchTaskOutput.set(msg.taskId, prev + (msg.chunk || ''));
+    const outputEl = document.querySelector(`.orch-task-output[data-output-id="${msg.taskId}"]`);
+    if (outputEl) {
+      const full = _orchTaskOutput.get(msg.taskId);
+      outputEl.textContent = full.substring(full.length - 2000);
+      outputEl.scrollTop = outputEl.scrollHeight;
+    } else {
+      renderOrchTasks();
+    }
+  }
+  // Watcher events: show what the orchestrator agent is doing
+  if (msg.event === 'watcher' && msg.taskId) {
+    const statusEl = document.querySelector(`.orch-task[data-id="${msg.taskId}"] .orch-watcher-status`);
+    if (statusEl) {
+      statusEl.textContent = msg.action;
+      statusEl.style.display = '';
+      clearTimeout(statusEl._fadeTimer);
+      statusEl._fadeTimer = setTimeout(() => { statusEl.style.display = 'none'; }, 5000);
+    }
+  }
+  // Orchestration mode change
+  if (msg.event === 'mode-change') {
+    setOrchestrationMode(msg.orchestrating);
+  }
+}
+
+function setOrchestrationMode(active) {
+  const mainTab = document.getElementById('mainTermTab');
+  const orchBtn = document.getElementById('orchestratorTabBtn');
+
+  if (active) {
+    // Add orchestrator badge to main terminal tab
+    if (mainTab && !mainTab.querySelector('.orch-mode-badge')) {
+      const badge = document.createElement('span');
+      badge.className = 'orch-mode-badge';
+      badge.textContent = 'Orchestrating';
+      mainTab.appendChild(badge);
+    }
+  } else {
+    // Remove orchestrator badge
+    if (mainTab) {
+      const badge = mainTab.querySelector('.orch-mode-badge');
+      if (badge) badge.remove();
+    }
+  }
+}
+
 // ── Bottom Hints Visibility ─────────────────────────────────────────────
 function updateVoiceHint() {
   const hint = document.getElementById('voiceHint');
-  if (hint) hint.classList.toggle('visible', !!(configData.WisprFlowKey));
+  if (hint) hint.classList.toggle('visible', !!(configData.WhisperKey));
   updateScreenHint();
 }
 
@@ -5561,6 +6349,8 @@ window.open = function(url, target) {
 switchCli(activeCli);
 try { lucide.createIcons(); } catch (_) {}
 connect();
+// Initial orchestrator refresh so tasks show immediately on page load
+setTimeout(() => orchRefresh(), 1000);
 (async () => {
   await loadConfig();
   // Show onboarding if no config exists
@@ -5578,7 +6368,7 @@ document.addEventListener('click', (e) => {
 
 function getTermAi(termId) {
   const tid = termId || activeTermId;
-  if (!termAiState.has(tid)) termAiState.set(tid, { cli: null, launched: false });
+  if (!termAiState.has(tid)) termAiState.set(tid, { cli: null, launched: false, orchestrated: false, taskId: null });
   return termAiState.get(tid);
 }
 
@@ -5839,6 +6629,7 @@ function switchTab(tab, preserveSearch) {
   if (tab === 'files') { populateFilesRepoSelect(); if (filesCurrentRepo) { loadFileTree(filesCurrentPath); loadProjectScripts(); } }
   if (tab === 'prs') { populatePRsRepoSelect(); loadPRs(); }
   if (tab === 'notes') loadNotesList();
+  if (tab === 'orchestrator') orchRefresh();
   notifyPluginIframes('tabActivated', { tab: tab });
 }
 
@@ -7430,6 +8221,8 @@ const AI_TOOLS_META = {
   gemini:  { name: 'Gemini CLI',   color: '#078efa', pkg: '@google/gemini-cli', docs: 'https://github.com/google-gemini/gemini-cli' },
   copilot: { name: 'Copilot CLI',  color: '#8534f3', pkg: '@github/copilot', docs: 'https://www.npmjs.com/package/@github/copilot' },
   codex:   { name: 'Codex CLI',    color: '#10a37f', pkg: '@openai/codex', docs: 'https://github.com/openai/codex' },
+
+  grok:    { name: 'Grok Code',    color: '#ef4444', pkg: '@webdevtoday/grok-cli', docs: 'https://github.com/superagent-ai/grok-cli' },
 };
 
 let _aiToolsStatus = {}; // cli -> { installed, path }
@@ -7555,13 +8348,16 @@ function switchSettingsTab(tabId, btn) {
   // Trigger AI detection when switching to AI tab
   if (tabId === 'ai') detectAiTools();
   if (tabId === 'theme') renderThemeList();
+  // Semi-transparent overlay on theme tab so user can preview live
+  const modal = document.getElementById('settingsModal');
+  if (modal) modal.classList.toggle('theme-preview', tabId === 'theme');
 }
 
 function openSettings(tab) {
   document.getElementById('settingsOrg').value = configData.AzureDevOpsOrg || '';
   document.getElementById('settingsPAT').value = configData.AzureDevOpsPAT || '';
   document.getElementById('settingsUser').value = configData.DefaultUser || '';
-  document.getElementById('settingsWispr').value = configData.WisprFlowKey || '';
+  document.getElementById('settingsWispr').value = configData.WhisperKey || '';
   document.getElementById('settingsGitHubPAT').value = configData.GitHubPAT || '';
   document.getElementById('settingsDefaultCli').value = configData.DefaultCli || activeCli || 'claude';
   document.getElementById('settingsTeam').value = configData.DefaultTeam || '';
@@ -7582,7 +8378,9 @@ function openSettings(tab) {
   document.getElementById(`settingsTab-${targetTab}`).classList.add('active');
   const navBtn = document.querySelector(`.settings-nav-btn[data-settings-tab="${targetTab}"]`);
   if (navBtn) navBtn.classList.add('active');
-  document.getElementById('settingsModal').classList.add('open');
+  const settingsModal = document.getElementById('settingsModal');
+  settingsModal.classList.add('open');
+  settingsModal.classList.toggle('theme-preview', targetTab === 'theme');
   try { lucide.createIcons(); } catch (_) {}
 }
 
@@ -7817,7 +8615,7 @@ async function saveSettings() {
     DefaultTeam: document.getElementById('settingsTeam').value.trim(),
     DefaultUser: document.getElementById('settingsUser').value.trim(),
     GitHubPAT: document.getElementById('settingsGitHubPAT').value.trim(),
-    WisprFlowKey: document.getElementById('settingsWispr').value.trim(),
+    WhisperKey: document.getElementById('settingsWispr').value.trim(),
     DefaultCli: defaultCli,
     Repos: configData.Repos || {},
   };
@@ -7977,10 +8775,14 @@ function _hslToHex(h, s, l) {
 
 // ── Theme generation from 4 inputs ───────────────────────────────────────
 function generateThemeVars(mode, tint, text, accent) {
-  const [h] = _hexToHsl(tint);
+  const [h, tintSat, tintLit] = _hexToHsl(tint);
   const [th, ts] = _hexToHsl(text);
   const isDark = mode === 'dark';
-  const bgSat = isDark ? 6 : 10;
+  // Derive background saturation from the tint color's own saturation.
+  // A grey/black/white tint = 0 saturation backgrounds.
+  // A vivid tint = stronger tint in backgrounds (capped for subtlety).
+  const litFactor = (tintLit > 5 && tintLit < 95) ? 1 : 0;
+  const bgSat = Math.round((tintSat / 100) * (isDark ? 12 : 16) * litFactor);
   const bg = (l) => _hslToHex(h, bgSat, l);
   const txt = (l) => _hslToHex(th, Math.min(ts, 8), l);
 
@@ -8018,7 +8820,37 @@ function generateThemeVars(mode, tint, text, accent) {
 function getSavedThemes() {
   try { return JSON.parse(localStorage.getItem(THEME_STORAGE_KEY) || '[]'); } catch (_) { return []; }
 }
-function setSavedThemes(themes) { localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(themes)); }
+function setSavedThemes(themes) {
+  localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(themes));
+  // Also persist to server (config/themes.json) for portability
+  const active = localStorage.getItem(ACTIVE_THEME_KEY) || null;
+  fetch('/api/themes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ themes, active }),
+  }).catch(() => {});
+}
+
+// Load themes from server on startup and sync to localStorage
+async function _loadThemesFromServer() {
+  try {
+    const data = await fetch('/api/themes').then(r => r.json());
+    if (data.themes && data.themes.length) {
+      // Merge: server themes take precedence
+      const local = getSavedThemes();
+      const merged = [...data.themes];
+      // Add any local-only themes not on server
+      for (const lt of local) {
+        if (!merged.some(t => t.name === lt.name)) merged.push(lt);
+      }
+      localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(merged));
+      // Restore active theme from server if not set locally
+      if (data.active && !localStorage.getItem(ACTIVE_THEME_KEY)) {
+        localStorage.setItem(ACTIVE_THEME_KEY, data.active);
+      }
+    }
+  } catch (_) {}
+}
 
 // ── Render theme list ────────────────────────────────────────────────────
 function renderThemeList() {
@@ -8071,6 +8903,9 @@ function _initEditorPickers() {
   if (tintEl) { tintEl.value = tint; document.getElementById('themeHexTint').textContent = tint; }
   if (textEl) { textEl.value = text; document.getElementById('themeHexText').textContent = text; }
   if (accentEl) { accentEl.value = accent; document.getElementById('themeHexAccent').textContent = accent; }
+  // Sync advanced pickers
+  const vars = generateThemeVars(mode, tint, text, accent);
+  _syncAdvancedPickers(vars);
   _editorMode = mode;
   _updateModeToggle(mode);
 }
@@ -8114,6 +8949,68 @@ function _onSimpleThemeChange(input) {
   const accent = document.getElementById('themeAccent')?.value || '#d97757';
   const vars = generateThemeVars(_editorMode, tint, text, accent);
   _applyVarsAsCustom(vars);
+  // Sync advanced pickers with generated values
+  _syncAdvancedPickers(vars);
+}
+
+function _syncAdvancedPickers(vars) {
+  const map = {
+    themeAdvSidebar: vars['--mantle'],
+    themeAdvHeader: vars['--mantle'],
+    themeAdvBase: vars['--base'],
+    themeAdvTermBg: vars['--term-bg'] || vars['--base'],
+    themeAdvTermFg: vars['--term-fg'] || vars['--text'],
+    themeAdvTermCursor: vars['--term-cursor'] || vars['--accent'],
+  };
+  for (const [id, val] of Object.entries(map)) {
+    const el = document.getElementById(id);
+    if (el && val) el.value = val;
+  }
+  // Reset area overrides when basic controls change (they regenerate everything)
+  const root = document.documentElement;
+  root.style.removeProperty('--sidebar-bg');
+  root.style.removeProperty('--header-bg');
+  root.style.removeProperty('--tab-bar-bg');
+  root.style.removeProperty('--content-bg');
+}
+
+function _onAdvancedThemeChange(cssVar, value) {
+  document.documentElement.style.setProperty(cssVar, value);
+  _markThemeDirty();
+}
+
+function _onAdvancedHeaderChange(value) {
+  document.documentElement.style.setProperty('--header-bg', value);
+  document.documentElement.style.setProperty('--tab-bar-bg', value);
+  _markThemeDirty();
+}
+
+function _onAdvancedTermChange(prop, value) {
+  if (!TERM_THEMES['_active']) {
+    TERM_THEMES['_active'] = { ...getActiveTermTheme() };
+  }
+  TERM_THEMES['_active'][prop] = value;
+  applyShellTheme();
+  _markThemeDirty();
+}
+
+function toggleThemeEditor() {
+  const panel = document.getElementById('themeEditorPanel');
+  const btn = document.getElementById('themeNewBtn');
+  if (!panel) return;
+  const showing = panel.style.display !== 'none';
+  panel.style.display = showing ? 'none' : '';
+  if (btn) btn.textContent = showing ? 'New Theme' : 'Close Editor';
+  if (!showing) _initEditorPickers();
+}
+
+function _markThemeDirty() {
+  if (!_themeEditorDirty) {
+    _themeEditorDirty = true;
+    const status = document.getElementById('themeEditorStatus');
+    if (status) status.style.display = '';
+    renderThemeList();
+  }
 }
 
 function _applyVarsAsCustom(vars) {
@@ -8146,15 +9043,15 @@ function saveCustomThemeFromEditor() {
   const existing = themes.findIndex(t => t.name === name);
   if (existing >= 0) themes[existing] = themeObj;
   else themes.push(themeObj);
-  setSavedThemes(themes);
   localStorage.setItem(ACTIVE_THEME_KEY, name);
+  setSavedThemes(themes);
   _applyVarsAsCustom(vars);
   _themeEditorDirty = false;
   const status = document.getElementById('themeEditorStatus');
   if (status) status.style.display = 'none';
   document.getElementById('themeNameInput').value = '';
   renderThemeList();
-  toast('Theme saved!', 'success');
+  toast('Theme "' + name + '" saved', 'success');
 }
 
 function editThemeInEditor(idx) {
@@ -8183,7 +9080,15 @@ function applyBuiltinTheme(themeId) {
   if (status) status.style.display = 'none';
   const root = document.documentElement;
   ALL_CSS_KEYS.forEach(k => root.style.removeProperty(k));
+  // Clear area-specific overrides
+  ['--sidebar-bg','--header-bg','--tab-bar-bg','--content-bg'].forEach(k => root.style.removeProperty(k));
   localStorage.setItem(ACTIVE_THEME_KEY, `__builtin_${themeId}`);
+  // Persist active selection to server
+  fetch('/api/themes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ themes: getSavedThemes(), active: `__builtin_${themeId}` }),
+  }).catch(() => {});
   activeThemeId = themeId;
   delete TERM_THEMES['_active'];
   root.setAttribute('data-theme', themeId);
@@ -8271,7 +9176,7 @@ function restoreCustomTheme() {
   if (stored.startsWith('__builtin_')) {
     let id = stored.replace('__builtin_', '');
     // Migrate old CLI-based theme IDs
-    const migrate = { claude: 'warm-metallic', gemini: 'industrial-blue', codex: 'futuristic-green', copilot: 'warm-metallic' };
+    const migrate = { claude: 'warm-metallic', gemini: 'industrial-blue', codex: 'futuristic-green', copilot: 'warm-metallic', grok: 'warm-metallic' };
     if (migrate[id]) { id = migrate[id]; localStorage.setItem(ACTIVE_THEME_KEY, `__builtin_${id}`); }
     if (BUILTIN_THEMES.some(b => b.id === id)) applyBuiltinTheme(id);
     return;
@@ -8280,7 +9185,8 @@ function restoreCustomTheme() {
   const idx = themes.findIndex(t => t.name === stored);
   if (idx >= 0) applyCustomTheme(idx);
 }
-setTimeout(restoreCustomTheme, 100);
+// Load themes from server, then restore the active theme
+_loadThemesFromServer().then(() => restoreCustomTheme()).catch(() => restoreCustomTheme());
 
 
 // ── Utilities ───────────────────────────────────────────────────────────
@@ -8361,7 +9267,7 @@ function esc(str) {
 
 // ── Onboarding Wizard ───────────────────────────────────────────────────
 let _obStep = 0;
-let _obData = { displayName: '', org: '', project: '', pat: '', team: '', ghPat: '', wisprKey: '', defaultCli: 'claude', repos: {} };
+let _obData = { displayName: '', org: '', project: '', pat: '', team: '', ghPat: '', whisperKey: '', defaultCli: 'claude', repos: {} };
 let _obAiStatus = {};
 
 const OB_STEPS = [
@@ -8398,6 +9304,8 @@ const OB_STEPS = [
         <option value="gemini"${_obData.defaultCli==='gemini'?' selected':''}>Gemini CLI</option>
         <option value="copilot"${_obData.defaultCli==='copilot'?' selected':''}>Copilot CLI</option>
         <option value="codex"${_obData.defaultCli==='codex'?' selected':''}>Codex CLI</option>
+
+        <option value="grok"${_obData.defaultCli==='grok'?' selected':''}>Grok Code</option>
       </select></div>
       <div class="onboarding-hint">Don't have any installed? Each tool has a one-click Install button above. They require <code>npm</code> (Node.js) which is already installed since this app is running.</div>`,
     onEnter: () => obDetectAiTools(),
@@ -8441,10 +9349,10 @@ const OB_STEPS = [
       </div>`,
     onEnter: () => obRenderRepos(),
   }),
-  // 5: Integrations (GitHub PAT + Wispr)
+  // 5: Integrations (GitHub PAT + Whisper)
   () => ({
     title: 'Integrations',
-    subtitle: 'Optional: Connect GitHub for pull request reviews and Wispr Flow for voice input.',
+    subtitle: 'Optional: Connect GitHub for pull request reviews and OpenAI Whisper for voice input.',
     html: `<div class="onboarding-section-title">GitHub</div>
       <div class="onboarding-field"><label>Personal Access Token</label><input id="obGhPat" type="password" placeholder="ghp_..." value="${esc(_obData.ghPat)}" oninput="_obData.ghPat=this.value"></div>
       <div class="onboarding-hint" style="margin-bottom:18px;">
@@ -8455,9 +9363,9 @@ const OB_STEPS = [
         4. Click Generate and copy the <code>ghp_...</code> token<br>
         5. If your org uses SAML/SSO, click <strong>Configure SSO</strong> next to the token and authorize it
       </div>
-      <div class="onboarding-section-title">Voice Input (Wispr Flow)</div>
-      <div class="onboarding-field"><label>API Key (optional)</label><input id="obWispr" type="password" placeholder="fl-..." value="${esc(_obData.wisprKey)}" oninput="_obData.wisprKey=this.value"></div>
-      <div style="font-size:10px;color:var(--subtext0);margin-top:3px;">Hold Ctrl+Shift to talk, release to transcribe. Requires a Wispr Flow subscription.</div>`,
+      <div class="onboarding-section-title">Voice Input (OpenAI Whisper)</div>
+      <div class="onboarding-field"><label>OpenAI API Key (optional)</label><input id="obWispr" type="password" placeholder="sk-..." value="${esc(_obData.whisperKey)}" oninput="_obData.whisperKey=this.value"></div>
+      <div style="font-size:10px;color:var(--subtext0);margin-top:3px;">Hold Ctrl+Shift to talk, release to transcribe. Uses OpenAI Whisper ($0.006/min).</div>`,
   }),
   // 6: Overview
   () => ({
@@ -8480,7 +9388,7 @@ const OB_STEPS = [
 
 function startOnboarding() {
   _obStep = 0;
-  _obData = { displayName: '', org: '', project: '', pat: '', team: '', ghPat: '', wisprKey: '', defaultCli: 'claude', repos: {} };
+  _obData = { displayName: '', org: '', project: '', pat: '', team: '', ghPat: '', whisperKey: '', defaultCli: 'claude', repos: {} };
   document.getElementById('onboarding').classList.add('visible');
   obRender();
 }
@@ -8520,7 +9428,7 @@ async function obFinish() {
     DefaultUser: _obData.displayName.trim(),
     DefaultCli: _obData.defaultCli,
     GitHubPAT: _obData.ghPat.trim(),
-    WisprFlowKey: _obData.wisprKey.trim(),
+    WhisperKey: _obData.whisperKey.trim(),
     Repos: _obData.repos,
   };
   try {
@@ -8572,7 +9480,7 @@ function obRenderAiTools() {
     <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--subtext0);margin:8px 0 6px;">AI Tools</div>`;
 
   // AI tool cards
-  const meta = { claude: { name: 'Claude Code', color: '#d97757', pkg: '@anthropic-ai/claude-code' }, gemini: { name: 'Gemini CLI', color: '#078efa', pkg: '@google/gemini-cli' }, copilot: { name: 'Copilot CLI', color: '#8534f3', pkg: '@github/copilot' }, codex: { name: 'Codex CLI', color: '#10a37f', pkg: '@openai/codex' } };
+  const meta = { claude: { name: 'Claude Code', color: '#d97757', pkg: '@anthropic-ai/claude-code' }, gemini: { name: 'Gemini CLI', color: '#078efa', pkg: '@google/gemini-cli' }, copilot: { name: 'Copilot CLI', color: '#8534f3', pkg: '@github/copilot' }, codex: { name: 'Codex CLI', color: '#10a37f', pkg: '@openai/codex' }, grok: { name: 'Grok Code', color: '#ef4444', pkg: '@webdevtoday/grok-cli' } };
   const toolCards = Object.entries(meta).map(([id, m]) => {
     const installed = _obAiStatus[id]?.installed;
     return `<div class="ai-tool-card">
@@ -8706,6 +9614,22 @@ function renderMarkdown(text) {
     earlyCodeBlocks.push(`<pre style="background:var(--crust);padding:12px 16px;border-radius:var(--radius);overflow-x:auto;font:12px var(--font-mono);margin:8px 0;border:1px solid var(--surface0);white-space:pre;"><code${langClass}>${escaped}</code></pre>`);
     return `%%EARLYCODE_${earlyCodeBlocks.length - 1}%%`;
   });
+  // Process core markdown formatting BEFORE link conversion (links create <a> tags
+  // which trigger the HTML branch that skips markdown parsing)
+  // Bold and italic (must come before list processing since lists contain bold)
+  text = text.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/(?<!\*)\*([^\s*](?:.*?[^\s*])?)\*(?!\*)/g, '<em>$1</em>');
+  // Headers
+  text = text.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
+  text = text.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
+  text = text.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+  text = text.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  text = text.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  text = text.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  // Lists
+  text = text.replace(/^\d+\. (.+)$/gm, '<li style="margin-left:16px;margin-bottom:2px;">$1</li>');
+  text = text.replace(/^[-*] (.+)$/gm, '<li style="margin-left:16px;margin-bottom:2px;">$1</li>');
   // Convert markdown images to <img> (works for both HTML and markdown paths)
   // Nested: [![alt](img)](link)
   text = text.replace(/\[!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)/g, '<a href="$3" target="_blank"><img src="$2" alt="$1"></a>');
@@ -8852,6 +9776,26 @@ function formatRelationType(rel) {
     'System.LinkTypes.Dependency-Reverse': 'Predecessor',
   };
   return map[rel] || rel.split('.').pop();
+}
+
+function confirmDialog(message, { confirmText = 'Confirm', cancelText = 'Cancel', danger = false } = {}) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);';
+    const accentColor = danger ? 'var(--red)' : 'var(--accent)';
+    overlay.innerHTML =
+      '<div style="background:var(--base);border:1px solid var(--surface1);border-radius:var(--radius-lg);padding:0;width:400px;max-width:90vw;overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,0.6);">' +
+        '<div style="padding:20px 24px 12px;font-size:13px;color:var(--text);line-height:1.5;">' + message.replace(/</g, '&lt;') + '</div>' +
+        '<div style="padding:12px 24px 16px;display:flex;gap:8px;justify-content:flex-end;">' +
+          '<button id="_confirmNo" style="padding:8px 16px;background:var(--surface1);color:var(--text);border:none;border-radius:var(--radius);font:12px var(--font-ui);cursor:pointer;transition:background 0.1s;">' + cancelText + '</button>' +
+          '<button id="_confirmYes" style="padding:8px 16px;background:' + accentColor + ';color:var(--crust);border:none;border-radius:var(--radius);font:12px var(--font-ui);font-weight:600;cursor:pointer;transition:opacity 0.1s;">' + confirmText + '</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    overlay.querySelector('#_confirmYes').onclick = () => { overlay.remove(); resolve(true); };
+    overlay.querySelector('#_confirmNo').onclick = () => { overlay.remove(); resolve(false); };
+    overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
+  });
 }
 
 function toast(msg, type = 'info') {

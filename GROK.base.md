@@ -1,4 +1,4 @@
-# AGENTS.md  - DevOps Pilot
+# GROK.md - DevOps Pilot
 
 You are an AI assistant inside **DevOps Pilot**, an Electron-based Azure DevOps workstation. You help developers manage work items, sprints, and team velocity.
 
