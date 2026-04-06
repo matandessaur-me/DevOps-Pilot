@@ -30,44 +30,48 @@ function saveDisplayPref(displayId) {
   } catch (_) { /* best effort */ }
 }
 
-function killZombiesAndRelaunch() {
-  if (process.platform !== 'win32') {
-    // Non-Windows: can't reliably detect/kill zombie processes, just quit
-    dialog.showErrorBox('DevOps Pilot', 'Another instance appears to be running but is unresponsive.\nPlease close it manually and try again.');
-    app.exit(1);
-    return;
-  }
+/**
+ * Kill anything holding port 3800 and/or any stale Electron instances.
+ * Returns true if something was killed.
+ */
+function killStaleProcesses() {
+  if (process.platform !== 'win32') return false;
   const { execSync } = require('child_process');
   const myPid = process.pid;
-  const exeName = path.basename(process.execPath);
-  let killed = false;
+  const pidsToKill = new Set();
+
+  // Strategy 1: find PIDs holding port 3800 via netstat
   try {
-    const out = execSync(`tasklist /FI "IMAGENAME eq ${exeName}" /FO CSV /NH`, { encoding: 'utf8' });
-    const pids = [];
+    const out = execSync(`netstat -ano | findstr :${PORT} | findstr LISTENING`, { encoding: 'utf8', timeout: 5000 });
     for (const line of out.trim().split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      const m = trimmed.match(/^"[^"]+","(\d+)"/);
-      if (m) {
-        const pid = Number(m[1]);
-        if (pid && pid !== myPid) pids.push(String(pid));
-      }
+      const m = line.trim().match(/\s(\d+)$/);
+      if (m && Number(m[1]) !== myPid) pidsToKill.add(m[1]);
     }
-    if (pids.length) {
-      execSync(`taskkill /F ${pids.map(p => '/PID ' + p).join(' ')}`, { encoding: 'utf8' });
-      killed = true;
+  } catch (_) { /* no listeners on port -- fine */ }
+
+  // Strategy 2: find other Electron instances by exe name
+  try {
+    const exeName = path.basename(process.execPath);
+    const out = execSync(`tasklist /FI "IMAGENAME eq ${exeName}" /FO CSV /NH`, { encoding: 'utf8', timeout: 5000 });
+    for (const line of out.trim().split('\n')) {
+      const m = line.trim().match(/^"[^"]+","(\d+)"/);
+      if (m && Number(m[1]) !== myPid) pidsToKill.add(m[1]);
     }
-  } catch (_) { /* best effort */ }
-  if (killed) {
-    setTimeout(() => { app.relaunch(); app.exit(0); }, 500);
-  } else {
-    dialog.showErrorBox('DevOps Pilot', 'Could not recover from a stale instance.\nPlease close any remaining DevOps Pilot processes and try again.');
-    app.exit(1);
+  } catch (_) {}
+
+  if (pidsToKill.size) {
+    try {
+      execSync(`taskkill /F ${[...pidsToKill].map(p => '/PID ' + p).join(' ')}`, { encoding: 'utf8', timeout: 5000 });
+      console.log('Killed stale process(es):', [...pidsToKill].join(', '));
+      return true;
+    } catch (_) {}
   }
+  return false;
 }
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
+  // Another instance holds the lock. Check if it's actually alive.
   const http = require('http');
   const req = http.get(`http://${HOST}:${PORT}/api/ui/context`, { timeout: 2000 }, (res) => {
     // Server is alive -- the real instance is running, just focus it
@@ -76,14 +80,16 @@ if (!gotLock) {
     res.on('end', () => { app.quit(); });
   });
   req.on('error', () => {
-    // Server not responding -- zombie processes, kill and relaunch
-    console.log('Stale instance detected -- killing zombies and relaunching...');
-    killZombiesAndRelaunch();
+    // Server not responding -- zombie. Kill everything and relaunch.
+    console.log('Stale instance detected -- killing and relaunching...');
+    killStaleProcesses();
+    setTimeout(() => { app.relaunch(); app.exit(0); }, 800);
   });
   req.on('timeout', () => {
     req.destroy();
-    console.log('Stale instance detected -- killing zombies and relaunching...');
-    killZombiesAndRelaunch();
+    console.log('Stale instance detected (timeout) -- killing and relaunching...');
+    killStaleProcesses();
+    setTimeout(() => { app.relaunch(); app.exit(0); }, 800);
   });
 } else {
   app.on('second-instance', () => {
@@ -110,7 +116,12 @@ if (!gotLock) {
 
     server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {
-        dialog.showErrorBox('DevOps Pilot', `Port ${PORT} is already in use.\n\nAnother instance may be running.`);
+        console.log(`Port ${PORT} in use -- killing stale processes and relaunching...`);
+        if (killStaleProcesses()) {
+          setTimeout(() => { app.relaunch(); app.exit(0); }, 800);
+          return;
+        }
+        dialog.showErrorBox('DevOps Pilot', `Port ${PORT} is already in use.\n\nClose any other DevOps Pilot instances and try again.`);
       } else {
         dialog.showErrorBox('Server Error', err.message);
       }
@@ -175,15 +186,23 @@ if (!gotLock) {
       }
     });
 
-    // ── Apply update (pull + install + relaunch) ─────────────────────
+    // ── Apply update (stash + pull + install + relaunch) ──────────────
     addRoute('POST', '/api/update-app', (req, res) => {
       const { exec } = require('child_process');
       const repoRoot = path.resolve(__dirname, '..');
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, status: 'updating' }));
-      // Checkout master, pull latest, install deps, then relaunch
-      exec('git checkout master && git pull && npm install', { cwd: repoRoot, timeout: 120000 }, (err) => {
-        // Relaunch regardless -- if npm install fails the old code is still fine
+      // Stash local changes (semicolon so it continues even if nothing to stash),
+      // then checkout master, pull, and install deps
+      const cmd = 'git stash --include-untracked 2>&1; git checkout master && git pull && npm install';
+      exec(cmd, { cwd: repoRoot, timeout: 120000 }, (err, stdout, stderr) => {
+        if (err) {
+          // Restore stashed changes on failure
+          exec('git stash pop 2>&1', { cwd: repoRoot }, () => {});
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: (stderr || err.message || '').substring(0, 500) }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, status: 'updated' }));
         setTimeout(() => { app.relaunch(); app.exit(0); }, 500);
       });
     });
@@ -215,6 +234,19 @@ if (!gotLock) {
       res.end(JSON.stringify({ canceled: false, path: folderPath, name: folderName }));
     });
 
+    // ── Window controls (custom title bar) ───────────────────────────
+    addRoute('POST', '/api/window/minimize', (req, res) => {
+      if (win) win.minimize();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    });
+
+    addRoute('POST', '/api/window/close', (req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+      if (win) win.close();
+    });
+
     server.on('listening', () => {
       console.log('Server listening, creating window...');
 
@@ -232,7 +264,6 @@ if (!gotLock) {
         width,
         height,
         autoHideMenuBar: true,
-        backgroundColor: '#1a1a18',
         title: 'DevOps Pilot',
         icon: nativeImage.createFromPath(
           fs.existsSync(path.join(__dirname, 'public', 'icon.ico'))
@@ -240,11 +271,7 @@ if (!gotLock) {
             : path.join(__dirname, 'public', 'icon.png')
         ),
         titleBarStyle: 'hidden',
-        titleBarOverlay: {
-          color: '#1a1a18',
-          symbolColor: '#e8e4dc',
-          height: 32,
-        },
+        maximizable: false,
         webPreferences: {
           contextIsolation: true,
           nodeIntegration: false,

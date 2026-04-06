@@ -28,12 +28,12 @@ const templatePath = path.join(repoRoot, 'config', 'config.template.json');
 // ── Static file routes ─────────────────────────────────────────────────────
 const ROUTES = {
   '/':                        { file: path.join(publicDir, 'index.html'),                                          type: 'text/html' },
-  '/xterm.css':               { file: path.join(nodeModules, 'xterm/css/xterm.css'),                               type: 'text/css' },
-  '/xterm.js':                { file: path.join(nodeModules, 'xterm/lib/xterm.js'),                                type: 'application/javascript' },
-  '/xterm-addon-fit.js':      { file: path.join(nodeModules, 'xterm-addon-fit/lib/xterm-addon-fit.js'),            type: 'application/javascript' },
-  '/xterm-addon-webgl.js':    { file: path.join(nodeModules, 'xterm-addon-webgl/lib/xterm-addon-webgl.js'),        type: 'application/javascript' },
-  '/xterm-addon-web-links.js':{ file: path.join(nodeModules, 'xterm-addon-web-links/lib/xterm-addon-web-links.js'),type: 'application/javascript' },
-  '/xterm-addon-unicode11.js':{ file: path.join(nodeModules, 'xterm-addon-unicode11/lib/xterm-addon-unicode11.js'),type: 'application/javascript' },
+  '/xterm.css':               { file: path.join(nodeModules, '@xterm/xterm/css/xterm.css'),                          type: 'text/css' },
+  '/xterm.js':                { file: path.join(nodeModules, '@xterm/xterm/lib/xterm.js'),                           type: 'application/javascript' },
+  '/xterm-addon-fit.js':      { file: path.join(nodeModules, '@xterm/addon-fit/lib/addon-fit.js'),                   type: 'application/javascript' },
+  '/xterm-addon-webgl.js':    { file: path.join(nodeModules, '@xterm/addon-webgl/lib/addon-webgl.js'),               type: 'application/javascript' },
+  '/xterm-addon-web-links.js':{ file: path.join(nodeModules, '@xterm/addon-web-links/lib/addon-web-links.js'),       type: 'application/javascript' },
+  '/xterm-addon-unicode11.js':{ file: path.join(nodeModules, '@xterm/addon-unicode11/lib/addon-unicode11.js'),       type: 'application/javascript' },
   '/logo.svg':                { file: path.join(publicDir, 'logo.svg'),                                            type: 'image/svg+xml' },
 };
 
@@ -47,6 +47,9 @@ function addRoute(method, pathname, handler) {
 const { loadPlugins } = require('./plugin-loader');
 const pluginsDir = path.join(__dirname, 'plugins');
 let loadedPlugins = [];
+
+// ── Orchestrator (cross-AI communication bus) ────────────────────────────────
+const { mountOrchestrator } = require('./orchestrator');
 
 // ── Helper: read JSON body ────────────────────────────────────────────────────
 function readBody(req) {
@@ -95,6 +98,8 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/config' && req.method === 'POST') return handleSaveConfig(req, res);
     if (url.pathname === '/api/config/export' && req.method === 'GET')  return handleExportConfig(res);
     if (url.pathname === '/api/config/import' && req.method === 'POST') return handleImportConfig(req, res);
+    if (url.pathname === '/api/themes' && req.method === 'GET')  return handleGetThemes(res);
+    if (url.pathname === '/api/themes' && req.method === 'POST') return handleSaveThemes(req, res);
     if (url.pathname === '/api/prerequisites')                   return handlePrerequisites(res);
     if (url.pathname === '/api/cli/install' && req.method === 'POST') return handleCliInstall(req, res);
 
@@ -184,7 +189,7 @@ const server = http.createServer(async (req, res) => {
     // ── Serve repo files (images, etc.) ────────────────────────────────────
     if (url.pathname === '/api/files/serve' && req.method === 'GET') return handleServeFile(url, res);
 
-    // ── Voice-to-Text (Wispr Flow) ─────────────────────────────────────────
+    // ── Voice-to-Text (OpenAI Whisper) ────────────────────────────────────
     if (url.pathname === '/api/voice/transcribe' && req.method === 'POST') return handleVoiceTranscribe(req, res);
 
     // ── Image Proxy (ADO images need auth) ─────────────────────────────────
@@ -232,6 +237,28 @@ function getConfig() {
   return {};
 }
 
+// ── Themes ────────────────────────────────────────────────────────────────
+const themesPath = path.join(repoRoot, 'config', 'themes.json');
+
+function handleGetThemes(res) {
+  try {
+    const data = fs.existsSync(themesPath) ? JSON.parse(fs.readFileSync(themesPath, 'utf8')) : { themes: [], active: null };
+    json(res, data);
+  } catch (_) {
+    json(res, { themes: [], active: null });
+  }
+}
+
+async function handleSaveThemes(req, res) {
+  const data = await readBody(req);
+  try {
+    fs.writeFileSync(themesPath, JSON.stringify(data, null, 2));
+    json(res, { ok: true });
+  } catch (e) {
+    json(res, { ok: false, error: e.message }, 500);
+  }
+}
+
 function handleGetConfig(res) {
   json(res, getConfig());
 }
@@ -255,7 +282,7 @@ async function handleSaveConfig(req, res) {
 }
 
 // Sensitive fields to strip from exports (PATs, API keys)
-const SENSITIVE_KEYS = ['AzureDevOpsPAT', 'GitHubPAT', 'WisprFlowKey'];
+const SENSITIVE_KEYS = ['AzureDevOpsPAT', 'GitHubPAT', 'WhisperKey'];
 
 function handleExportConfig(res) {
   const cfg = getConfig();
@@ -347,7 +374,7 @@ function handlePrerequisites(res) {
     config: { exists: false, complete: false },
   };
 
-  for (const id of ['claude', 'gemini', 'copilot', 'codex']) {
+  for (const id of ['claude', 'gemini', 'copilot', 'codex', 'grok']) {
     result.cliTools[id] = detectCli(id);
   }
 
@@ -371,6 +398,8 @@ const CLI_INSTALL_COMMANDS = {
   gemini:  'npm install -g @google/gemini-cli',
   copilot: 'npm install -g @github/copilot',
   codex:   'npm install -g @openai/codex',
+
+  grok:    'npm install -g @webdevtoday/grok-cli',
 };
 
 // Detect a CLI tool via `where` first, then fall back to common npm global paths.
@@ -2233,33 +2262,60 @@ function handleServeFile(url, res) {
   fs.createReadStream(resolved).pipe(res);
 }
 
-// ── Voice-to-Text (Wispr Flow) ──────────────────────────────────────────────
+// ── Voice-to-Text (OpenAI Whisper) ──────────────────────────────────────────
 async function handleVoiceTranscribe(req, res) {
   try {
     const { audio } = await readBody(req);
     if (!audio) return json(res, { error: 'audio (base64 WAV) required' }, 400);
 
     const cfg = getConfig();
-    const apiKey = cfg.WisprFlowKey || '';
-    if (!apiKey) return json(res, { error: 'Wispr Flow API key not configured. Add it in Settings.' }, 400);
+    const apiKey = cfg.WhisperKey || '';
+    if (!apiKey) return json(res, { error: 'OpenAI API key not configured. Add it in Settings > Other > Voice Input.' }, 400);
 
-    const payload = JSON.stringify({
-      audio,
-      language: ['en', 'fr'],
-      context: {
-        app: { name: 'DevOps Pilot', type: 'ai' },
-      },
-    });
+    // Decode base64 WAV to buffer
+    const wavBuffer = Buffer.from(audio, 'base64');
+
+    // Build multipart/form-data for OpenAI Whisper API
+    const boundary = '----DevOpsPilotVoice' + Date.now();
+    const parts = [];
+
+    // File part
+    parts.push(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="file"; filename="recording.wav"\r\n` +
+      `Content-Type: audio/wav\r\n\r\n`
+    );
+    parts.push(wavBuffer);
+    parts.push('\r\n');
+
+    // Model part
+    parts.push(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="model"\r\n\r\n` +
+      `whisper-1\r\n`
+    );
+
+    // Response format
+    parts.push(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="response_format"\r\n\r\n` +
+      `json\r\n`
+    );
+
+    parts.push(`--${boundary}--\r\n`);
+
+    // Combine into single buffer
+    const body = Buffer.concat(parts.map(p => typeof p === 'string' ? Buffer.from(p) : p));
 
     const result = await new Promise((resolve, reject) => {
       const options = {
-        hostname: 'platform-api.wisprflow.ai',
-        path: '/api/v1/dash/api',
+        hostname: 'api.openai.com',
+        path: '/v1/audio/transcriptions',
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(payload),
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': body.length,
         },
       };
 
@@ -2270,16 +2326,16 @@ async function handleVoiceTranscribe(req, res) {
           if (resp.statusCode >= 200 && resp.statusCode < 300) {
             try { resolve(JSON.parse(data)); } catch (_) { resolve({ text: data }); }
           } else {
-            reject(new Error(`Wispr API error (${resp.statusCode}): ${data.slice(0, 200)}`));
+            reject(new Error(`Whisper API error (${resp.statusCode}): ${data.slice(0, 300)}`));
           }
         });
       });
       apiReq.on('error', reject);
-      apiReq.write(payload);
+      apiReq.write(body);
       apiReq.end();
     });
 
-    json(res, { text: result.text || '', language: result.detected_language || '' });
+    json(res, { text: result.text || '', language: result.language || '' });
   } catch (e) {
     json(res, { error: e.message }, 502);
   }
@@ -2617,10 +2673,16 @@ function writePluginHints() {
   let block = '';
   if (pluginData.length) {
     block += '\n## Installed Plugins\n\n';
-    block += 'The following plugins are installed. **Do NOT embed full plugin instructions here** -- they are loaded dynamically.\n\n';
+    block += '### How Plugins Work\n\n';
+    block += 'Plugins extend DevOps Pilot with extra capabilities. Each plugin may provide:\n';
+    block += '- **API routes** at `/api/plugins/<plugin-id>/` (call via curl or Invoke-RestMethod)\n';
+    block += '- **PowerShell scripts** (`.ps1` files) in `dashboard/plugins/<plugin-id>/scripts/` that you can run directly\n';
+    block += '- **Node.js scripts** (`.js` files) that you can run with `node`\n\n';
+    block += 'You are in a shell environment (PowerShell or bash). You can run plugin scripts directly without curl if scripts exist. ';
+    block += 'Fetch the plugin instructions to discover available scripts and API routes.\n\n';
     block += '### IMPORTANT: Always Ask Before Using a Plugin\n\n';
     block += 'When the user\'s request matches any of the keywords below, **ASK the user if they want to use the plugin** before proceeding. For example: "Would you like to use the Builder.io plugin for this?"\n\n';
-    block += 'Do NOT silently use a plugin. Do NOT ignore plugins and search the repo instead. Ask first, then fetch the plugin\'s instructions via `curl -s http://127.0.0.1:3800/api/plugins/instructions` to learn its API routes and capabilities.\n\n';
+    block += 'Do NOT silently use a plugin. Do NOT ignore plugins and search the repo instead. Ask first, then fetch the plugin\'s instructions to learn its capabilities.\n\n';
     for (const p of pluginData) {
       if (p.keywords.length) {
         block += `- **${p.name}** (${p.description}): ${p.keywords.join(', ')}\n`;
@@ -2636,13 +2698,26 @@ function writePluginHints() {
     { base: path.join(repoRoot, 'AGENTS.base.md'), out: path.join(repoRoot, 'AGENTS.md') },
     { base: path.join(repoRoot, 'GEMINI.base.md'), out: path.join(repoRoot, 'GEMINI.md') },
     { base: path.join(repoRoot, '.github', 'copilot-instructions.base.md'), out: path.join(repoRoot, '.github', 'copilot-instructions.md') },
+    { base: path.join(repoRoot, 'GROK.base.md'), out: path.join(repoRoot, 'GROK.md') },
   ];
   const START = '<!-- PLUGIN_INSTRUCTIONS_START -->';
   const END = '<!-- PLUGIN_INSTRUCTIONS_END -->';
+  const ORCH_START = '<!-- ORCHESTRATION_START -->';
+  const ORCH_END = '<!-- ORCHESTRATION_END -->';
+  const cfg = getConfig();
+  const orchestrationEnabled = cfg.OrchestrateMode === true; // default: off
   for (const { base, out } of templateFiles) {
     try {
       if (!fs.existsSync(base)) { console.warn(`  [writePluginHints] template not found: ${base}`); continue; }
       let content = fs.readFileSync(base, 'utf8');
+      // Strip orchestration section if disabled
+      if (!orchestrationEnabled) {
+        const orchStart = content.indexOf(ORCH_START);
+        const orchEnd = content.indexOf(ORCH_END);
+        if (orchStart !== -1 && orchEnd !== -1) {
+          content = content.substring(0, orchStart) + content.substring(orchEnd + ORCH_END.length);
+        }
+      }
       const startIdx = content.indexOf(START);
       const endIdx = content.indexOf(END);
       if (startIdx === -1 || endIdx === -1) { console.warn(`  [writePluginHints] markers not found in ${base}`); continue; }
@@ -2653,6 +2728,10 @@ function writePluginHints() {
     } catch (err) { console.error(`  [writePluginHints] failed to generate ${out}:`, err.message); }
   }
 }
+
+// ── Mount orchestrator ───────────────────────────────────────────────────────
+const orchestrator = mountOrchestrator(addRoute, json, { terminals, broadcast, repoRoot, createTerminal, getConfig });
+console.log('  Orchestrator bus mounted (/api/orchestrator/*)');
 
 // ── Load plugins ─────────────────────────────────────────────────────────────
 loadedPlugins = loadPlugins(pluginsDir, { addRoute, getConfig, broadcast, json, writePluginHints, swrCache: swrPlugins });
@@ -2687,5 +2766,5 @@ process.on('SIGINT', () => {
 
 module.exports = {
   server, startServer, addRoute, loadedPlugins,
-  guard, broadcast,
+  guard, broadcast, orchestrator,
 };
