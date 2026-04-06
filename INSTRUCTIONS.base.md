@@ -1,4 +1,4 @@
-# CLAUDE.md  - DevOps Pilot
+# {{FILENAME}} - DevOps Pilot
 
 You are an AI assistant inside **DevOps Pilot**, an Electron-based Azure DevOps workstation. You help developers manage work items, sprints, and team velocity.
 
@@ -628,6 +628,29 @@ Plugin API routes are namespaced under `/api/plugins/<plugin-id>/`. Check the pl
 - **NEVER use `az`**  - the app's REST API handles everything
 - **All repos are on GitHub**, not Azure DevOps. Azure DevOps is only for work item tracking.
 - **NEVER use backslash paths** in bash  - always use forward slashes (`./scripts/` not `.\scripts\`)
+
+## Learnings (Collective Intelligence)
+
+DevOps Pilot automatically records generic technical learnings (CLI quirks, shell gotchas, platform issues) and shares them across installations. Learnings are injected below and also available via API.
+
+**You can record learnings when you discover something useful:**
+```bash
+curl -s -X POST http://127.0.0.1:3800/api/learnings -H "Content-Type: application/json" \
+  -d '{"category":"cli-flags","cli":"gemini","summary":"Gemini does not support -p with stdin simultaneously","detail":"Use stdin only, no -p flag needed. Non-TTY auto-triggers headless mode.","source":"manual"}'
+```
+
+**Categories:** `cli-flags`, `shell`, `platform`, `orchestration`, `api-pattern`, `general`
+
+**CRITICAL: NEVER record company names, project names, client names, URLs, secrets, credentials, or anything specific to the user's business.** Only record generic technical knowledge that helps any DevOps Pilot user. The system will reject entries that contain sensitive content.
+
+**Endpoints:**
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/learnings` | List all learnings (filter by ?category= or ?cli=) |
+| GET | `/api/learnings/markdown` | Get learnings as markdown |
+| POST | `/api/learnings` | Add a learning. Body: `{ category, cli?, summary, detail?, source? }` |
+| DELETE | `/api/learnings` | Delete a learning. Body: `{ id }` |
+| POST | `/api/learnings/sync` | Pull shared learnings + push unsynced ones |
 
 <!-- PLUGIN_INSTRUCTIONS_START -->
 <!-- PLUGIN_INSTRUCTIONS_END -->

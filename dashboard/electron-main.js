@@ -186,25 +186,25 @@ if (!gotLock) {
       }
     });
 
-    // ── Apply update (stash + pull + install + relaunch) ──────────────
+    // ── Apply update (stash + fetch + pull + install + relaunch) ───────
     addRoute('POST', '/api/update-app', (req, res) => {
-      const { exec } = require('child_process');
+      const { execSync } = require('child_process');
       const repoRoot = path.resolve(__dirname, '..');
-      // Stash local changes (semicolon so it continues even if nothing to stash),
-      // then checkout master, pull, and install deps
-      const cmd = 'git stash --include-untracked 2>&1; git checkout master && git pull && npm install';
-      exec(cmd, { cwd: repoRoot, timeout: 120000 }, (err, stdout, stderr) => {
-        if (err) {
-          // Restore stashed changes on failure
-          exec('git stash pop 2>&1', { cwd: repoRoot }, () => {});
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, error: (stderr || err.message || '').substring(0, 500) }));
-          return;
-        }
+      try {
+        // Stash any local changes (safe to ignore if nothing to stash)
+        try { execSync('git stash --include-untracked', { cwd: repoRoot, encoding: 'utf8', timeout: 15000 }); } catch (_) {}
+        // Fetch, checkout master, pull, install
+        execSync('git checkout master', { cwd: repoRoot, encoding: 'utf8', timeout: 10000 });
+        execSync('git fetch origin', { cwd: repoRoot, encoding: 'utf8', timeout: 30000 });
+        execSync('git pull', { cwd: repoRoot, encoding: 'utf8', timeout: 30000 });
+        execSync('npm install', { cwd: repoRoot, encoding: 'utf8', timeout: 120000 });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, status: 'updated' }));
         setTimeout(() => { app.relaunch(); app.exit(0); }, 500);
-      });
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: (err.message || '').substring(0, 500) }));
+      }
     });
 
     // ── Restart app (relaunch Electron) ───────────────────────────────

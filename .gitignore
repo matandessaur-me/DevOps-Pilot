@@ -2,6 +2,7 @@ node_modules/
 dist/
 config/config.json
 config/display-pref.json
+config/themes.json
 dashboard/plugins/*
 !dashboard/plugins/sdk/
 notes/

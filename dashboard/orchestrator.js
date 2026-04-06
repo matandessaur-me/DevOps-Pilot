@@ -285,6 +285,11 @@ class Orchestrator extends EventEmitter {
             `Update HEADLESS_FLAGS in orchestrator.js to match the CLI's current interface.`
           : errText || `Process exited with code ${code}`;
         task.result = stdout.trim();
+        // Auto-record failure in learnings
+        if (getLearnings) {
+          const lrn = getLearnings();
+          if (lrn) lrn.recordFailure({ cli, args: finalArgs, error: task.error });
+        }
       }
       task.completedAt = Date.now();
       this._persistResult(task);
@@ -1091,7 +1096,7 @@ function readBody(req) {
  * @param {string}   opts.repoRoot
  * @returns {Orchestrator}
  */
-function mountOrchestrator(addRoute, json, { terminals, broadcast, repoRoot, createTerminal, getConfig }) {
+function mountOrchestrator(addRoute, json, { terminals, broadcast, repoRoot, createTerminal, getConfig, getLearnings }) {
   const workspaceDir = path.join(repoRoot, '.ai-workspace', 'orchestrator');
   const orch = new Orchestrator({ terminals, broadcast, workspaceDir, createTerminal });
 

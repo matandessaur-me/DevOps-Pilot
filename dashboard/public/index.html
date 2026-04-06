@@ -1345,9 +1345,13 @@
     .pr-tl-comment-body ul, .pr-tl-comment-body ol { padding-left: 20px; margin: 4px 0; }
     .pr-tl-comment-body details { margin: 8px 0; }
     .pr-tl-comment-body summary { cursor: pointer; color: var(--text); font-weight: 600; }
-    .pr-tl-comment-body table { border-collapse: collapse; margin: 8px 0; width: 100%; }
-    .pr-tl-comment-body th, .pr-tl-comment-body td { padding: 6px 10px; border: 1px solid var(--surface0); font-size: 12px; }
-    .pr-tl-comment-body th { background: var(--surface0); font-weight: 600; text-align: left; }
+    .md-table-wrap { overflow-x: auto; margin: 4px 0 12px; border-radius: var(--radius); border: 1px solid var(--surface0); }
+    .md-table-wrap table { margin: 0; }
+    .pr-tl-comment-body table, .md-table-wrap table { border-collapse: collapse; width: 100%; }
+    .pr-tl-comment-body th, .pr-tl-comment-body td, .md-table-wrap th, .md-table-wrap td { padding: 6px 12px; border: 1px solid var(--surface0); font-size: 12px; line-height: 1.5; }
+    .pr-tl-comment-body th, .md-table-wrap th { background: var(--surface0); font-weight: 600; text-align: left; }
+    .md-table-wrap tbody tr:nth-child(even) { background: color-mix(in srgb, var(--surface0) 30%, transparent); }
+    .md-table-wrap tbody tr:hover { background: color-mix(in srgb, var(--surface0) 60%, transparent); }
     .pr-tl-comment-body hr { border: none; border-top: 1px solid var(--surface0); margin: 16px 0; }
     .pr-tl-event {
       display: flex; align-items: center; gap: 6px; padding: 6px 0;
@@ -1485,9 +1489,12 @@
     #notePreview strong { color: var(--text); font-weight: 600; }
     #notePreview a { color: var(--accent); }
     #notePreview hr { border: none; border-top: 1px solid var(--surface0); margin: 16px 0; }
-    #notePreview table { border-collapse: collapse; margin: 0 0 12px; width: 100%; }
-    #notePreview th, #notePreview td { padding: 6px 10px; border: 1px solid var(--surface0); font-size: 12px; }
-    #notePreview th { background: var(--surface0); font-weight: 600; text-align: left; }
+    #notePreview .md-table-wrap { overflow-x: auto; margin: 4px 0 16px; border-radius: var(--radius); border: 1px solid var(--surface0); }
+    #notePreview table { border-collapse: collapse; width: 100%; margin: 0; }
+    #notePreview th, #notePreview td { padding: 6px 12px; border: 1px solid var(--surface0); font-size: 12px; line-height: 1.5; }
+    #notePreview th { background: var(--surface0); font-weight: 600; text-align: left; white-space: nowrap; }
+    #notePreview tbody tr:nth-child(even) { background: color-mix(in srgb, var(--surface0) 30%, transparent); }
+    #notePreview tbody tr:hover { background: color-mix(in srgb, var(--surface0) 60%, transparent); }
     #notePreview img { max-width: 100%; border-radius: var(--radius); }
 
     /* ── Right panel (Intelligence) ───────────────────────────────────────── */
@@ -2202,7 +2209,7 @@
         <button class="tab-scroll-arrow left" id="tabScrollLeft" onclick="scrollTabs(-200)"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
         <div class="tab-bar-scroll" id="tabBarScroll">
           <button class="tab-btn active" data-tab="terminal" onclick="switchTab('terminal')">Terminal</button>
-          <button class="tab-btn" data-tab="orchestrator" id="orchestratorTabBtn" onclick="switchTab('orchestrator')" style="display:none;">Orchestrator</button>
+          <button class="tab-btn" data-tab="orchestrator" id="orchestratorTabBtn" onclick="switchTab('orchestrator')" style="display:none;">Orchestrator <span style="font-size:9px;opacity:0.6;font-weight:400;margin-left:2px;">[BETA]</span></button>
           <button class="tab-btn" data-tab="backlog" id="backlogTabBtn" onclick="switchTab('backlog')" style="display:none;">Backlog</button>
           <button class="tab-btn" data-tab="workitem" id="workitemTabBtn" onclick="switchTab('workitem')" style="display:none;">Work Item</button>
           <button class="tab-btn" data-tab="activity" id="activityTabBtn" onclick="switchTab('activity')" style="display:none;">Activity Timeline</button>
@@ -2936,7 +2943,7 @@
         <!-- Other Tab -->
         <div class="settings-tab" id="settingsTab-other">
           <div class="settings-section">
-            <div class="settings-section-title">AI Orchestration</div>
+            <div class="settings-section-title">AI Orchestration <span style="font-size:10px;opacity:0.5;font-weight:400;">[BETA]</span></div>
             <div class="settings-section-desc">When enabled, the lead AI can automatically dispatch tasks to other AI CLIs (Gemini, Codex, Grok, Copilot). When disabled, the AI works alone without spawning other agents.</div>
             <div style="display:flex;align-items:center;gap:10px;">
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
@@ -2997,7 +3004,7 @@
     <div class="modal-title" style="display:flex;align-items:center;gap:10px;">
       <span>Plugin Registry</span>
       <div style="flex:1;"></div>
-      <button onclick="closeRegistryModal()" style="background:none;border:none;color:var(--subtext0);cursor:pointer;padding:4px;display:flex;" title="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      <button id="registryCloseBtn" onclick="closeRegistryModal()" style="background:none;border:none;color:var(--subtext0);cursor:pointer;padding:4px;display:flex;" title="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <div style="padding:10px 16px;border-bottom:1px solid var(--surface0);display:flex;gap:8px;align-items:center;">
       <input type="text" id="registrySearch" placeholder="Search plugins..." oninput="filterRegistry()" style="flex:1;padding:6px 10px;background:var(--surface0);border:1px solid var(--surface1);border-radius:var(--radius);color:var(--text);font:12px var(--font-ui);outline:none;">
@@ -5901,13 +5908,8 @@ document.addEventListener('keyup', async (e) => {
         }]);
         monacoEditor.focus();
       } else {
-        // Default: send to terminal
-        if (aiLaunched) {
-          sendCommand(text);
-        } else {
-          launchAi();
-          setTimeout(() => sendCommand(text), 2000);
-        }
+        // Default: send to terminal (just the text, never auto-launch AI)
+        sendCommand(text);
         switchTab('terminal');
       }
     }
@@ -8837,13 +8839,18 @@ function importSettings() {
       const result = await res.json();
       if (result.ok) {
         closeSettings();
-        showLoading('Importing settings...');
+        showLoading(result.pluginsInstalled ? 'Importing settings and installing plugins...' : 'Importing settings...');
         const minWait = new Promise(r => setTimeout(r, 3000));
         await loadConfig(true);
         loadVelocity();
         await minWait;
         hideLoading();
-        toast('Settings imported successfully', 'success');
+        var msg = 'Settings imported successfully!';
+        if (result.pluginsInstalled && result.pluginsInstalled.length > 0) {
+          msg += ' Installed ' + result.pluginsInstalled.length + ' plugin(s): ' + result.pluginsInstalled.join(', ') + '.';
+          msg += ' Restart the app to activate them.';
+        }
+        toast(msg, 'success');
       } else {
         toast(`Import failed: ${result.error || 'Unknown error'}`, 'error');
       }
@@ -9689,13 +9696,20 @@ async function obImportSettings() {
       const result = await res.json();
       if (result.ok) {
         document.getElementById('onboarding').classList.remove('visible');
-        showLoading('Importing settings...');
+        showLoading(result.pluginsInstalled ? 'Importing settings and installing plugins...' : 'Importing settings...');
         const minWait = new Promise(r => setTimeout(r, 3000));
         await loadConfig(true);
         loadVelocity();
         await minWait;
         hideLoading();
-        toast('Settings imported successfully! You may need to re-enter your PATs in Settings.', 'success');
+        var msg = 'Settings imported successfully!';
+        if (result.pluginsInstalled && result.pluginsInstalled.length > 0) {
+          msg += ' Installed ' + result.pluginsInstalled.length + ' plugin(s): ' + result.pluginsInstalled.join(', ') + '.';
+          msg += ' Restart the app to activate them.';
+        } else {
+          msg += ' You may need to re-enter your PATs in Settings.';
+        }
+        toast(msg, 'success');
       } else {
         toast(`Import failed: ${result.error || 'Unknown error'}`, 'error');
       }
@@ -9761,6 +9775,28 @@ function renderMarkdown(text) {
   text = text.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   text = text.replace(/^## (.+)$/gm, '<h2>$1</h2>');
   text = text.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  // Tables — process early so the HTML-detection branch does not skip them
+  text = text.replace(/((?:^\|.+\|[ \t]*$\n?)+)/gm, (block) => {
+    const rows = block.trim().split('\n').filter(r => r.trim());
+    if (rows.length < 2) return block;
+    const isSep = /^\|[\s:]*-{2,}[\s:]*(\|[\s:]*-{2,}[\s:]*)*\|$/.test(rows[1].trim());
+    if (!isSep) return block;
+    // Parse alignment from separator row
+    const aligns = rows[1].split('|').filter((_,i,a) => i > 0 && i < a.length - 1).map(c => {
+      c = c.trim();
+      if (c.startsWith(':') && c.endsWith(':')) return 'center';
+      if (c.endsWith(':')) return 'right';
+      return 'left';
+    });
+    const hCells = rows[0].split('|').filter((_,i,a) => i > 0 && i < a.length - 1);
+    let thead = '<thead><tr>' + hCells.map((c,i) => `<th style="text-align:${aligns[i]||'left'}">${c.trim()}</th>`).join('') + '</tr></thead>';
+    const bodyRows = rows.slice(2);
+    let tbody = '<tbody>' + bodyRows.map(r => {
+      const cells = r.split('|').filter((_,i,a) => i > 0 && i < a.length - 1);
+      return '<tr>' + cells.map((c,i) => `<td style="text-align:${aligns[i]||'left'}">${c.trim()}</td>`).join('') + '</tr>';
+    }).join('') + '</tbody>';
+    return `<div class="md-table-wrap"><table>${thead}${tbody}</table></div>`;
+  });
   // Lists
   text = text.replace(/^\d+\. (.+)$/gm, '<li style="margin-left:16px;margin-bottom:2px;">$1</li>');
   text = text.replace(/^[-*] (.+)$/gm, '<li style="margin-left:16px;margin-bottom:2px;">$1</li>');
@@ -9804,9 +9840,9 @@ function renderMarkdown(text) {
     // Collapse 2+ consecutive <br> into 1 (empty lines were too tall)
     html = html.replace(/(<br>){2,}/gi, '<br>');
     // Clean up <br> around block elements
-    html = html.replace(/(<\/(?:h[1-6]|p|li|ul|ol|blockquote|details|summary|pre|div|hr)>)(<br>)+/gi, '$1');
-    html = html.replace(/(<br>)+(<(?:h[1-6]|p|li|ul|ol|blockquote|details|summary|pre|div|hr)[\s>/])/gi, '$2');
-    html = html.replace(/(<br>)+(<\/(?:blockquote|details|ul|ol|div)>)/gi, '$2');
+    html = html.replace(/(<\/(?:h[1-6]|p|li|ul|ol|blockquote|details|summary|pre|div|hr|table|thead|tbody|tr|td|th)>)(<br>)+/gi, '$1');
+    html = html.replace(/(<br>)+(<(?:h[1-6]|p|li|ul|ol|blockquote|details|summary|pre|div|hr|table|thead|tbody|tr|td|th)[\s>/])/gi, '$2');
+    html = html.replace(/(<br>)+(<\/(?:blockquote|details|ul|ol|div|table|thead|tbody)>)/gi, '$2');
     // Restore early code blocks — clean surrounding <br> tags
     earlyCodeBlocks.forEach((block, i) => {
       html = html.replace(new RegExp(`(<br>)*%%EARLYCODE_${i}%%(<br>)*`, 'g'), block);
@@ -10994,6 +11030,13 @@ async function browsePlugins() {
   document.getElementById('registryModal').classList.add('open');
   document.getElementById('registrySearch').value = '';
   document.getElementById('registryFilter').value = '';
+  _registryNeedsRestart = false;
+  var closeBtn = document.getElementById('registryCloseBtn');
+  if (closeBtn) {
+    closeBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    closeBtn.title = 'Close';
+    closeBtn.style.cssText = 'background:none;border:none;color:var(--subtext0);cursor:pointer;padding:4px;display:flex;';
+  }
   document.getElementById('registryList').innerHTML = '<div style="text-align:center;padding:40px;color:var(--subtext0);font-size:12px;">Loading registry...</div>';
 
   try {
@@ -11007,7 +11050,27 @@ async function browsePlugins() {
   }
 }
 
-function closeRegistryModal() { document.getElementById('registryModal').classList.remove('open'); }
+var _registryNeedsRestart = false;
+
+function markRegistryNeedsRestart() {
+  _registryNeedsRestart = true;
+  var btn = document.getElementById('registryCloseBtn');
+  if (!btn) return;
+  btn.innerHTML = 'Save & Restart';
+  btn.title = 'Restart the app to apply plugin changes';
+  btn.style.cssText = 'font-size:12px;padding:4px 14px;background:var(--accent);color:var(--crust);border:1px solid var(--accent);border-radius:var(--radius);cursor:pointer;font-weight:600;font-family:var(--font-ui);';
+}
+
+function closeRegistryModal() {
+  if (_registryNeedsRestart) {
+    _registryNeedsRestart = false;
+    document.getElementById('registryModal').classList.remove('open');
+    toast('Restarting to apply plugin changes...', 'success');
+    setTimeout(function() { restartApp(); }, 500);
+    return;
+  }
+  document.getElementById('registryModal').classList.remove('open');
+}
 
 function filterRegistry() {
   var q = (document.getElementById('registrySearch').value || '').toLowerCase();
@@ -11075,7 +11138,8 @@ async function installFromRegistry(id, repo, name) {
     });
     var data = await res.json();
     if (data.ok) {
-      toast('Plugin "' + name + '" installed. Restart to activate.', 'success');
+      toast('Plugin "' + name + '" installed.', 'success');
+      markRegistryNeedsRestart();
       // Refresh registry to show "Installed"
       var r = await fetch('/api/plugins/registry');
       var d = await r.json();
@@ -11096,7 +11160,8 @@ async function updatePlugin(id, repo, name) {
     });
     var data = await res.json();
     if (data.ok) {
-      toast('Plugin "' + name + '" updated. Restart to activate.', 'success');
+      toast('Plugin "' + name + '" updated.', 'success');
+      markRegistryNeedsRestart();
       var r = await fetch('/api/plugins/registry');
       var d = await r.json();
       _registryPlugins = d.plugins || [];
@@ -11117,7 +11182,7 @@ async function installPluginPrompt() {
       body: JSON.stringify({ path: result.path })
     });
     var data = await res.json();
-    if (data.ok) { toast('Plugin "' + data.name + '" installed. Restart to activate.', 'success'); }
+    if (data.ok) { toast('Plugin "' + data.name + '" installed.', 'success'); markRegistryNeedsRestart(); }
     else { toast(data.error || 'Install failed', 'error'); }
   } catch (e) { toast('Install failed', 'error'); }
 }
@@ -11133,7 +11198,12 @@ async function uninstallPlugin(id, name) {
     });
     var data = await res.json();
     if (data.ok) {
-      toast(name + ' uninstalled. Restart the app to apply.', 'success');
+      toast(name + ' uninstalled. Restart to apply.', 'success');
+      // Mark settings as needing restart
+      var settingsBtn = document.getElementById('settingsSaveBtn');
+      if (settingsBtn) { settingsBtn.textContent = 'Save & Restart'; settingsBtn._needsRestart = true; }
+      // Also mark registry modal if open
+      if (document.getElementById('registryModal').classList.contains('open')) markRegistryNeedsRestart();
     } else {
       toast('Failed: ' + (data.error || 'Unknown error'), 'error');
     }

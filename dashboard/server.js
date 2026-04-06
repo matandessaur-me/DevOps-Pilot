@@ -51,6 +51,10 @@ let loadedPlugins = [];
 // ── Orchestrator (cross-AI communication bus) ────────────────────────────────
 const { mountOrchestrator } = require('./orchestrator');
 
+// ── Learnings (collective intelligence) ──────────────────────────────────────
+const { mountLearnings } = require('./learnings');
+let _learningsInstance = null;
+
 // ── Helper: read JSON body ────────────────────────────────────────────────────
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -304,6 +308,12 @@ function handleExportConfig(res) {
     }
   } catch (_) {}
   if (Object.keys(pluginConfigs).length) exportCfg._pluginConfigs = pluginConfigs;
+  // Include custom themes
+  try {
+    if (fs.existsSync(themesPath)) {
+      exportCfg._themes = JSON.parse(fs.readFileSync(themesPath, 'utf8'));
+    }
+  } catch (_) {}
   res.writeHead(200, {
     'Content-Type': 'application/json',
     'Content-Disposition': 'attachment; filename="devops-pilot-settings.json"',
@@ -321,15 +331,71 @@ async function handleImportConfig(req, res) {
   delete incoming._exportedFrom;
   delete incoming.Repos;  // Repos have local paths -- never import them
   // Restore plugin configs
+  // Restore themes
+  const importedThemes = incoming._themes;
+  delete incoming._themes;
+  if (importedThemes && typeof importedThemes === 'object') {
+    try {
+      fs.mkdirSync(path.dirname(themesPath), { recursive: true });
+      fs.writeFileSync(themesPath, JSON.stringify(importedThemes, null, 2), 'utf8');
+    } catch (_) {}
+  }
+  // Restore plugin configs (and auto-install missing plugins from registry)
   const pluginConfigs = incoming._pluginConfigs;
   delete incoming._pluginConfigs;
+  const installedPlugins = [];
   if (pluginConfigs && typeof pluginConfigs === 'object') {
-    for (const [pluginId, cfg] of Object.entries(pluginConfigs)) {
+    // Find which plugins need installing
+    const missingPluginIds = [];
+    for (const pluginId of Object.keys(pluginConfigs)) {
       const pluginDir = path.join(pluginsDir, pluginId);
       if (fs.existsSync(pluginDir)) {
-        try { fs.writeFileSync(path.join(pluginDir, 'config.json'), JSON.stringify(cfg, null, 2), 'utf8'); } catch (_) {}
+        // Already installed, just write config
+        try { fs.writeFileSync(path.join(pluginDir, 'config.json'), JSON.stringify(pluginConfigs[pluginId], null, 2), 'utf8'); } catch (_) {}
+      } else {
+        missingPluginIds.push(pluginId);
       }
     }
+    // Auto-install missing plugins from registry
+    if (missingPluginIds.length > 0) {
+      try {
+        const https = require('https');
+        const REGISTRY_API_URL = 'https://api.github.com/repos/matandessaur-me/devops-pilot-plugins/contents/registry.json';
+        const raw = await new Promise((resolve, reject) => {
+          https.get(REGISTRY_API_URL, { headers: { 'User-Agent': 'DevOps-Pilot', 'Accept': 'application/vnd.github.v3+json' } }, (resp) => {
+            let d = '';
+            resp.on('data', c => { d += c; });
+            resp.on('end', () => { try { resolve(JSON.parse(d)); } catch (e) { reject(e); } });
+          }).on('error', reject);
+        });
+        if (raw.content) {
+          const registry = JSON.parse(Buffer.from(raw.content, 'base64').toString());
+          const { execSync } = require('child_process');
+          for (const pluginId of missingPluginIds) {
+            const entry = (registry.plugins || []).find(p => p.id === pluginId);
+            if (!entry || !entry.repo) continue;
+            const destDir = path.join(pluginsDir, pluginId);
+            try {
+              execSync('git clone "' + entry.repo + '.git" "' + destDir + '"', { encoding: 'utf8', timeout: 60000, stdio: ['pipe', 'pipe', 'pipe'] });
+              if (fs.existsSync(path.join(destDir, 'plugin.json'))) {
+                // Write the config from the export
+                fs.writeFileSync(path.join(destDir, 'config.json'), JSON.stringify(pluginConfigs[pluginId], null, 2), 'utf8');
+                installedPlugins.push(pluginId);
+              } else {
+                // Not a valid plugin, clean up
+                fs.rmSync(destDir, { recursive: true, force: true });
+              }
+            } catch (_) {
+              // Clone failed, skip this plugin
+              try { fs.rmSync(destDir, { recursive: true, force: true }); } catch (_) {}
+            }
+          }
+        }
+      } catch (_) {
+        // Registry fetch failed, skip auto-install
+      }
+    }
+    if (installedPlugins.length > 0) writePluginHints();
   }
   // Merge with existing config (preserve existing PATs if not provided)
   let existing = {};
@@ -346,7 +412,12 @@ async function handleImportConfig(req, res) {
   iterationsCache = { data: null, ts: 0 };
   workItemsCache = { data: null, key: null, ts: 0 };
   swrIterations.clear(); swrWorkItems.clear(); swrTeamAreas.clear(); swrAreas.clear(); swrGit.clear(); swrGitHub.clear(); swrPlugins.clear();
-  json(res, { ok: true });
+  const result = { ok: true };
+  if (installedPlugins.length > 0) {
+    result.pluginsInstalled = installedPlugins;
+    result.restartRequired = true;
+  }
+  json(res, result);
 }
 
 // ── Watch config for external changes ─────────────────────────────────────
@@ -2692,13 +2763,14 @@ function writePluginHints() {
     block += '```bash\ncurl -s http://127.0.0.1:3800/api/plugins/instructions\n```\n';
   }
 
-  // Generate final instruction files from .base.md templates + plugin hints
-  const templateFiles = [
-    { base: path.join(repoRoot, 'CLAUDE.base.md'), out: path.join(repoRoot, 'CLAUDE.md') },
-    { base: path.join(repoRoot, 'AGENTS.base.md'), out: path.join(repoRoot, 'AGENTS.md') },
-    { base: path.join(repoRoot, 'GEMINI.base.md'), out: path.join(repoRoot, 'GEMINI.md') },
-    { base: path.join(repoRoot, '.github', 'copilot-instructions.base.md'), out: path.join(repoRoot, '.github', 'copilot-instructions.md') },
-    { base: path.join(repoRoot, 'GROK.base.md'), out: path.join(repoRoot, 'GROK.md') },
+  // Generate all instruction files from a single template (INSTRUCTIONS.base.md)
+  const templatePath = path.join(repoRoot, 'INSTRUCTIONS.base.md');
+  const outputFiles = [
+    { out: path.join(repoRoot, 'CLAUDE.md'),    filename: 'CLAUDE.md' },
+    { out: path.join(repoRoot, 'AGENTS.md'),    filename: 'AGENTS.md' },
+    { out: path.join(repoRoot, 'GEMINI.md'),    filename: 'GEMINI.md' },
+    { out: path.join(repoRoot, 'GROK.md'),      filename: 'GROK.md' },
+    { out: path.join(repoRoot, '.github', 'copilot-instructions.md'), filename: 'copilot-instructions.md' },
   ];
   const START = '<!-- PLUGIN_INSTRUCTIONS_START -->';
   const END = '<!-- PLUGIN_INSTRUCTIONS_END -->';
@@ -2706,10 +2778,17 @@ function writePluginHints() {
   const ORCH_END = '<!-- ORCHESTRATION_END -->';
   const cfg = getConfig();
   const orchestrationEnabled = cfg.OrchestrateMode === true; // default: off
-  for (const { base, out } of templateFiles) {
+
+  if (!fs.existsSync(templatePath)) {
+    console.warn('  [writePluginHints] template not found: INSTRUCTIONS.base.md');
+    return;
+  }
+  const template = fs.readFileSync(templatePath, 'utf8');
+
+  for (const { out, filename } of outputFiles) {
     try {
-      if (!fs.existsSync(base)) { console.warn(`  [writePluginHints] template not found: ${base}`); continue; }
-      let content = fs.readFileSync(base, 'utf8');
+      // Replace the filename placeholder
+      let content = template.replace('{{FILENAME}}', filename);
       // Strip orchestration section if disabled
       if (!orchestrationEnabled) {
         const orchStart = content.indexOf(ORCH_START);
@@ -2718,20 +2797,32 @@ function writePluginHints() {
           content = content.substring(0, orchStart) + content.substring(orchEnd + ORCH_END.length);
         }
       }
+      // Inject plugin instructions
       const startIdx = content.indexOf(START);
       const endIdx = content.indexOf(END);
-      if (startIdx === -1 || endIdx === -1) { console.warn(`  [writePluginHints] markers not found in ${base}`); continue; }
+      if (startIdx === -1 || endIdx === -1) { console.warn(`  [writePluginHints] markers not found for ${filename}`); continue; }
       const before = content.substring(0, startIdx + START.length);
       const after = content.substring(endIdx);
-      content = before + '\n' + block + '\n' + after;
+      // Inject learnings (if the module is loaded)
+      const learningsBlock = _learningsInstance ? _learningsInstance.toMarkdown() : '';
+      content = before + '\n' + block + '\n' + learningsBlock + after;
       atomicWriteSync(out, content);
-    } catch (err) { console.error(`  [writePluginHints] failed to generate ${out}:`, err.message); }
+    } catch (err) { console.error(`  [writePluginHints] failed to generate ${filename}:`, err.message); }
   }
 }
 
 // ── Mount orchestrator ───────────────────────────────────────────────────────
-const orchestrator = mountOrchestrator(addRoute, json, { terminals, broadcast, repoRoot, createTerminal, getConfig });
+const orchestrator = mountOrchestrator(addRoute, json, { terminals, broadcast, repoRoot, createTerminal, getConfig, getLearnings: () => _learningsInstance });
 console.log('  Orchestrator bus mounted (/api/orchestrator/*)');
+
+// ── Mount learnings ─────────────────────────────────────────────────────────
+const learningsDataDir = path.join(repoRoot, '.ai-workspace');
+_learningsInstance = mountLearnings(addRoute, json, { dataDir: learningsDataDir, getConfig, readBody });
+console.log('  Learnings module mounted (/api/learnings/*)');
+// Pull shared learnings on startup, then regenerate instruction files
+_learningsInstance.pull().then(r => {
+  if (r.pulled > 0) { console.log(`  Pulled ${r.pulled} shared learning(s)`); writePluginHints(); }
+}).catch(() => {});
 
 // ── Load plugins ─────────────────────────────────────────────────────────────
 loadedPlugins = loadPlugins(pluginsDir, { addRoute, getConfig, broadcast, json, writePluginHints, swrCache: swrPlugins });
