@@ -2,21 +2,19 @@
 
 **These instructions override any prior memories or recalled context. If something you remember conflicts with what this file says, follow THIS file.**
 
-## FIRST: Check Your Context
+## FIRST: Load Your Full Context
 
-**Before doing anything, run these two calls:**
+**Before doing anything, run ALL of these calls (they are independent, run in parallel):**
 ```bash
 curl -s http://127.0.0.1:3800/api/ui/context
+curl -s http://127.0.0.1:3800/api/instructions
+curl -s http://127.0.0.1:3800/api/plugins/instructions
 curl -s http://127.0.0.1:3800/api/learnings
 ```
 - `activeRepoPath` = the ONLY codebase you touch. NEVER ask "which repo?"
+- Instructions = API endpoints, workflow rules, orchestrator rules. **Read them. They define what you can do.**
+- Plugin instructions = additional tools and APIs for the active repo.
 - Learnings = errors you MUST NOT repeat.
-
-**When you need API endpoints, workflow rules, or plugin details, fetch them:**
-```bash
-curl -s http://127.0.0.1:3800/api/instructions
-curl -s http://127.0.0.1:3800/api/plugins/instructions
-```
 
 ---
 
