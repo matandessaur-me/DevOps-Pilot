@@ -2046,7 +2046,7 @@ function handleGitStatus(url, res) {
   if (!repoPath) return json(res, { error: 'Repo not found' }, 400);
 
   const branch = gitExec(repoPath, 'rev-parse --abbrev-ref HEAD');
-  const status = gitExec(repoPath, 'status --porcelain');
+  const status = gitExec(repoPath, 'status --porcelain -u');
   const statusMap = { 'M': 'modified', 'A': 'added', 'D': 'deleted', 'R': 'renamed', '?': 'new', 'U': 'conflict' };
   const statusLabel = { 'modified': 'M', 'added': 'A', 'deleted': 'D', 'renamed': 'R', 'new': 'N', 'conflict': 'U' };
   const files = status ? status.split('\n').filter(Boolean).map(line => {
@@ -2936,6 +2936,55 @@ try {
 loadedPlugins = loadPlugins(pluginsDir, { addRoute, getConfig, broadcast, json, writePluginHints, swrCache: swrPlugins });
 if (loadedPlugins.length) console.log(`  Loaded ${loadedPlugins.length} plugin(s)`);
 writePluginHints();
+
+// ── AI Instructions endpoint ────────────────────────────────────────────────
+// Serves split instruction files from dashboard/instructions/ so CLAUDE.md stays small.
+// GET /api/instructions           - merged (all files concatenated)
+// GET /api/instructions/api-reference  - just the API reference
+(() => {
+  const instrDir = path.join(__dirname, 'instructions');
+  function readInstrFile(name) {
+    const p = path.join(instrDir, name + '.md');
+    if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
+    return null;
+  }
+  // Merged: returns all instruction files concatenated (config-aware)
+  addRoute('GET', '/api/instructions', (req, res) => {
+    try {
+      const cfg = getConfig();
+      const orchestrationEnabled = cfg.OrchestrateMode === true;
+      // Order: behavioral rules first (survive compaction better), reference tables last
+      const priorityOrder = ['workflows.md', 'orchestrator.md', 'api-reference.md'];
+      const files = fs.readdirSync(instrDir).filter(f => {
+        if (!f.endsWith('.md')) return false;
+        if (f === 'orchestrator.md' && !orchestrationEnabled) return false;
+        return true;
+      }).sort((a, b) => {
+        const ai = priorityOrder.indexOf(a), bi = priorityOrder.indexOf(b);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+        return a.localeCompare(b);
+      });
+      const sections = files.map(f => fs.readFileSync(path.join(instrDir, f), 'utf8'));
+      res.writeHead(200, { 'Content-Type': 'text/markdown' });
+      res.end(sections.join('\n\n---\n\n'));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+  });
+  // Individual: /api/instructions/{name} serves a single file
+  addRoute('__PREFIX__', '/api/instructions/', (req, res, url, subpath) => {
+    const name = (subpath || '').replace(/\.md$/i, '').replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!name) { json(res, { error: 'Missing instruction name' }, 400); return; }
+    const content = readInstrFile(name);
+    if (!content) { json(res, { error: `Instruction "${name}" not found` }, 404); return; }
+    res.writeHead(200, { 'Content-Type': 'text/markdown' });
+    res.end(content);
+  });
+  console.log('  AI Instructions endpoint mounted (/api/instructions/*)');
+})();
 
 // ── Start ───────────────────────────────────────────────────────────────────
 function startServer() {
