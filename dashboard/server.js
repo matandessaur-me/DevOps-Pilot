@@ -1455,21 +1455,26 @@ async function handleStartWorking(req, res) {
       workItemsCache = { data: null, ts: 0 };
     } catch (_) { /* may already be active */ }
 
-    // Proper branch creation: checkout main, fetch, then create branch
-    const commands = [
-      `cd "${repoPath.replace(/\\/g, '/')}"`,
-      `git checkout main 2>/dev/null || git checkout master`,
-      `git fetch origin`,
-      `git pull`,
-      `git checkout -b ${branchName}`,
-    ];
-
-    const mainTerm = terminals.get('main');
-    for (const cmd of commands) {
-      if (mainTerm) mainTerm.pty.write(cmd + '\r');
+    // Perform git operations server-side so they don't collide with the AI prompt in the terminal PTY.
+    const gitSteps = [];
+    try {
+      let baseBranch = 'main';
+      try {
+        gitExec(repoPath, 'checkout main');
+      } catch (_) {
+        baseBranch = 'master';
+        gitExec(repoPath, 'checkout master');
+      }
+      gitSteps.push(`checked out ${baseBranch}`);
+      try { gitExec(repoPath, 'fetch origin'); gitSteps.push('fetched origin'); } catch (e) { gitSteps.push(`fetch failed: ${e.message}`); }
+      try { gitExec(repoPath, 'pull'); gitSteps.push('pulled'); } catch (e) { gitSteps.push(`pull failed: ${e.message}`); }
+      gitExec(repoPath, `checkout -b ${branchName}`);
+      gitSteps.push(`created branch ${branchName}`);
+    } catch (e) {
+      return json(res, { error: `Git operation failed: ${e.message}`, steps: gitSteps }, 500);
     }
 
-    json(res, { ok: true, branchName, repoPath });
+    json(res, { ok: true, branchName, repoPath, steps: gitSteps });
   } catch (e) {
     json(res, { error: e.message }, 500);
   }

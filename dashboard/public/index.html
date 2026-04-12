@@ -7728,7 +7728,7 @@ async function viewWorkItem(id) {
       <div style="margin-top:20px;padding:14px;background:var(--surface0);border-radius:var(--radius-lg);border:1px solid var(--surface1);">
         ${configData.Repos && Object.keys(configData.Repos).length > 0 ? `
           <div style="display:flex;align-items:center;gap:10px;">
-            <select id="startWorkRepo" style="padding:7px 10px;background:var(--base);border:1px solid var(--surface1);border-radius:var(--radius);color:var(--text);font:12px var(--font-ui);outline:none;flex:1;">
+            <select id="startWorkRepo" onchange="selectRepo(this.value)" style="padding:7px 10px;background:var(--base);border:1px solid var(--surface1);border-radius:var(--radius);color:var(--text);font:12px var(--font-ui);outline:none;flex:1;">
               ${Object.keys(configData.Repos).map(r => `<option value="${esc(r)}"${r === activeRepo ? ' selected' : ''}>${esc(r)}</option>`).join('')}
             </select>
             <button class="btn btn-primary" onclick="startWorking(${wi.id})" style="flex-shrink:0;width:auto;padding:7px 16px;"><i data-lucide="play"></i> Start Working</button>
@@ -8440,6 +8440,10 @@ function selectRepo(name) {
   // Sync files tab repo selector
   const select = document.getElementById('filesRepoSelect');
   if (select) select.value = name;
+
+  // Sync work item tab "Start Working" repo selector
+  const startWorkSelect = document.getElementById('startWorkRepo');
+  if (startWorkSelect && name) startWorkSelect.value = name;
 
   if (name) {
     loadFileTree('');
