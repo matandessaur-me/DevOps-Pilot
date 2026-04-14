@@ -124,6 +124,30 @@ Exposed prompts: `standup_summary`, `retro_analysis`.
 
 All mutating tools are gated by the active DevOps Pilot permission mode (review / edit / trusted / bypass), with an in-app modal for approval.
 
+### Plugins as MCP tools
+
+Any installed plugin can declare tools, resources, and prompts in its `plugin.json` under `contributions.mcp`. They are automatically merged into DevOps Pilot's MCP server with a namespaced name (`<pluginId>__<toolName>`), so a Claude Desktop user can use Builder.io plugin tools without ever opening DevOps Pilot's UI.
+
+Example (`dashboard/plugins/builderio/plugin.json`):
+```json
+"contributions": {
+  "mcp": {
+    "tools": [
+      {
+        "name": "health",
+        "description": "Builder.io project health check.",
+        "inputSchema": { "type": "object", "properties": {} },
+        "route": "GET /api/plugins/builderio/health"
+      }
+    ]
+  }
+}
+```
+
+### MCP client (consume external servers)
+
+DevOps Pilot can also connect to external MCP servers (GitHub, Postgres, Slack, Linear, Sentry, Figma, Notion, and hundreds more). Settings -> MCP Servers lets you add a server by command and args. Each server is launched as a child process over stdio, its capabilities are fetched and displayed, and its tools become callable via `/api/mcp/call`.
+
 ---
 
 ## Supported AI Agents

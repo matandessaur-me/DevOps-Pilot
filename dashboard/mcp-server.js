@@ -19,10 +19,14 @@
  */
 
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
 const PROTOCOL_VERSION = '2025-11-25';
 const API_HOST = '127.0.0.1';
 const API_PORT = 3800;
+const REPO_ROOT = path.resolve(__dirname, '..');
+const PLUGINS_DIR = path.join(__dirname, 'plugins');
 
 // ── JSON-RPC framing ────────────────────────────────────────────────────────
 const stdin = process.stdin;
@@ -258,6 +262,116 @@ function textResult(text) {
   return { content: [{ type: 'text', text: String(text) }] };
 }
 
+// ── Plugin MCP reflection ───────────────────────────────────────────────────
+// Each plugin may declare a `contributions.mcp` block in plugin.json:
+//   "contributions": {
+//     "mcp": {
+//       "tools": [
+//         { "name": "...", "description": "...", "inputSchema": {...},
+//           "route": "GET /api/plugins/<id>/something",
+//           "bodyFrom": "arguments"   // optional, used with POST/PATCH
+//         }
+//       ],
+//       "resources": [ { "uri": "...", "name": "...", "mimeType": "...", "route": "GET ..." } ],
+//       "prompts":   [ { "name": "...", "description": "...", "arguments": [], "route": "GET ..." } ]
+//     }
+//   }
+// The name is namespaced as "<pluginId>__<declaredName>" so collisions are impossible.
+function loadPluginContributions() {
+  const tools = [];
+  const resources = [];
+  const prompts = [];
+  if (!fs.existsSync(PLUGINS_DIR)) return { tools, resources, prompts };
+  let dirs = [];
+  try { dirs = fs.readdirSync(PLUGINS_DIR); } catch (_) { return { tools, resources, prompts }; }
+  for (const dir of dirs) {
+    if (dir === 'sdk') continue;
+    const manifestPath = path.join(PLUGINS_DIR, dir, 'plugin.json');
+    if (!fs.existsSync(manifestPath)) continue;
+    let manifest;
+    try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); } catch (_) { continue; }
+    const mcp = manifest && manifest.contributions && manifest.contributions.mcp;
+    if (!mcp) continue;
+    const id = manifest.id || dir;
+    for (const t of (mcp.tools || [])) {
+      tools.push({
+        name: `${id}__${t.name}`,
+        description: `[${manifest.name || id}] ${t.description || ''}`.trim(),
+        inputSchema: t.inputSchema || { type: 'object', properties: {} },
+        handler: buildRouteHandler(t),
+      });
+    }
+    for (const r of (mcp.resources || [])) {
+      resources.push({
+        uri: r.uri,
+        name: `${manifest.name || id}: ${r.name || r.uri}`,
+        description: r.description || '',
+        mimeType: r.mimeType || 'application/json',
+        read: buildRouteReader(r),
+      });
+    }
+    for (const p of (mcp.prompts || [])) {
+      prompts.push({
+        name: `${id}__${p.name}`,
+        description: `[${manifest.name || id}] ${p.description || ''}`.trim(),
+        arguments: p.arguments || [],
+        render: buildPromptRenderer(p),
+      });
+    }
+  }
+  return { tools, resources, prompts };
+}
+
+function parseRoute(route) {
+  const i = String(route || '').indexOf(' ');
+  if (i < 0) return { method: 'GET', pathname: route || '' };
+  return { method: String(route).slice(0, i).toUpperCase(), pathname: String(route).slice(i + 1) };
+}
+
+function applyPathParams(pathname, args) {
+  return String(pathname).replace(/:(\w+)/g, (_, key) => encodeURIComponent(args[key] != null ? args[key] : ''));
+}
+
+function buildRouteHandler(tool) {
+  return async (args) => {
+    const { method, pathname } = parseRoute(tool.route);
+    const resolved = applyPathParams(pathname, args || {});
+    let body;
+    if (method === 'GET' || method === 'DELETE') {
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(args || {})) {
+        if (resolved.includes(`:${k}`)) continue;
+        if (v == null) continue;
+        params.set(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+      }
+      const qs = params.toString();
+      const data = await apiRequest(method, resolved + (qs ? (resolved.includes('?') ? '&' : '?') + qs : ''));
+      return textResult(typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+    }
+    body = tool.bodyFrom === 'arguments' || !tool.bodyFrom ? args : (args && args[tool.bodyFrom]) || {};
+    const data = await apiRequest(method, resolved, body);
+    return textResult(typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+  };
+}
+
+function buildRouteReader(res) {
+  return async () => {
+    const { method, pathname } = parseRoute(res.route);
+    return apiRequest(method || 'GET', pathname);
+  };
+}
+
+function buildPromptRenderer(p) {
+  return async (args) => {
+    const { method, pathname } = parseRoute(p.route);
+    const resolved = applyPathParams(pathname, args || {});
+    const data = method === 'GET' ? await apiRequest('GET', resolved) : await apiRequest(method, resolved, args);
+    if (Array.isArray(data)) return data; // assume well-formed messages
+    if (data && Array.isArray(data.messages)) return data.messages;
+    return [{ role: 'user', content: { type: 'text', text: typeof data === 'string' ? data : JSON.stringify(data, null, 2) } }];
+  };
+}
+
 // ── Resources ───────────────────────────────────────────────────────────────
 const RESOURCES = [
   {
@@ -371,13 +485,17 @@ async function handleRequest(msg) {
     }
 
     if (method === 'tools/list') {
-      return sendResult(id, { tools: TOOLS.map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
+      const plugin = loadPluginContributions();
+      const all = [...TOOLS, ...plugin.tools];
+      return sendResult(id, { tools: all.map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
     }
 
     if (method === 'tools/call') {
       const name = params && params.name;
       const args = (params && params.arguments) || {};
-      const tool = TOOLS.find(t => t.name === name);
+      const plugin = loadPluginContributions();
+      const all = [...TOOLS, ...plugin.tools];
+      const tool = all.find(t => t.name === name);
       if (!tool) return sendError(id, -32602, `Unknown tool: ${name}`);
       try {
         const result = await tool.handler(args);
@@ -389,14 +507,18 @@ async function handleRequest(msg) {
     }
 
     if (method === 'resources/list') {
+      const plugin = loadPluginContributions();
+      const all = [...RESOURCES, ...plugin.resources];
       return sendResult(id, {
-        resources: RESOURCES.map(r => ({ uri: r.uri, name: r.name, description: r.description, mimeType: r.mimeType })),
+        resources: all.map(r => ({ uri: r.uri, name: r.name, description: r.description, mimeType: r.mimeType })),
       });
     }
 
     if (method === 'resources/read') {
       const uri = params && params.uri;
-      const res = RESOURCES.find(r => r.uri === uri);
+      const plugin = loadPluginContributions();
+      const all = [...RESOURCES, ...plugin.resources];
+      const res = all.find(r => r.uri === uri);
       if (!res) return sendError(id, -32602, `Unknown resource: ${uri}`);
       try {
         const data = await res.read();
@@ -408,13 +530,17 @@ async function handleRequest(msg) {
     }
 
     if (method === 'prompts/list') {
-      return sendResult(id, { prompts: PROMPTS.map(p => ({ name: p.name, description: p.description, arguments: p.arguments })) });
+      const plugin = loadPluginContributions();
+      const all = [...PROMPTS, ...plugin.prompts];
+      return sendResult(id, { prompts: all.map(p => ({ name: p.name, description: p.description, arguments: p.arguments })) });
     }
 
     if (method === 'prompts/get') {
       const name = params && params.name;
       const args = (params && params.arguments) || {};
-      const p = PROMPTS.find(p => p.name === name);
+      const plugin = loadPluginContributions();
+      const all = [...PROMPTS, ...plugin.prompts];
+      const p = all.find(p => p.name === name);
       if (!p) return sendError(id, -32602, `Unknown prompt: ${name}`);
       try {
         const messages = await p.render(args);
