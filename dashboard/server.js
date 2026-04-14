@@ -63,6 +63,21 @@ const graphRuns = new GraphRunsEngine({
   },
 });
 const modelRouter = require('./model-router');
+const recipes = require('./recipes');
+
+// Render input.default templates so the UI sees evaluated values
+// instead of raw {{ context.selectedIterationName }} placeholders.
+function withRenderedDefaults(recipe, ctx) {
+  if (!recipe || !Array.isArray(recipe.inputs)) return recipe;
+  const renderedInputs = recipe.inputs.map(i => {
+    if (typeof i.default !== 'string' || !i.default.includes('{{')) return i;
+    try {
+      const rendered = recipes.renderTemplate(i.default, { context: ctx });
+      return { ...i, default: rendered, defaultTemplate: i.default };
+    } catch (_) { return i; }
+  });
+  return { ...recipe, inputs: renderedInputs };
+}
 
 async function permGate(res, type, value, label) {
   return permissions.gate(res, { type, value }, { configPath, actionLabel: label });
@@ -129,6 +144,116 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/models/recommend' && req.method === 'POST') {
       const body = await readBody(req);
       return json(res, modelRouter.recommend({ ...body, configPath }));
+    }
+
+    // ── Recipes ───────────────────────────────────────────────────────────
+    if (url.pathname === '/api/recipes' && req.method === 'GET') {
+      const ctx = getUiContextWithPath();
+      return json(res, recipes.listRecipes().map(r => withRenderedDefaults(r, ctx)));
+    }
+    const recipeMatch = url.pathname.match(/^\/api\/recipes\/([^/]+)$/);
+    if (recipeMatch && req.method === 'GET') {
+      const r = recipes.loadRecipe(decodeURIComponent(recipeMatch[1]));
+      if (!r) return json(res, { error: 'recipe not found' }, 404);
+      return json(res, withRenderedDefaults(r, getUiContextWithPath()));
+    }
+    if (url.pathname === '/api/recipes/save' && req.method === 'POST') {
+      const body = await readBody(req);
+      const id = String(body.id || '').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      if (!id) return json(res, { error: 'id required' }, 400);
+      const file = path.join(repoRoot, 'recipes', id + '.md');
+      if (fs.existsSync(file) && !body.overwrite) {
+        return json(res, { error: `A recipe with id '${id}' already exists. Pass overwrite:true to replace it.`, exists: true }, 409);
+      }
+      if (!await permGate(res, 'api', 'POST /api/recipes/save', `${body.overwrite ? 'Update' : 'Save'} recipe: ${id}`)) return;
+      try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        const fm = body.frontmatter || {};
+        const lines = ['---'];
+        const order = ['name', 'description', 'icon', 'intent', 'cli', 'model', 'mode', 'dispatch', 'plugins', 'mcpServers', 'inputs'];
+        for (const k of order) {
+          if (fm[k] === undefined || fm[k] === null || fm[k] === '') continue;
+          if (Array.isArray(fm[k])) {
+            if (k === 'inputs') {
+              lines.push('inputs:');
+              for (const it of fm[k]) {
+                lines.push('  - name: ' + it.name);
+                if (it.type) lines.push('    type: ' + it.type);
+                if (it.description) lines.push('    description: ' + JSON.stringify(it.description));
+                if (it.default !== undefined && it.default !== '') lines.push('    default: ' + JSON.stringify(String(it.default)));
+                if (it.required) lines.push('    required: true');
+              }
+            } else {
+              lines.push(k + ': [' + fm[k].map(v => JSON.stringify(v)).join(', ') + ']');
+            }
+          } else if (typeof fm[k] === 'boolean') {
+            lines.push(k + ': ' + (fm[k] ? 'true' : 'false'));
+          } else {
+            lines.push(k + ': ' + (typeof fm[k] === 'string' && /[:#'"\\\[\]\{\}]/.test(fm[k]) ? JSON.stringify(fm[k]) : fm[k]));
+          }
+        }
+        lines.push('---');
+        const content = lines.join('\n') + '\n\n' + (body.body || '').replace(/\r\n/g, '\n');
+        fs.writeFileSync(file, content, 'utf8');
+        return json(res, { ok: true, id, path: file });
+      } catch (e) { return json(res, { error: e.message }, 500); }
+    }
+    if (url.pathname === '/api/recipes/preview' && req.method === 'POST') {
+      const body = await readBody(req);
+      const id = String(body.id || '').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      if (!id) return json(res, { error: 'id required' }, 400);
+      const recipe = recipes.loadRecipe(id);
+      if (!recipe) return json(res, { error: 'recipe not found' }, 404);
+      try {
+        const ctx = getUiContextWithPath();
+        const finalInputs = {};
+        for (const def of (recipe.inputs || [])) {
+          let v = (body.inputs && Object.prototype.hasOwnProperty.call(body.inputs, def.name)) ? body.inputs[def.name] : undefined;
+          if (v === undefined && def.default !== undefined) v = def.default;
+          if (typeof v === 'string' && v.includes('{{')) {
+            v = recipes.renderTemplate(v, { context: ctx });
+          }
+          finalInputs[def.name] = v;
+        }
+        const rendered = recipes.renderTemplate(recipe.body, { context: ctx, env: process.env, inputs: finalInputs });
+        return json(res, { id, inputs: finalInputs, prompt: rendered.trim() });
+      } catch (e) { return json(res, { error: e.message }, 500); }
+    }
+    const recipeDelMatch = url.pathname.match(/^\/api\/recipes\/([^/]+)$/);
+    if (recipeDelMatch && req.method === 'DELETE') {
+      const id = decodeURIComponent(recipeDelMatch[1]).toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      if (!id) return json(res, { error: 'id required' }, 400);
+      if (!await permGate(res, 'api', `DELETE /api/recipes/${id}`, `Delete recipe: ${id}`)) return;
+      try {
+        const file = path.join(repoRoot, 'recipes', id + '.md');
+        if (!fs.existsSync(file)) return json(res, { error: 'not found' }, 404);
+        fs.unlinkSync(file);
+        return json(res, { ok: true, id });
+      } catch (e) { return json(res, { error: e.message }, 500); }
+    }
+    if (url.pathname === '/api/recipes/run' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!body.id) return json(res, { error: 'id required' }, 400);
+      if (!await permGate(res, 'api', 'POST /api/recipes/run', `Run recipe: ${body.id}`)) return;
+      try {
+        return json(res, await recipes.runRecipe({
+          ...body,
+          injectToTerminal: (termId, text) => {
+            const t = terminals.get(termId);
+            if (t && t.pty) try { t.pty.write(text); } catch (_) {}
+          },
+          getOrchestrateMode: () => getConfig().OrchestrateMode === true,
+        }));
+      } catch (e) { return json(res, { error: e.message }, 400); }
+    }
+    if (url.pathname === '/api/ui/open-path' && req.method === 'POST') {
+      const body = await readBody(req);
+      const safe = String(body.path || '').replace(/\.\./g, '');
+      const target = path.join(repoRoot, safe);
+      try { fs.mkdirSync(target, { recursive: true }); } catch (_) {}
+      const opener = process.platform === 'win32' ? 'explorer.exe' : (process.platform === 'darwin' ? 'open' : 'xdg-open');
+      try { spawnSync(opener, [target], { detached: true, stdio: 'ignore' }); return json(res, { ok: true, path: target }); }
+      catch (e) { return json(res, { error: e.message }, 500); }
     }
 
     // ── Permissions ────────────────────────────────────────────────────────
