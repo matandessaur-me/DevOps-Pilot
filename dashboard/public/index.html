@@ -2650,6 +2650,7 @@
       <button class="intel-tab active" data-itab="activity" onclick="switchIntelTab('activity')">Activity</button>
       <button class="intel-tab" data-itab="team" onclick="switchIntelTab('team')">Team</button>
       <button class="intel-tab" data-itab="gitlog" onclick="switchIntelTab('gitlog')">Git Log</button>
+      <button class="intel-tab" data-itab="recipes" onclick="switchIntelTab('recipes'); refreshRecipesPanel();">Recipes</button>
       <div class="tab-open-wrap" id="intelReopenWrap" style="display:none;flex-shrink:0;">
         <button class="tab-open-btn" onclick="toggleIntelReopenMenu()" title="Open closed panels" style="font-size:12px;padding:4px 6px;width:22px;height:22px;margin-top:6px;">+</button>
         <div class="tab-open-menu" id="intelReopenMenu"></div>
@@ -2673,6 +2674,15 @@
     <!-- Git Log Panel -->
     <div class="intel-panel" id="ipanel-gitlog">
       <div id="gitLogList" style="color:var(--subtext0);font-size:12px;padding:4px;">Select a repo in Files tab</div>
+    </div>
+
+    <!-- Recipes Panel -->
+    <div class="intel-panel" id="ipanel-recipes">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+        <button onclick="refreshRecipesPanel()" title="Rescan recipes folder" style="font-size:10px;padding:4px 10px;background:var(--surface1);border:1px solid var(--surface2);color:var(--text);border-radius:4px;cursor:pointer;display:flex;align-items:center;gap:4px;"><i data-lucide="refresh-cw" style="width:11px;height:11px;"></i> Rescan</button>
+        <button onclick="openRecipesFolder()" title="Open recipes folder in OS file manager" style="font-size:10px;padding:4px 10px;background:var(--surface1);border:1px solid var(--surface2);color:var(--text);border-radius:4px;cursor:pointer;display:flex;align-items:center;gap:4px;"><i data-lucide="folder-open" style="width:11px;height:11px;"></i> Folder</button>
+      </div>
+      <div id="recipesPanelList" style="display:flex;flex-direction:column;gap:6px;font-size:12px;"><div style="color:var(--subtext0);padding:8px;">Loading...</div></div>
     </div>
   </aside>
 </div>
@@ -2756,9 +2766,6 @@
         </button>
         <button class="settings-nav-btn" data-settings-tab="mcp" onclick="switchSettingsTab('mcp', this); refreshMcpServers();">
           <i data-lucide="plug" style="width:14px;height:14px;"></i> MCP Servers
-        </button>
-        <button class="settings-nav-btn" data-settings-tab="recipes" onclick="switchSettingsTab('recipes', this); refreshRecipesPanel();">
-          <i data-lucide="book-open" style="width:14px;height:14px;"></i> Recipes
         </button>
         <button class="settings-nav-btn" data-settings-tab="theme" onclick="switchSettingsTab('theme', this)">
           <i data-lucide="palette" style="width:14px;height:14px;"></i> Theme
@@ -2906,25 +2913,6 @@
             <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
               <button class="modal-btn modal-btn-primary" onclick="addMcpServer()" style="padding:6px 14px;font-size:11px;">Add Server</button>
             </div>
-          </div>
-        </div>
-
-        <!-- Recipes Tab -->
-        <div class="settings-tab" id="settingsTab-recipes">
-          <div class="settings-section">
-            <div class="settings-section-title">Recipe Library</div>
-            <div class="settings-section-desc">
-              Reusable AI workflows declared as markdown files. Project-local recipes live in <code>recipes/</code>; user-global ones in <code>~/.devops-pilot/recipes/</code>. Project-local wins on name conflict. New recipes are picked up automatically; refresh below to re-scan.
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;margin:8px 0 12px;">
-              <button onclick="refreshRecipesPanel()" style="font-size:11px;padding:5px 12px;background:var(--surface1);border:1px solid var(--surface2);color:var(--text);border-radius:var(--radius);cursor:pointer;display:flex;align-items:center;gap:6px;">
-                <i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> Rescan
-              </button>
-              <button onclick="openRecipesFolder()" style="font-size:11px;padding:5px 12px;background:var(--surface1);border:1px solid var(--surface2);color:var(--text);border-radius:var(--radius);cursor:pointer;display:flex;align-items:center;gap:6px;">
-                <i data-lucide="folder-open" style="width:12px;height:12px;"></i> Open recipes folder
-              </button>
-            </div>
-            <div id="recipesPanelList" style="display:flex;flex-direction:column;gap:8px;"><div style="color:var(--subtext0);padding:12px;">No recipes found.</div></div>
           </div>
         </div>
 
