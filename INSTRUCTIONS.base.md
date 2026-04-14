@@ -165,6 +165,42 @@ When you call a gated endpoint, expect one of:
 - GitHub PR comment / review.
 - `git push`, force push, destructive shell commands (enforced through the mode defaults on `cmd:` rules).
 
+## Model Router: pick the right CLI + model for each task
+
+**DO NOT hardcode CLI and model for spawned work.** Use the router so picks respect the user's subscriptions, API keys, and budget.
+
+**From bash/scripts:**
+```bash
+# Ask what to use for a given intent
+powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "./scripts/Get-ModelRecommendation.ps1 -Intent quick-summary"
+```
+
+**From API:**
+```bash
+curl -s -X POST http://127.0.0.1:3800/api/models/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"intent":"quick-summary"}'
+# -> { "cli": "claude", "model": "claude-haiku-4-5", "reasoning": "..." }
+```
+
+**Intents (use the closest match):**
+- `quick-summary` — short output, classify, haiku, 1-paragraph answer
+- `deep-code` — complex refactor, debugging, architecture reasoning
+- `plan-and-implement` — reason about approach, then produce the code
+- `long-autonomy` — multi-hour agentic work
+- `web-research` — needs current info from the open web
+- `web-research-cheap` — light web lookup (pricing, docs)
+- `pr-review` — GitHub PR/issue workflow
+- `social-live` — live X/Twitter/social context
+- `parallel-fanout` — one of N cheap workers in a fan-out
+- `large-context` — input > 200k tokens (auto-promoted if `contextTokens` is passed)
+
+**Budget flag** (optional): `cheap`, `default`, `premium`.
+
+**When you spawn via `/api/orchestrator/spawn` or define a worker node in a graph run, call the router first** unless the user explicitly asked for a specific CLI/model. Feed the returned `cli` + `model` into the spawn body.
+
+Full catalog: `curl -s http://127.0.0.1:3800/api/models/catalog`
+
 ## API Reference
 
 **All endpoint details (work items, git, GitHub PRs, notes, UI control, orchestrator, browser, learnings) are at `http://127.0.0.1:3800/api/instructions`.** Fetch when you need to make an API call you are not sure about. Do NOT guess endpoint signatures.
