@@ -2611,7 +2611,7 @@
             <input id="newNoteInput" type="text" placeholder="Note name..." style="width:100%;padding:5px 8px;background:var(--surface0);border:1px solid var(--surface1);border-radius:var(--radius);color:var(--text);font:12px var(--font-ui);outline:none;" onkeydown="if(event.key==='Enter')confirmCreateNote();if(event.key==='Escape')hideNewNoteInput();">
           </div>
           <div id="notesSearchWrap" style="padding:6px 8px;border-bottom:1px solid var(--surface0);flex-shrink:0;">
-            <input id="notesSearchInput" type="text" placeholder="Search notes + learnings..." oninput="onNotesSearchInput()" style="width:100%;padding:5px 8px;background:var(--surface0);border:1px solid var(--surface1);border-radius:var(--radius);color:var(--text);font:12px var(--font-ui);outline:none;box-sizing:border-box;">
+            <input id="notesSearchInput" type="text" placeholder="Search notes..." oninput="onNotesSearchInput()" style="width:100%;padding:5px 8px;background:var(--surface0);border:1px solid var(--surface1);border-radius:var(--radius);color:var(--text);font:12px var(--font-ui);outline:none;box-sizing:border-box;">
           </div>
           <div id="notesSearchResults" style="display:none;overflow-y:auto;padding:4px 0;border-bottom:1px solid var(--surface0);flex-shrink:0;max-height:50%;"></div>
           <div id="notesList" style="overflow-y:auto;flex:1;"></div>
@@ -10339,6 +10339,9 @@ function getCmdActions() {
     { label: 'Resume Session', icon: 'rotate-ccw', action: () => { resumeAiSession(); switchTab('terminal'); }, category: 'AI' },
     // Settings
     { label: 'Open Settings', icon: 'settings', action: () => openSettings(), category: 'Settings' },
+    // Search + retrieval
+    { label: 'Search Notes + Learnings', icon: 'search', action: () => { document.getElementById('cmdPaletteInput').value = '/find '; filterCmdPalette(); }, category: 'Action', hint: '/find <query>' },
+    { label: 'Generate Repo Map', icon: 'map', action: () => openRepoMapModal(), category: 'Action', hint: 'Symbol map of the active repo' },
   ];
   // Repos
   for (const name of repos) {
@@ -10458,8 +10461,21 @@ function closeCmdPalette() {
 var _cmdSearchTimer = null;
 
 function filterCmdPalette() {
-  const q = document.getElementById('cmdPaletteInput').value.toLowerCase().trim();
+  const raw = document.getElementById('cmdPaletteInput').value.trim();
+  const q = raw.toLowerCase();
   const all = getCmdActions();
+
+  // Slash-command: /find <query> or /search <query>
+  // -> hybrid search across notes + learnings
+  const findMatch = raw.match(/^\/(?:find|search)\s+(.+)$/i);
+  if (findMatch) {
+    const query = findMatch[1];
+    _cmdFiltered = [{ label: `Searching "${query}"...`, icon: 'loader', action: () => {}, category: 'Search' }];
+    _cmdSelectedIdx = 0;
+    renderCmdPalette();
+    runPaletteSearch(query);
+    return;
+  }
 
   // Check if user typed a work item ID like #12345 or just 12345
   const idMatch = q.match(/^#?(\d{3,})$/);
@@ -10467,7 +10483,6 @@ function filterCmdPalette() {
   if (idMatch) {
     const id = idMatch[1];
     _cmdFiltered = all.filter(a => a.label.includes(`#${id}`));
-    // Also add a "Go to #ID" option
     if (!_cmdFiltered.some(a => a.label === `#${id}`)) {
       _cmdFiltered.unshift({ label: `Open Work Item #${id}`, icon: 'external-link', action: () => viewWorkItem(parseInt(id)), category: 'Work Item' });
     }
@@ -10487,6 +10502,93 @@ function filterCmdPalette() {
     if (pluginHits < 3) {
       _cmdSearchTimer = setTimeout(function() { liveSearchPlugins(q); }, 300);
     }
+  }
+}
+
+async function openRepoMapModal() {
+  let overlay = document.getElementById('repoMapOverlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
+  overlay.id = 'repoMapOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center;font-family:var(--font-ui);';
+  overlay.innerHTML = `
+    <div style="background:var(--surface0);border:1px solid var(--surface2);border-radius:var(--radius);padding:18px;width:90vw;max-width:1000px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 24px rgba(0,0,0,0.4);">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <i data-lucide="map" style="width:18px;height:18px;color:var(--accent);"></i>
+        <strong style="font-size:15px;">Repo Map</strong>
+        <select id="repoMapRepo" style="margin-left:8px;padding:5px 8px;background:var(--surface1);border:1px solid var(--surface2);border-radius:4px;color:var(--text);font:12px var(--font-ui);outline:none;"></select>
+        <select id="repoMapBudget" style="padding:5px 8px;background:var(--surface1);border:1px solid var(--surface2);border-radius:4px;color:var(--text);font:12px var(--font-ui);outline:none;">
+          <option value="2000">~2k tokens</option>
+          <option value="4000" selected>~4k tokens</option>
+          <option value="8000">~8k tokens</option>
+          <option value="16000">~16k tokens</option>
+        </select>
+        <button onclick="loadRepoMapInto()" style="font-size:12px;padding:5px 12px;background:var(--surface1);border:1px solid var(--surface2);color:var(--text);border-radius:4px;cursor:pointer;">Refresh</button>
+        <div style="flex:1;"></div>
+        <button onclick="copyRepoMap()" style="font-size:12px;padding:5px 12px;background:var(--surface1);border:1px solid var(--surface2);color:var(--text);border-radius:4px;cursor:pointer;">Copy</button>
+        <button onclick="document.getElementById('repoMapOverlay').remove()" style="font-size:12px;padding:5px 12px;background:var(--surface1);border:1px solid var(--surface2);border-radius:4px;color:var(--text);cursor:pointer;">Close</button>
+      </div>
+      <pre id="repoMapOutput" style="flex:1;overflow:auto;background:var(--mantle);border:1px solid var(--surface2);border-radius:4px;padding:14px;color:var(--text);font:12px var(--font-mono);white-space:pre-wrap;line-height:1.5;margin:0;">Loading...</pre>
+    </div>`;
+  document.body.appendChild(overlay);
+  // Populate repo dropdown
+  try {
+    const repos = await fetch('/api/repos').then(r => r.json());
+    const ctx = await fetch('/api/ui/context').then(r => r.json());
+    const sel = document.getElementById('repoMapRepo');
+    sel.innerHTML = Object.keys(repos || {}).map(n => `<option value="${escapeHtml(n)}" ${n===ctx.activeRepo?'selected':''}>${escapeHtml(n)}${n===ctx.activeRepo?' (active)':''}</option>`).join('');
+  } catch (_) {}
+  if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
+  loadRepoMapInto();
+}
+
+async function loadRepoMapInto() {
+  const repo = document.getElementById('repoMapRepo').value;
+  const budget = document.getElementById('repoMapBudget').value;
+  const out = document.getElementById('repoMapOutput');
+  out.textContent = `Generating map for ${repo} (~${budget} tokens)...`;
+  try {
+    const r = await fetch('/api/repo/map?repo=' + encodeURIComponent(repo) + '&budget=' + encodeURIComponent(budget));
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    out.textContent = await r.text();
+  } catch (e) { out.textContent = 'Failed: ' + e.message; }
+}
+
+async function copyRepoMap() {
+  const text = document.getElementById('repoMapOutput').textContent;
+  try { await navigator.clipboard.writeText(text); toast('Copied to clipboard', 'success'); }
+  catch (_) { toast('Copy failed', 'error'); }
+}
+
+async function runPaletteSearch(query) {
+  const input = document.getElementById('cmdPaletteInput');
+  if (!input || input.value.trim().toLowerCase().indexOf('/' + 'find ') !== 0 && input.value.trim().toLowerCase().indexOf('/' + 'search ') !== 0) return;
+  try {
+    const r = await fetch('/api/search?q=' + encodeURIComponent(query) + '&limit=20');
+    if (r.status === 501) {
+      _cmdFiltered = [{ label: 'Hybrid Search is OFF. Enable in Settings -> Other.', icon: 'alert-circle', action: () => openSettings('other'), category: 'Search' }];
+      _cmdSelectedIdx = 0; renderCmdPalette(); return;
+    }
+    const data = await r.json();
+    if (!data.results || !data.results.length) {
+      _cmdFiltered = [{ label: `No matches for "${query}"`, icon: 'x-circle', action: () => {}, category: 'Search' }];
+      _cmdSelectedIdx = 0; renderCmdPalette(); return;
+    }
+    _cmdFiltered = data.results.map(x => ({
+      label: `${x.kind === 'learning' ? '[learning] ' : ''}${x.title}`,
+      icon: x.kind === 'learning' ? 'book-marked' : 'file-text',
+      hint: (x.snippet || '').slice(0, 80),
+      category: 'Search',
+      action: () => {
+        if (x.kind === 'note') openNote(x.id.replace(/^note:/, ''));
+        else { switchTab('terminal'); toast(`Learning: ${x.title}`, 'success'); }
+      },
+    }));
+    _cmdSelectedIdx = 0;
+    renderCmdPalette();
+  } catch (_) {
+    _cmdFiltered = [{ label: 'Search failed', icon: 'alert-circle', action: () => {}, category: 'Search' }];
+    _cmdSelectedIdx = 0; renderCmdPalette();
   }
 }
 
@@ -12005,7 +12107,8 @@ async function runNotesSearch() {
   const host = document.getElementById('notesSearchResults');
   if (!q) { host.style.display = 'none'; host.innerHTML = ''; return; }
   try {
-    const r = await fetch('/api/search?q=' + encodeURIComponent(q) + '&limit=15');
+    // Notes tab search is scoped to notes only. Cross-corpus search lives in the command palette.
+    const r = await fetch('/api/search?q=' + encodeURIComponent(q) + '&kinds=note&limit=15');
     if (r.status === 501) {
       host.style.display = '';
       host.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:var(--subtext0);">Hybrid Search is OFF. Enable it in <a href="#" onclick="event.preventDefault();openSettings();return false;" style="color:var(--accent);">Settings -> Other</a> to search across notes + learnings.</div>';
@@ -12019,16 +12122,9 @@ async function runNotesSearch() {
     }
     host.style.display = '';
     host.innerHTML = data.results.map(x => {
-      // In the Notes tab the NOTE badge is redundant (everything here is a note
-      // by default); show only LEARNING since that's the meaningful distinction.
-      const badge = x.kind === 'learning'
-        ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:var(--surface2);color:var(--subtext0);">LEARNING</span> '
-        : '';
-      // Reconstruct filename from the id ("note:<filename-without-md>")
-      const noteName = x.kind === 'note' ? x.id.replace(/^note:/, '') : '';
-      const click = noteName ? `openNote(${JSON.stringify(noteName)})` : '';
-      return `<div onclick="${click}" style="padding:6px 12px;cursor:${click?'pointer':'default'};border-bottom:1px solid var(--surface0);" onmouseenter="this.style.background='var(--surface0)'" onmouseleave="this.style.background='transparent'">
-        <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text);font-weight:500;">${badge}${escapeHtml(x.title)} <span title="BM25 relevance score - higher means better match. Combines how often your terms appear in this doc, how rare those terms are across all docs, and document length normalization." style="margin-left:auto;font-size:10px;color:var(--subtext0);cursor:help;">${x.score}</span></div>
+      const noteName = x.id.replace(/^note:/, '');
+      return `<div onclick="openNote(${JSON.stringify(noteName)})" style="padding:6px 12px;cursor:pointer;border-bottom:1px solid var(--surface0);" onmouseenter="this.style.background='var(--surface0)'" onmouseleave="this.style.background='transparent'">
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text);font-weight:500;">${escapeHtml(x.title)} <span title="BM25 relevance score. Higher = better match. Combines how often your terms appear here, how rare those terms are across all notes, and document-length normalization." style="margin-left:auto;font-size:10px;color:var(--subtext0);cursor:help;">${x.score}</span></div>
         <div style="font-size:11px;color:var(--subtext0);margin-top:3px;line-height:1.3;">${escapeHtml(x.snippet || '')}</div>
       </div>`;
     }).join('');
