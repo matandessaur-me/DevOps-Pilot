@@ -12019,9 +12019,16 @@ async function runNotesSearch() {
     }
     host.style.display = '';
     host.innerHTML = data.results.map(x => {
-      const click = x.kind === 'note' ? `selectNote('${escapeHtml(x.title.replace(/ /g, '-'))}.md')` : '';
+      // In the Notes tab the NOTE badge is redundant (everything here is a note
+      // by default); show only LEARNING since that's the meaningful distinction.
+      const badge = x.kind === 'learning'
+        ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:var(--surface2);color:var(--subtext0);">LEARNING</span> '
+        : '';
+      // Reconstruct filename from the id ("note:<filename-without-md>")
+      const noteName = x.kind === 'note' ? x.id.replace(/^note:/, '') : '';
+      const click = noteName ? `openNote(${JSON.stringify(noteName)})` : '';
       return `<div onclick="${click}" style="padding:6px 12px;cursor:${click?'pointer':'default'};border-bottom:1px solid var(--surface0);" onmouseenter="this.style.background='var(--surface0)'" onmouseleave="this.style.background='transparent'">
-        <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text);font-weight:500;"><span style="font-size:9px;padding:1px 5px;border-radius:3px;background:var(--surface2);color:var(--subtext0);">${x.kind.toUpperCase()}</span> ${escapeHtml(x.title)} <span style="margin-left:auto;font-size:10px;color:var(--subtext0);">${x.score}</span></div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text);font-weight:500;">${badge}${escapeHtml(x.title)} <span title="BM25 relevance score - higher means better match. Combines how often your terms appear in this doc, how rare those terms are across all docs, and document length normalization." style="margin-left:auto;font-size:10px;color:var(--subtext0);cursor:help;">${x.score}</span></div>
         <div style="font-size:11px;color:var(--subtext0);margin-top:3px;line-height:1.3;">${escapeHtml(x.snippet || '')}</div>
       </div>`;
     }).join('');
