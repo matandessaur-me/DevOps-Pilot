@@ -10340,7 +10340,7 @@ function getCmdActions() {
     // Settings
     { label: 'Open Settings', icon: 'settings', action: () => openSettings(), category: 'Settings' },
     // Search + retrieval
-    { label: 'Search Notes + Learnings', icon: 'search', action: () => { document.getElementById('cmdPaletteInput').value = '/find '; filterCmdPalette(); }, category: 'Action', hint: '/find <query>' },
+    { label: 'Search Notes + Learnings', icon: 'search', action: () => { document.getElementById('cmdPaletteInput').value = 'find '; filterCmdPalette(); }, category: 'Action', hint: 'find <query>' },
     { label: 'Generate Repo Map', icon: 'map', action: () => openRepoMapModal(), category: 'Action', hint: 'Symbol map of the active repo' },
   ];
   // Repos
@@ -10465,9 +10465,9 @@ function filterCmdPalette() {
   const q = raw.toLowerCase();
   const all = getCmdActions();
 
-  // Slash-command: /find <query> or /search <query>
+  // Search command: "find <query>" or "search <query>" (slash optional)
   // -> hybrid search across notes + learnings
-  const findMatch = raw.match(/^\/(?:find|search)\s+(.+)$/i);
+  const findMatch = raw.match(/^\/?(?:find|search)\s+(.+)$/i);
   if (findMatch) {
     const query = findMatch[1];
     _cmdFiltered = [{ label: `Searching "${query}"...`, icon: 'loader', action: () => {}, category: 'Search' }];
@@ -10503,6 +10503,42 @@ function filterCmdPalette() {
       _cmdSearchTimer = setTimeout(function() { liveSearchPlugins(q); }, 300);
     }
   }
+}
+
+async function openLearningModal(id) {
+  let learning = null;
+  try {
+    const all = await fetch('/api/learnings').then(r => r.json());
+    learning = (Array.isArray(all) ? all : []).find(l => l.id === id);
+  } catch (_) {}
+  if (!learning) { toast('Learning not found: ' + id, 'error'); return; }
+  let overlay = document.getElementById('learningOverlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
+  overlay.id = 'learningOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center;font-family:var(--font-ui);';
+  const cli = learning.cli ? `<span style="font-size:10px;padding:2px 6px;background:var(--surface2);color:var(--subtext0);border-radius:3px;">cli: ${escapeHtml(learning.cli)}</span>` : '';
+  const synced = learning.synced ? '<span style="font-size:10px;color:var(--green);" title="Synced to shared learnings repo">synced</span>' : '<span style="font-size:10px;color:var(--subtext0);" title="Local only">local</span>';
+  overlay.innerHTML = `
+    <div style="background:var(--surface0);border:1px solid var(--surface2);border-radius:var(--radius);padding:18px 22px;width:80vw;max-width:780px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 24px rgba(0,0,0,0.4);">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+        <i data-lucide="book-marked" style="width:18px;height:18px;color:var(--accent);"></i>
+        <strong style="font-size:14px;">Learning</strong>
+        <span style="font-size:10px;padding:2px 6px;background:var(--surface2);color:var(--subtext0);border-radius:3px;">${escapeHtml(learning.category || 'general')}</span>
+        ${cli}
+        ${synced}
+        <div style="flex:1;"></div>
+        <span style="font-size:10px;color:var(--subtext0);font-family:var(--font-mono);">id: ${escapeHtml(learning.id)}</span>
+        <button onclick="document.getElementById('learningOverlay').remove()" style="font-size:12px;padding:5px 12px;background:var(--surface1);border:1px solid var(--surface2);border-radius:4px;color:var(--text);cursor:pointer;">Close</button>
+      </div>
+      <div style="overflow-y:auto;flex:1;min-height:0;">
+        <div style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:14px;word-wrap:break-word;">${escapeHtml(learning.summary || '')}</div>
+        ${learning.detail ? `<div style="font-size:12px;color:var(--subtext0);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Detail</div><pre style="background:var(--mantle);border:1px solid var(--surface2);border-radius:4px;padding:12px;color:var(--text);font:12px var(--font-mono);white-space:pre-wrap;line-height:1.5;margin:0;">${escapeHtml(learning.detail)}</pre>` : ''}
+        ${learning.source ? `<div style="margin-top:14px;font-size:11px;color:var(--subtext0);">Source: ${escapeHtml(learning.source)} · ${escapeHtml(learning.addedAt || '')}</div>` : ''}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
 }
 
 async function openRepoMapModal() {
@@ -10562,7 +10598,10 @@ async function copyRepoMap() {
 
 async function runPaletteSearch(query) {
   const input = document.getElementById('cmdPaletteInput');
-  if (!input || input.value.trim().toLowerCase().indexOf('/' + 'find ') !== 0 && input.value.trim().toLowerCase().indexOf('/' + 'search ') !== 0) return;
+  if (!input) return;
+  // Bail if the user has typed past this query (race protection)
+  const cur = input.value.trim().toLowerCase();
+  if (!/^\/?(?:find|search)\s+/i.test(cur)) return;
   try {
     const r = await fetch('/api/search?q=' + encodeURIComponent(query) + '&limit=20');
     if (r.status === 501) {
@@ -10581,7 +10620,7 @@ async function runPaletteSearch(query) {
       category: 'Search',
       action: () => {
         if (x.kind === 'note') openNote(x.id.replace(/^note:/, ''));
-        else { switchTab('terminal'); toast(`Learning: ${x.title}`, 'success'); }
+        else openLearningModal(x.id.replace(/^learning:/, ''));
       },
     }));
     _cmdSelectedIdx = 0;
