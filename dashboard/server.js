@@ -55,7 +55,13 @@ const { MCPClientManager } = require('./mcp-client');
 const mcpClient = new MCPClientManager({ configPath });
 mcpClient.bootstrap().catch(e => console.warn('  [mcp-client] bootstrap error:', e.message));
 const { GraphRunsEngine } = require('./graph-runs');
-const graphRuns = new GraphRunsEngine({ repoRoot });
+const graphRuns = new GraphRunsEngine({
+  repoRoot,
+  injectToTerminal: (termId, text) => {
+    const t = terminals.get(termId);
+    if (t && t.pty) try { t.pty.write(text); } catch (_) {}
+  },
+});
 
 async function permGate(res, type, value, label) {
   return permissions.gate(res, { type, value }, { configPath, actionLabel: label });
@@ -2871,6 +2877,7 @@ function createTerminal(termId, cols = 120, rows = 30, cwd = repoRoot) {
       COLORTERM: 'truecolor',
       FORCE_COLOR: '1',
       SystemRoot: process.env.SystemRoot || 'C:\\Windows',
+      DEVOPS_PILOT_TERM_ID: termId,
     },
   });
 

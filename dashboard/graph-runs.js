@@ -25,11 +25,12 @@ const EventEmitter = require('events');
 const STATES = ['pending', 'running', 'awaiting_approval', 'completed', 'failed', 'cancelled', 'paused'];
 
 class GraphRunsEngine extends EventEmitter {
-  constructor({ repoRoot, apiHost = '127.0.0.1', apiPort = 3800 }) {
+  constructor({ repoRoot, apiHost = '127.0.0.1', apiPort = 3800, injectToTerminal = null }) {
     super();
     this.repoRoot = repoRoot;
     this.apiHost = apiHost;
     this.apiPort = apiPort;
+    this.injectToTerminal = injectToTerminal;
     this.runsDir = path.join(repoRoot, '.devops-pilot', 'graph-runs');
     this.walPath = path.join(this.runsDir, 'events.jsonl');
     this.runs = new Map(); // runId -> run object (in memory + persisted)
@@ -92,7 +93,7 @@ class GraphRunsEngine extends EventEmitter {
   }
 
   // ── Public API ────────────────────────────────────────────────────────
-  async createRun({ name, nodes, state = {}, from = 'user' }) {
+  async createRun({ name, nodes, state = {}, from = 'user', originTermId = null }) {
     if (!Array.isArray(nodes) || !nodes.length) throw new Error('nodes array required');
     const id = this._newId();
     const now = Date.now();
@@ -103,6 +104,7 @@ class GraphRunsEngine extends EventEmitter {
       createdAt: now,
       updatedAt: now,
       from,
+      originTermId,
       state,
       nodes: nodes.map(n => ({
         ...n,
@@ -272,10 +274,28 @@ class GraphRunsEngine extends EventEmitter {
         run.status = anyFailed ? 'failed' : 'completed';
         run.updatedAt = Date.now();
         this._wal({ kind: 'run_ended', runId, status: run.status });
+        this._deliverResult(run);
       }
     }
     this._persist(run);
     this.emit('run-updated', run);
+  }
+
+  // Inject a one-line summary into the terminal that started this run,
+  // so the supervisor agent knows to pick up where it left off. Mirrors
+  // the orchestrator's OrchestrateResultDelivery=inject pattern.
+  _deliverResult(run) {
+    if (!this.injectToTerminal || !run.originTermId) return;
+    const ran = run.nodes.filter(n => n.status === 'completed').length;
+    const cancelled = run.nodes.filter(n => n.status === 'cancelled').length;
+    const failed = run.nodes.filter(n => n.status === 'failed').length;
+    const duration = Math.round((run.updatedAt - run.createdAt) / 1000);
+    const lastCompleted = [...run.nodes].reverse().find(n => n.status === 'completed');
+    const snippet = lastCompleted && lastCompleted.output && lastCompleted.output.result
+      ? String(lastCompleted.output.result).replace(/\n/g, ' ').substring(0, 400)
+      : '(no result from last node)';
+    const line = `[GRAPH RUN ${run.id}] ${run.status} — ${run.name} | ${ran} done, ${cancelled} skipped, ${failed} failed | ${duration}s | last: ${snippet}`;
+    try { this.injectToTerminal(run.originTermId, line + '\r'); } catch (_) {}
   }
 
   _areDepsComplete(run, node) {
