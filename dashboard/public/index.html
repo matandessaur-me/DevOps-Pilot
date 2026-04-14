@@ -2186,6 +2186,7 @@
         <button class="btn" onclick="runScript('standup')"><i data-lucide="message-square"></i> Standup Summary</button>
         <button class="btn" onclick="runScript('status')"><i data-lucide="bar-chart-2"></i> Iteration Status</button>
         <button class="btn" onclick="runScript('retro')"><i data-lucide="rotate-ccw"></i> Retrospective</button>
+        <button class="btn" onclick="openRepoMapModal()"><i data-lucide="map"></i> Generate Repo Map</button>
         <div id="sidebarPluginAiActions"></div>
         <div class="divider"></div>
       </div>
@@ -10541,6 +10542,10 @@ async function openLearningModal(id) {
   if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
 }
 
+let _repoMapEditor = null;
+let _repoMapMarkdownText = '';
+let _repoMapView = 'code'; // 'code' | 'preview'
+
 async function openRepoMapModal() {
   let overlay = document.getElementById('repoMapOverlay');
   if (overlay) overlay.remove();
@@ -10548,8 +10553,8 @@ async function openRepoMapModal() {
   overlay.id = 'repoMapOverlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center;font-family:var(--font-ui);';
   overlay.innerHTML = `
-    <div style="background:var(--surface0);border:1px solid var(--surface2);border-radius:var(--radius);padding:18px;width:90vw;max-width:1000px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 24px rgba(0,0,0,0.4);">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+    <div style="background:var(--surface0);border:1px solid var(--surface2);border-radius:var(--radius);padding:14px 16px;width:92vw;max-width:1100px;height:88vh;display:flex;flex-direction:column;box-shadow:0 8px 24px rgba(0,0,0,0.4);">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-shrink:0;">
         <i data-lucide="map" style="width:18px;height:18px;color:var(--accent);"></i>
         <strong style="font-size:15px;">Repo Map</strong>
         <select id="repoMapRepo" style="margin-left:8px;padding:5px 8px;background:var(--surface1);border:1px solid var(--surface2);border-radius:4px;color:var(--text);font:12px var(--font-ui);outline:none;"></select>
@@ -10560,14 +10565,18 @@ async function openRepoMapModal() {
           <option value="16000">~16k tokens</option>
         </select>
         <button onclick="loadRepoMapInto()" style="font-size:12px;padding:5px 12px;background:var(--surface1);border:1px solid var(--surface2);color:var(--text);border-radius:4px;cursor:pointer;">Refresh</button>
+        <div style="display:flex;border:1px solid var(--surface2);border-radius:4px;overflow:hidden;">
+          <button onclick="setRepoMapView('code')" id="repoMapBtnCode" style="font-size:12px;padding:5px 12px;background:var(--accent);border:none;color:#000;cursor:pointer;font-weight:600;">Code</button>
+          <button onclick="setRepoMapView('preview')" id="repoMapBtnPreview" style="font-size:12px;padding:5px 12px;background:var(--surface1);border:none;border-left:1px solid var(--surface2);color:var(--text);cursor:pointer;">Preview</button>
+        </div>
         <div style="flex:1;"></div>
         <button onclick="copyRepoMap()" style="font-size:12px;padding:5px 12px;background:var(--surface1);border:1px solid var(--surface2);color:var(--text);border-radius:4px;cursor:pointer;">Copy</button>
-        <button onclick="document.getElementById('repoMapOverlay').remove()" style="font-size:12px;padding:5px 12px;background:var(--surface1);border:1px solid var(--surface2);border-radius:4px;color:var(--text);cursor:pointer;">Close</button>
+        <button onclick="closeRepoMapModal()" style="font-size:12px;padding:5px 12px;background:var(--surface1);border:1px solid var(--surface2);border-radius:4px;color:var(--text);cursor:pointer;">Close</button>
       </div>
-      <pre id="repoMapOutput" style="flex:1;overflow:auto;background:var(--mantle);border:1px solid var(--surface2);border-radius:4px;padding:14px;color:var(--text);font:12px var(--font-mono);white-space:pre-wrap;line-height:1.5;margin:0;">Loading...</pre>
+      <div id="repoMapEditor" style="flex:1;border:1px solid var(--surface2);border-radius:4px;overflow:hidden;display:block;"></div>
+      <div id="repoMapPreview" style="flex:1;border:1px solid var(--surface2);border-radius:4px;overflow:auto;background:var(--mantle);padding:18px 22px;color:var(--text);display:none;line-height:1.55;font-size:13px;"></div>
     </div>`;
   document.body.appendChild(overlay);
-  // Populate repo dropdown
   try {
     const repos = await fetch('/api/repos').then(r => r.json());
     const ctx = await fetch('/api/ui/context').then(r => r.json());
@@ -10575,25 +10584,99 @@ async function openRepoMapModal() {
     sel.innerHTML = Object.keys(repos || {}).map(n => `<option value="${escapeHtml(n)}" ${n===ctx.activeRepo?'selected':''}>${escapeHtml(n)}${n===ctx.activeRepo?' (active)':''}</option>`).join('');
   } catch (_) {}
   if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
+  // Mount Monaco
+  try {
+    if (typeof loadMonaco === 'function') await loadMonaco();
+    if (typeof monaco !== 'undefined') {
+      _repoMapEditor = monaco.editor.create(document.getElementById('repoMapEditor'), {
+        value: 'Loading...',
+        language: 'markdown',
+        theme: 'devops-pilot',
+        fontSize: 13,
+        fontFamily: "'Cascadia Code', 'Cascadia Mono', Consolas, 'Courier New', monospace",
+        minimap: { enabled: false },
+        scrollBeyondLastLine: false,
+        wordWrap: 'on',
+        automaticLayout: true,
+        readOnly: true,
+        lineNumbers: 'off',
+        padding: { top: 10 },
+      });
+    }
+  } catch (e) { console.warn('repo map monaco mount failed', e); }
+  _repoMapView = 'code';
   loadRepoMapInto();
+}
+
+function closeRepoMapModal() {
+  if (_repoMapEditor) { try { _repoMapEditor.dispose(); } catch (_) {} _repoMapEditor = null; }
+  const o = document.getElementById('repoMapOverlay'); if (o) o.remove();
+}
+
+function setRepoMapView(view) {
+  _repoMapView = view;
+  const ed = document.getElementById('repoMapEditor');
+  const pv = document.getElementById('repoMapPreview');
+  const bc = document.getElementById('repoMapBtnCode');
+  const bp = document.getElementById('repoMapBtnPreview');
+  if (view === 'preview') {
+    ed.style.display = 'none'; pv.style.display = '';
+    pv.innerHTML = renderMarkdownToHtml(_repoMapMarkdownText);
+    bc.style.background = 'var(--surface1)'; bc.style.color = 'var(--text)'; bc.style.fontWeight = '400';
+    bp.style.background = 'var(--accent)'; bp.style.color = '#000'; bp.style.fontWeight = '600';
+  } else {
+    ed.style.display = ''; pv.style.display = 'none';
+    bc.style.background = 'var(--accent)'; bc.style.color = '#000'; bc.style.fontWeight = '600';
+    bp.style.background = 'var(--surface1)'; bp.style.color = 'var(--text)'; bp.style.fontWeight = '400';
+    if (_repoMapEditor) _repoMapEditor.layout();
+  }
 }
 
 async function loadRepoMapInto() {
   const repo = document.getElementById('repoMapRepo').value;
   const budget = document.getElementById('repoMapBudget').value;
-  const out = document.getElementById('repoMapOutput');
-  out.textContent = `Generating map for ${repo} (~${budget} tokens)...`;
+  if (_repoMapEditor) _repoMapEditor.setValue(`Generating map for ${repo} (~${budget} tokens)...`);
   try {
     const r = await fetch('/api/repo/map?repo=' + encodeURIComponent(repo) + '&budget=' + encodeURIComponent(budget));
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    out.textContent = await r.text();
-  } catch (e) { out.textContent = 'Failed: ' + e.message; }
+    _repoMapMarkdownText = await r.text();
+    if (_repoMapEditor) _repoMapEditor.setValue(_repoMapMarkdownText);
+    if (_repoMapView === 'preview') {
+      document.getElementById('repoMapPreview').innerHTML = renderMarkdownToHtml(_repoMapMarkdownText);
+    }
+  } catch (e) {
+    _repoMapMarkdownText = 'Failed: ' + e.message;
+    if (_repoMapEditor) _repoMapEditor.setValue(_repoMapMarkdownText);
+  }
 }
 
 async function copyRepoMap() {
-  const text = document.getElementById('repoMapOutput').textContent;
-  try { await navigator.clipboard.writeText(text); toast('Copied to clipboard', 'success'); }
+  try { await navigator.clipboard.writeText(_repoMapMarkdownText); toast('Copied to clipboard', 'success'); }
   catch (_) { toast('Copy failed', 'error'); }
+}
+
+// Tiny markdown -> HTML renderer (handles the subset our repo maps emit)
+function renderMarkdownToHtml(md) {
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  const inline = s => esc(s)
+    .replace(/`([^`]+)`/g, '<code style="background:var(--surface1);padding:1px 5px;border-radius:3px;font-size:12px;">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>')
+    .replace(/_([^_]+)_/g, '<em>$1</em>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:var(--accent);text-decoration:underline;">$1</a>');
+  const lines = String(md || '').split(/\r?\n/);
+  const out = [];
+  let inList = false;
+  for (const line of lines) {
+    if (/^### /.test(line)) { if (inList) { out.push('</ul>'); inList = false; } out.push('<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text);">' + inline(line.slice(4)) + '</h3>'); }
+    else if (/^## /.test(line)) { if (inList) { out.push('</ul>'); inList = false; } out.push('<h2 style="margin:22px 0 10px;font-size:16px;color:var(--text);border-bottom:1px solid var(--surface2);padding-bottom:4px;">' + inline(line.slice(3)) + '</h2>'); }
+    else if (/^# /.test(line)) { if (inList) { out.push('</ul>'); inList = false; } out.push('<h1 style="margin:0 0 14px;font-size:20px;color:var(--text);">' + inline(line.slice(2)) + '</h1>'); }
+    else if (/^- /.test(line)) { if (!inList) { out.push('<ul style="margin:6px 0 12px 20px;">'); inList = true; } out.push('<li style="margin:3px 0;">' + inline(line.slice(2)) + '</li>'); }
+    else if (line.trim() === '') { if (inList) { out.push('</ul>'); inList = false; } out.push(''); }
+    else { if (inList) { out.push('</ul>'); inList = false; } out.push('<p style="margin:6px 0;">' + inline(line) + '</p>'); }
+  }
+  if (inList) out.push('</ul>');
+  return out.join('\n');
 }
 
 async function runPaletteSearch(query) {
