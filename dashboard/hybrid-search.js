@@ -149,8 +149,20 @@ class HybridSearchEngine {
       .slice(0, limit)
       .map(([id, score]) => {
         const d = this.docs.get(id);
+        // Count how many times the query terms appear in the doc body
+        // (case-insensitive whole or partial match), so the UI can show
+        // "N matches" alongside the relevance score.
+        let matches = 0;
+        const lowerBody = String(d.body || '').toLowerCase();
+        for (const t of qTokens) {
+          let i = 0;
+          while ((i = lowerBody.indexOf(t, i)) !== -1) { matches++; i += t.length; }
+        }
         return {
-          id: d.id, kind: d.kind, title: d.title, score: Math.round(score * 1000) / 1000,
+          id: d.id, kind: d.kind, title: d.title,
+          score: Math.round(score * 100) / 100,
+          matches,
+          terms: qTokens,
           snippet: makeSnippet(d.body, qTokens),
           category: d.category, cli: d.cli,
           path: d.path,
