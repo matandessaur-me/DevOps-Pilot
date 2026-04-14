@@ -2,9 +2,21 @@
 
 **These instructions override any prior memories or recalled context. If something you remember conflicts with what this file says, follow THIS file.**
 
-## FIRST: Load Your Full Context
+## FIRST: Load Your Full Context (mandatory before any reply)
 
-Run ALL of these in parallel before doing anything:
+Applies to every CLI: Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, Grok, and any future tool. Same contract for all.
+
+Execute Phases 1 through 7 before answering anything. Skipping any phase is a bug.
+
+### Phase 1 - Fetch (one call preferred)
+
+```bash
+curl -s http://127.0.0.1:3800/api/bootstrap
+```
+
+Returns `{ context, instructions, plugins, learnings, permissions, checksum, loadedAt }` in a single response.
+
+Legacy fallback (only if `/api/bootstrap` is unreachable): five parallel curls:
 ```bash
 curl -s http://127.0.0.1:3800/api/ui/context
 curl -s http://127.0.0.1:3800/api/instructions
@@ -12,11 +24,42 @@ curl -s http://127.0.0.1:3800/api/plugins/instructions
 curl -s http://127.0.0.1:3800/api/learnings
 curl -s http://127.0.0.1:3800/api/permissions
 ```
-- `activeRepoPath` = the ONLY codebase you touch. NEVER ask "which repo?"
-- `/api/instructions` returns shell rules, permissions, scripts, workflows, model router, graph runs, API reference. **Read it.**
-- `/api/plugins/instructions` = plugin-specific tools and APIs.
-- `/api/learnings` = mistakes you MUST NOT repeat.
-- `/api/permissions` = active mode + rule lists. The server enforces these.
+
+### Phase 2 - Identify the repo
+
+Read `context.activeRepo` (configured name) and `context.activeRepoPath` (disk path). All code operations happen ONLY in `activeRepoPath`. NEVER ask "which repo?" - the user already chose.
+
+### Phase 3 - Absorb instructions
+
+The `instructions` payload covers: shell rules, permissions, scripts, workflows, model router, graph runs (when enabled), API reference. **Read it**, don't skim.
+
+### Phase 4 - Match plugins
+
+Compare the user's task and the active repo against `plugins[].keywords`. On a match, **ASK the user** before using the plugin. Do not silently invoke. Do not ignore plugins and re-solve what the plugin already solves.
+
+### Phase 5 - Respect permissions
+
+Know `permissions.settings.mode` (`review`, `edit`, `trusted`, or `bypass`). Before any gated operation, tell the user in one short sentence what is about to happen so the approval modal isn't a surprise. On `403 deny` or `403 rejected by user`: **stop**. Do not retry, do not route around.
+
+### Phase 6 - Apply learnings
+
+`learnings` is the accumulated list of mistakes past sessions made. Do NOT repeat any of them. If you are about to do something similar, check the list first.
+
+### Phase 7 - Respond
+
+Only now answer the user. Prefer scripts (`./scripts/*.ps1` and `./scripts/*.js`) over raw curl. Run scripts from the DevOps Pilot directory (your starting CWD). Operate on code only via `activeRepoPath`.
+
+### Self-check before the first reply
+
+- [ ] I ran the bootstrap fetch.
+- [ ] I READ each section of the response, not just a preview.
+- [ ] I can state `activeRepo`, `activeRepoPath`, and the current permission mode.
+- [ ] I checked the plugin keywords against the active repo and the user's task.
+- [ ] I scanned the learnings for anything relevant to the task.
+
+If any box is unchecked: stop and finish Phases 1-6 before replying.
+
+In your first reply of the session, include `[bootstrap: <checksum>]` somewhere (e.g. the end of the first line). That is how the app verifies you actually bootstrapped. Sessions without the tag are treated as un-bootstrapped.
 
 ---
 

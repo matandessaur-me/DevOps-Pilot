@@ -422,6 +422,77 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/ui/context' && req.method === 'GET')         return json(res, getUiContextWithPath());
     if (url.pathname === '/api/ui/context' && req.method === 'POST')        return handleUiContextUpdate(req, res);
 
+    // ── Bootstrap: one call returns everything an AI CLI needs to start ─
+    // The instructions tell every CLI (Claude, Gemini, Codex, Copilot, Grok)
+    // to call this once at the start of a session. Returns a checksum the
+    // CLI is required to echo in its first reply so we can verify it
+    // actually bootstrapped.
+    if (url.pathname === '/api/bootstrap' && req.method === 'GET') {
+      try {
+        const context = getUiContextWithPath();
+        const cfg = getConfig();
+        const permissionsData = { settings: permissions.loadSettings(configPath), modes: permissions.MODES };
+        // Reuse the instructions builder by calling the route handler logic inline.
+        // Simpler: read all files in dashboard/instructions/ same way /api/instructions does.
+        const instrDir = path.join(__dirname, 'instructions');
+        let instructions = '';
+        try {
+          const orchestrationEnabled = cfg.OrchestrateMode === true;
+          const priorityOrder = ['workflows.md', 'orchestrator.md', 'api-reference.md'];
+          const files = fs.readdirSync(instrDir).filter(f => {
+            if (!f.endsWith('.md')) return false;
+            if (f === 'orchestrator.md' && !orchestrationEnabled) return false;
+            return true;
+          }).sort((a, b) => {
+            const ai = priorityOrder.indexOf(a), bi = priorityOrder.indexOf(b);
+            if (ai !== -1 && bi !== -1) return ai - bi;
+            if (ai !== -1) return -1;
+            if (bi !== -1) return 1;
+            return a.localeCompare(b);
+          });
+          instructions = files.map(f => fs.readFileSync(path.join(instrDir, f), 'utf8')).join('\n\n---\n\n');
+        } catch (_) {}
+        // Plugins: lightweight index (full instructions remain at /api/plugins/instructions)
+        const plugins = (loadedPlugins || []).map(p => ({
+          id: p.id, name: p.name, description: p.description || '',
+          keywords: p.aiKeywords || [],
+        }));
+        // Learnings: full list, AI must scan
+        const learnings = _learningsInstance ? _learningsInstance.list() : [];
+        // Compose payload
+        const payload = {
+          context, instructions, plugins, learnings, permissions: permissionsData,
+          loadedAt: new Date().toISOString(),
+          features: {
+            orchestrateMode: cfg.OrchestrateMode === true,
+            graphRunsMode: cfg.GraphRunsMode === true,
+            incognitoMode: cfg.IncognitoMode === true,
+          },
+        };
+        // Checksum: short hash so the CLI can echo it. Computed over a stable view.
+        const stable = JSON.stringify({
+          activeRepo: context.activeRepo, mode: permissionsData.settings.mode,
+          pluginCount: plugins.length, learningCount: learnings.length,
+          features: payload.features, instructionsLen: instructions.length,
+        });
+        const crypto = require('crypto');
+        payload.checksum = 'b' + crypto.createHash('sha256').update(stable).digest('hex').slice(0, 10);
+        return json(res, payload);
+      } catch (e) {
+        return json(res, { error: e.message }, 500);
+      }
+    }
+    if (url.pathname === '/api/bootstrap/ack' && req.method === 'POST') {
+      const body = await readBody(req);
+      // Lightweight receipt log; visible in dashboard later.
+      try {
+        const log = path.join(repoRoot, '.devops-pilot', 'bootstrap-acks.jsonl');
+        fs.mkdirSync(path.dirname(log), { recursive: true });
+        fs.appendFileSync(log, JSON.stringify({ ts: Date.now(), ...body }) + '\n', 'utf8');
+      } catch (_) {}
+      return json(res, { ok: true });
+    }
+
     // ── System Health & Diagnostics ─────────────────────────────────────
     if (url.pathname === '/api/health' && req.method === 'GET')              return handleHealthCheck(res);
     if (url.pathname === '/api/busy' && req.method === 'GET')                return json(res, guard.activeLocks());

@@ -305,12 +305,22 @@ class GraphRunsEngine extends EventEmitter {
         : '(no result)';
     }
     const line = `[GRAPH RUN ${run.id}] ${run.status} - ${run.name} | ${ran} done, ${cancelled} skipped, ${failed} failed | ${duration}s | ${detail}`;
-    // Use \r\n + a small delay before injecting so the supervisor CLI's input
-    // buffer has settled; \r alone was observed to paste without submitting
-    // in some Claude Code builds.
+    // Submit reliably across Claude Code, Codex, Gemini, Copilot, Grok TUIs.
+    // A single write of `text + \r` or `text + \r\n` is interpreted as a
+    // newline INSIDE the input field by many TUIs, not as Enter. Real human
+    // typing is two events: text, then (after a beat) Enter. We emulate that:
+    //   1. settle delay
+    //   2. write the line text
+    //   3. delay
+    //   4. write a bare \r as a separate event (acts as Enter)
     try {
       setTimeout(() => {
-        try { this.injectToTerminal(run.originTermId, line + '\r\n'); } catch (_) {}
+        try {
+          this.injectToTerminal(run.originTermId, line);
+          setTimeout(() => {
+            try { this.injectToTerminal(run.originTermId, '\r'); } catch (_) {}
+          }, 120);
+        } catch (_) {}
       }, 250);
     } catch (_) {}
   }
