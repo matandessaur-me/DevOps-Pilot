@@ -11778,6 +11778,16 @@ async function openRecipeRunModal(recipeId) {
     recipe = await r.json();
   } catch (e) { toast('Could not load recipe: ' + recipeId, 'error'); return; }
 
+  // Inject-mode recipes need an AI launched in the active terminal.
+  // Dispatch-mode recipes don't (they spawn a fresh worker).
+  const wantsDispatch = recipe.meta && recipe.meta.dispatch === true;
+  const aiState = (typeof termAiState !== 'undefined') ? termAiState.get(activeTermId) : null;
+  const aiReady = aiState && aiState.launched && aiState.cli;
+  if (!wantsDispatch && !aiReady) {
+    toast('Launch an AI in your active terminal first (Ctrl+L or click an AI in the picker).', 'error');
+    return;
+  }
+
   let overlay = document.getElementById('recipeRunOverlay');
   if (overlay) overlay.remove();
   overlay = document.createElement('div');
@@ -11818,6 +11828,15 @@ async function openRecipeRunModal(recipeId) {
 
 async function submitRecipeRun(recipeIdEnc) {
   const recipeId = decodeURIComponent(recipeIdEnc);
+  // Re-check AI readiness right before running (could have changed since modal opened)
+  const recipeMeta = (_recipesCache || []).find(r => r.id === recipeId) || {};
+  const wantsDispatch = recipeMeta && recipeMeta.meta && recipeMeta.meta.dispatch === true;
+  const aiState = (typeof termAiState !== 'undefined') ? termAiState.get(activeTermId) : null;
+  const aiReady = aiState && aiState.launched && aiState.cli;
+  if (!wantsDispatch && !aiReady) {
+    toast('Launch an AI in your active terminal first.', 'error');
+    return;
+  }
   const inputs = {};
   document.querySelectorAll('[data-recipe-input]').forEach(el => {
     const name = el.getAttribute('data-recipe-input');
@@ -11850,20 +11869,30 @@ async function refreshRecipesPanel() {
     host.innerHTML = '<div style="color:var(--subtext0);padding:12px;">No recipes found. Add a markdown file to <code>recipes/</code>.</div>';
     return;
   }
-  host.innerHTML = _recipesCache.map(r => {
+  const aiState = (typeof termAiState !== 'undefined') ? termAiState.get(activeTermId) : null;
+  const aiReady = aiState && aiState.launched && aiState.cli;
+  host.innerHTML = (!aiReady ? `<div style="padding:8px 12px;margin-bottom:10px;background:color-mix(in srgb, var(--yellow, #f5b800) 12%, var(--surface0));border:1px solid color-mix(in srgb, var(--yellow, #f5b800) 30%, transparent);border-radius:var(--radius);font-size:11px;color:var(--text);">No AI launched in your active terminal. Recipes that run in your terminal need one. <a href="#" onclick="event.preventDefault(); switchTab('terminal');" style="color:var(--accent);">Open the terminal</a> and launch an AI first.</div>` : '') + _recipesCache.map(r => {
     const inputs = (r.inputs || []).map(i => escapeHtml(i.name) + (i.required ? '*' : '')).join(', ') || 'none';
     const target = r.cli ? `cli: <code>${escapeHtml(r.cli)}</code>` : (r.intent ? `intent: <code>${escapeHtml(r.intent)}</code>` : '');
+    const wantsDispatch = r.meta && r.meta.dispatch === true;
+    const canRun = wantsDispatch || aiReady;
+    const modeBadge = wantsDispatch
+      ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:var(--surface2);color:var(--subtext0);margin-left:6px;">DISPATCH</span>'
+      : '';
     const scopeBadge = r.scope === 'user'
       ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:var(--surface2);color:var(--subtext0);margin-left:6px;">USER</span>'
       : '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:var(--surface2);color:var(--subtext0);margin-left:6px;">PROJECT</span>';
+    const btn = canRun
+      ? `<button onclick="openRecipeRunModal('${encodeURIComponent(r.id)}')" style="font-size:10px;padding:4px 12px;background:var(--accent);border:none;color:#000;border-radius:4px;cursor:pointer;font-weight:600;">Run</button>`
+      : `<button disabled title="Launch an AI in your active terminal first" style="font-size:10px;padding:4px 12px;background:var(--surface2);border:none;color:var(--subtext0);border-radius:4px;cursor:not-allowed;font-weight:600;">Run</button>`;
     return `
-      <div style="border:1px solid var(--surface2);border-radius:var(--radius);padding:10px 12px;background:var(--surface0);">
+      <div style="border:1px solid var(--surface2);border-radius:var(--radius);padding:10px 12px;background:var(--surface0);${canRun?'':'opacity:0.6;'}">
         <div style="display:flex;align-items:center;gap:8px;">
           <i data-lucide="${escapeHtml(r.icon || 'play')}" style="width:14px;height:14px;color:var(--accent);"></i>
           <strong style="font-size:12px;">${escapeHtml(r.name)}</strong>
-          ${scopeBadge}
+          ${scopeBadge}${modeBadge}
           <div style="flex:1;"></div>
-          <button onclick="openRecipeRunModal('${encodeURIComponent(r.id)}')" style="font-size:10px;padding:4px 12px;background:var(--accent);border:none;color:#000;border-radius:4px;cursor:pointer;font-weight:600;">Run</button>
+          ${btn}
         </div>
         <div style="color:var(--subtext0);font-size:11px;margin-top:4px;">${escapeHtml(r.description || '(no description)')}</div>
         <div style="color:var(--subtext0);font-size:10px;font-family:var(--font-mono);margin-top:6px;">id: ${escapeHtml(r.id)} &nbsp; ${target} &nbsp; inputs: ${inputs}</div>
