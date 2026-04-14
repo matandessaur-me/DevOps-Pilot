@@ -3097,8 +3097,11 @@ function writePluginHints() {
       const before = content.substring(0, startIdx + START.length);
       const after = content.substring(endIdx);
       // Inject learnings (if the module is loaded)
-      const learningsBlock = _learningsInstance ? _learningsInstance.toMarkdown() : '';
-      content = before + '\n' + block + '\n' + learningsBlock + after;
+      // NOTE: learnings are NOT inlined here. They are fetchable via
+      // /api/learnings at bootstrap. Inlining pushed CLAUDE.md past 40k
+      // chars (Claude Code's warning threshold) and grew with every new
+      // entry. The fetch is one extra curl at session start.
+      content = before + '\n' + block + '\n' + after;
       atomicWriteSync(out, content);
     } catch (err) { console.error(`  [writePluginHints] failed to generate ${filename}:`, err.message); }
   }
