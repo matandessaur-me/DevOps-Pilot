@@ -129,6 +129,25 @@ class GraphRunsEngine extends EventEmitter {
 
   getRun(id) { return this.runs.get(id); }
 
+  listPendingApprovals() {
+    const out = [];
+    for (const run of this.runs.values()) {
+      for (const node of run.nodes) {
+        if (node.status === 'awaiting_approval') {
+          out.push({
+            runId: run.id,
+            runName: run.name,
+            nodeId: node.id,
+            title: node.title || `Approve node ${node.id}`,
+            requestedAt: node.startedAt,
+            state: run.state,
+          });
+        }
+      }
+    }
+    return out.sort((a, b) => a.requestedAt - b.requestedAt);
+  }
+
   pauseRun(id) {
     const run = this.runs.get(id);
     if (!run) throw new Error('no such run');

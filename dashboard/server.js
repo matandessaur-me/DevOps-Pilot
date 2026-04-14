@@ -179,6 +179,9 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/graph-runs' && req.method === 'GET') {
         return json(res, graphRuns.listRuns());
       }
+      if (url.pathname === '/api/graph-runs/pending-approvals' && req.method === 'GET') {
+        return json(res, graphRuns.listPendingApprovals());
+      }
       if (url.pathname === '/api/graph-runs' && req.method === 'POST') {
         const body = await readBody(req);
         if (!await permGate(res, 'api', 'POST /api/graph-runs', `Start graph run: ${body.name || 'unnamed'}`)) return;
