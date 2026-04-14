@@ -2757,6 +2757,9 @@
         <button class="settings-nav-btn" data-settings-tab="mcp" onclick="switchSettingsTab('mcp', this); refreshMcpServers();">
           <i data-lucide="plug" style="width:14px;height:14px;"></i> MCP Servers
         </button>
+        <button class="settings-nav-btn" data-settings-tab="recipes" onclick="switchSettingsTab('recipes', this); refreshRecipesPanel();">
+          <i data-lucide="book-open" style="width:14px;height:14px;"></i> Recipes
+        </button>
         <button class="settings-nav-btn" data-settings-tab="theme" onclick="switchSettingsTab('theme', this)">
           <i data-lucide="palette" style="width:14px;height:14px;"></i> Theme
         </button>
@@ -2903,6 +2906,25 @@
             <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
               <button class="modal-btn modal-btn-primary" onclick="addMcpServer()" style="padding:6px 14px;font-size:11px;">Add Server</button>
             </div>
+          </div>
+        </div>
+
+        <!-- Recipes Tab -->
+        <div class="settings-tab" id="settingsTab-recipes">
+          <div class="settings-section">
+            <div class="settings-section-title">Recipe Library</div>
+            <div class="settings-section-desc">
+              Reusable AI workflows declared as markdown files. Project-local recipes live in <code>recipes/</code>; user-global ones in <code>~/.devops-pilot/recipes/</code>. Project-local wins on name conflict. New recipes are picked up automatically; refresh below to re-scan.
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin:8px 0 12px;">
+              <button onclick="refreshRecipesPanel()" style="font-size:11px;padding:5px 12px;background:var(--surface1);border:1px solid var(--surface2);color:var(--text);border-radius:var(--radius);cursor:pointer;display:flex;align-items:center;gap:6px;">
+                <i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> Rescan
+              </button>
+              <button onclick="openRecipesFolder()" style="font-size:11px;padding:5px 12px;background:var(--surface1);border:1px solid var(--surface2);color:var(--text);border-radius:var(--radius);cursor:pointer;display:flex;align-items:center;gap:6px;">
+                <i data-lucide="folder-open" style="width:12px;height:12px;"></i> Open recipes folder
+              </button>
+            </div>
+            <div id="recipesPanelList" style="display:flex;flex-direction:column;gap:8px;"><div style="color:var(--subtext0);padding:12px;">No recipes found.</div></div>
           </div>
         </div>
 
@@ -11813,6 +11835,42 @@ async function submitRecipeRun(recipeIdEnc) {
     if (!r.ok) throw new Error(data.error || r.statusText);
     toast(`Recipe '${recipeId}' running on ${data.cli} (task ${data.taskId.slice(0,8)})`, 'success');
   } catch (e) { toast('Recipe failed: ' + e.message, 'error'); }
+}
+
+async function refreshRecipesPanel() {
+  await refreshRecipes();
+  const host = document.getElementById('recipesPanelList');
+  if (!host) return;
+  if (!_recipesCache.length) {
+    host.innerHTML = '<div style="color:var(--subtext0);padding:12px;">No recipes found. Add a markdown file to <code>recipes/</code>.</div>';
+    return;
+  }
+  host.innerHTML = _recipesCache.map(r => {
+    const inputs = (r.inputs || []).map(i => escapeHtml(i.name) + (i.required ? '*' : '')).join(', ') || 'none';
+    const target = r.cli ? `cli: <code>${escapeHtml(r.cli)}</code>` : (r.intent ? `intent: <code>${escapeHtml(r.intent)}</code>` : '');
+    const scopeBadge = r.scope === 'user'
+      ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:var(--surface2);color:var(--subtext0);margin-left:6px;">USER</span>'
+      : '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:var(--surface2);color:var(--subtext0);margin-left:6px;">PROJECT</span>';
+    return `
+      <div style="border:1px solid var(--surface2);border-radius:var(--radius);padding:10px 12px;background:var(--surface0);">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <i data-lucide="${escapeHtml(r.icon || 'play')}" style="width:14px;height:14px;color:var(--accent);"></i>
+          <strong style="font-size:12px;">${escapeHtml(r.name)}</strong>
+          ${scopeBadge}
+          <div style="flex:1;"></div>
+          <button onclick="openRecipeRunModal('${encodeURIComponent(r.id)}')" style="font-size:10px;padding:4px 12px;background:var(--accent);border:none;color:#000;border-radius:4px;cursor:pointer;font-weight:600;">Run</button>
+        </div>
+        <div style="color:var(--subtext0);font-size:11px;margin-top:4px;">${escapeHtml(r.description || '(no description)')}</div>
+        <div style="color:var(--subtext0);font-size:10px;font-family:var(--font-mono);margin-top:6px;">id: ${escapeHtml(r.id)} &nbsp; ${target} &nbsp; inputs: ${inputs}</div>
+      </div>`;
+  }).join('');
+  if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
+}
+
+async function openRecipesFolder() {
+  try {
+    await fetch('/api/ui/open-path', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: 'recipes' }) });
+  } catch (_) { toast('Could not open folder', 'error'); }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

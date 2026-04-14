@@ -164,6 +164,15 @@ const server = http.createServer(async (req, res) => {
       try { return json(res, await recipes.runRecipe(body)); }
       catch (e) { return json(res, { error: e.message }, 400); }
     }
+    if (url.pathname === '/api/ui/open-path' && req.method === 'POST') {
+      const body = await readBody(req);
+      const safe = String(body.path || '').replace(/\.\./g, '');
+      const target = path.join(repoRoot, safe);
+      try { fs.mkdirSync(target, { recursive: true }); } catch (_) {}
+      const opener = process.platform === 'win32' ? 'explorer.exe' : (process.platform === 'darwin' ? 'open' : 'xdg-open');
+      try { spawnSync(opener, [target], { detached: true, stdio: 'ignore' }); return json(res, { ok: true, path: target }); }
+      catch (e) { return json(res, { error: e.message }, 500); }
+    }
 
     // ── Permissions ────────────────────────────────────────────────────────
     if (url.pathname === '/api/permissions' && req.method === 'GET') {
