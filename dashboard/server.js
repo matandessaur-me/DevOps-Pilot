@@ -51,6 +51,9 @@ let loadedPlugins = [];
 // ── Orchestrator (cross-AI communication bus) ────────────────────────────────
 const { mountOrchestrator } = require('./orchestrator');
 const permissions = require('./permissions');
+const { MCPClientManager } = require('./mcp-client');
+const mcpClient = new MCPClientManager({ configPath });
+mcpClient.bootstrap().catch(e => console.warn('  [mcp-client] bootstrap error:', e.message));
 
 async function permGate(res, type, value, label) {
   return permissions.gate(res, { type, value }, { configPath, actionLabel: label });
@@ -140,6 +143,40 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const ok = permissions.resolveApproval(body.id, body.decision, !!body.promote);
       return json(res, { ok });
+    }
+
+    // ── MCP client (external servers) ──────────────────────────────────────
+    if (url.pathname === '/api/mcp/servers' && req.method === 'GET') {
+      return json(res, mcpClient.listServers());
+    }
+    if (url.pathname === '/api/mcp/servers' && req.method === 'POST') {
+      const body = await readBody(req);
+      try { return json(res, await mcpClient.addServer(body)); }
+      catch (e) { return json(res, { error: e.message }, 400); }
+    }
+    const mcpServerMatch = url.pathname.match(/^\/api\/mcp\/servers\/([^/]+)$/);
+    if (mcpServerMatch && req.method === 'DELETE') {
+      return json(res, await mcpClient.removeServer(decodeURIComponent(mcpServerMatch[1])));
+    }
+    const mcpToggleMatch = url.pathname.match(/^\/api\/mcp\/servers\/([^/]+)\/enabled$/);
+    if (mcpToggleMatch && req.method === 'POST') {
+      const body = await readBody(req);
+      try { return json(res, await mcpClient.setEnabled(decodeURIComponent(mcpToggleMatch[1]), !!body.enabled)); }
+      catch (e) { return json(res, { error: e.message }, 400); }
+    }
+    const mcpRefreshMatch = url.pathname.match(/^\/api\/mcp\/servers\/([^/]+)\/refresh$/);
+    if (mcpRefreshMatch && req.method === 'POST') {
+      try { return json(res, await mcpClient.refresh(decodeURIComponent(mcpRefreshMatch[1]))); }
+      catch (e) { return json(res, { error: e.message }, 400); }
+    }
+    if (url.pathname === '/api/mcp/call' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!await permGate(res, 'api', 'POST /api/mcp/call', `Call MCP tool ${body.server}/${body.tool}`)) return;
+      try {
+        if (body.kind === 'resource') return json(res, await mcpClient.readResource(body.server, body.uri));
+        if (body.kind === 'prompt') return json(res, await mcpClient.getPrompt(body.server, body.name, body.arguments));
+        return json(res, await mcpClient.callTool(body.server, body.tool, body.arguments));
+      } catch (e) { return json(res, { error: e.message }, 500); }
     }
     if (url.pathname === '/api/prerequisites')                   return handlePrerequisites(res);
     if (url.pathname === '/api/cli/install' && req.method === 'POST') return handleCliInstall(req, res);

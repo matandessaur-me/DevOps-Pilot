@@ -96,6 +96,60 @@ DevOps Pilot
 
 ---
 
+## MCP Server (Model Context Protocol)
+
+DevOps Pilot ships an MCP server so external AI clients (Claude Desktop, Cursor, VS Code Copilot, Zed, Goose, Warp, etc.) can use its work item management, sprint queries, notes, orchestrator, and learnings database as tools and resources.
+
+Launch it from your MCP client's config. The DevOps Pilot app must be running.
+
+**Claude Desktop** (`%APPDATA%\Claude\claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "devops-pilot": {
+      "command": "node",
+      "args": ["C:/Code/Personal/DevOps-Pilot/scripts/mcp-serve.js"]
+    }
+  }
+}
+```
+
+**Cursor / VS Code / Zed**: point at the same command. Transport is stdio.
+
+Exposed tools: `list_work_items`, `get_work_item`, `create_work_item`, `set_work_item_state`, `get_sprint_status`, `save_note`, `spawn_worker`, `search_learnings`, `list_repos`, `get_permission_mode`.
+
+Exposed resources: `devops-pilot://context`, `devops-pilot://instructions`, `devops-pilot://learnings`, `devops-pilot://permissions`.
+
+Exposed prompts: `standup_summary`, `retro_analysis`.
+
+All mutating tools are gated by the active DevOps Pilot permission mode (review / edit / trusted / bypass), with an in-app modal for approval.
+
+### Plugins as MCP tools
+
+Any installed plugin can declare tools, resources, and prompts in its `plugin.json` under `contributions.mcp`. They are automatically merged into DevOps Pilot's MCP server with a namespaced name (`<pluginId>__<toolName>`), so a Claude Desktop user can use Builder.io plugin tools without ever opening DevOps Pilot's UI.
+
+Example (`dashboard/plugins/builderio/plugin.json`):
+```json
+"contributions": {
+  "mcp": {
+    "tools": [
+      {
+        "name": "health",
+        "description": "Builder.io project health check.",
+        "inputSchema": { "type": "object", "properties": {} },
+        "route": "GET /api/plugins/builderio/health"
+      }
+    ]
+  }
+}
+```
+
+### MCP client (consume external servers)
+
+DevOps Pilot can also connect to external MCP servers (GitHub, Postgres, Slack, Linear, Sentry, Figma, Notion, and hundreds more). Settings -> MCP Servers lets you add a server by command and args. Each server is launched as a child process over stdio, its capabilities are fetched and displayed, and its tools become callable via `/api/mcp/call`.
+
+---
+
 ## Supported AI Agents
 
 Each AI agent gets its own themed color palette when active:
