@@ -4,10 +4,17 @@ description: Quick orientation: what this repo does, how it is organized, where 
 icon: book-open
 intent: deep-code
 mode: edit
-inputs: []
+inputs:
+  - name: repo
+    type: repo
+    description: Which repo to explain
+    default: "{{ context.activeRepo }}"
+    required: true
 ---
 
-You are helping a new contributor understand the codebase rooted at `{{ context.activeRepoPath }}`.
+You are helping a new contributor understand the codebase **{{ inputs.repo }}**.
+
+Resolve the on-disk path with: `curl -s http://127.0.0.1:3800/api/repos | grep -o '"{{ inputs.repo }}":"[^"]*"'` (or the value of `{{ context.activeRepoPath }}` if `{{ inputs.repo }}` matches the active repo).
 
 Steps:
 

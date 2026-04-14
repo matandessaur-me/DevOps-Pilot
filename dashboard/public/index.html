@@ -11766,8 +11766,6 @@ async function openRecipeRunModal(recipeId) {
     recipe = await r.json();
   } catch (e) { toast('Could not load recipe: ' + recipeId, 'error'); return; }
 
-  // Inject-mode recipes need an AI launched in the active terminal.
-  // Dispatch-mode recipes don't (they spawn a fresh worker).
   const wantsDispatch = recipe.meta && recipe.meta.dispatch === true;
   const aiState = (typeof termAiState !== 'undefined') ? termAiState.get(activeTermId) : null;
   const aiReady = aiState && aiState.launched && aiState.cli;
@@ -11775,6 +11773,15 @@ async function openRecipeRunModal(recipeId) {
     toast('Launch an AI in your active terminal first (Ctrl+L or click an AI in the picker).', 'error');
     return;
   }
+
+  // Fetch live data the smart selectors will need
+  const [reposObj, iterations, ctx] = await Promise.all([
+    fetch('/api/repos').then(r => r.json()).catch(() => ({})),
+    fetch('/api/iterations').then(r => r.json()).catch(() => []),
+    fetch('/api/ui/context').then(r => r.json()).catch(() => ({})),
+  ]);
+  const repoNames = Object.keys(reposObj || {});
+  const iterationNames = Array.isArray(iterations) ? iterations.map(i => i.name || i.path) : [];
 
   let overlay = document.getElementById('recipeRunOverlay');
   if (overlay) overlay.remove();
@@ -11785,26 +11792,46 @@ async function openRecipeRunModal(recipeId) {
   const inputsHtml = (recipe.inputs || []).map(i => {
     const def = i.default == null ? '' : String(i.default);
     const req = i.required ? ' <span style="color:var(--accent);">*</span>' : '';
+    const label = `<label style="display:block;font-size:11px;color:var(--subtext0);margin-bottom:4px;">${escapeHtml(i.name)}${req}${i.description ? ' <span style="opacity:0.7;">- '+escapeHtml(i.description)+'</span>' : ''}</label>`;
     if (i.type === 'boolean') {
       return `<div style="margin-bottom:10px;"><label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);"><input type="checkbox" data-recipe-input="${escapeHtml(i.name)}" ${def==='true'?'checked':''}> ${escapeHtml(i.name)}${req}</label></div>`;
     }
+    if (i.type === 'repo') {
+      const initial = def || ctx.activeRepo || '';
+      const opts = repoNames.map(n => `<option value="${escapeHtml(n)}" ${n===initial?'selected':''}>${escapeHtml(n)}${n===ctx.activeRepo?' (active)':''}</option>`).join('');
+      return `<div style="margin-bottom:10px;">${label}<select data-recipe-input="${escapeHtml(i.name)}" style="width:100%;padding:6px 8px;background:var(--surface0);border:1px solid var(--surface2);border-radius:4px;color:var(--text);font:12px var(--font-ui);outline:none;">${opts}</select></div>`;
+    }
+    if (i.type === 'iteration') {
+      const initial = def || ctx.selectedIterationName || '';
+      const opts = iterationNames.map(n => `<option value="${escapeHtml(n)}" ${n===initial?'selected':''}>${escapeHtml(n)}${n===ctx.selectedIterationName?' (active)':''}</option>`).join('');
+      return `<div style="margin-bottom:10px;">${label}<select data-recipe-input="${escapeHtml(i.name)}" style="width:100%;padding:6px 8px;background:var(--surface0);border:1px solid var(--surface2);border-radius:4px;color:var(--text);font:12px var(--font-ui);outline:none;">${opts}</select></div>`;
+    }
+    if (i.type === 'select' && Array.isArray(i.choices)) {
+      const opts = i.choices.map(c => `<option value="${escapeHtml(c)}" ${String(c)===def?'selected':''}>${escapeHtml(c)}</option>`).join('');
+      return `<div style="margin-bottom:10px;">${label}<select data-recipe-input="${escapeHtml(i.name)}" style="width:100%;padding:6px 8px;background:var(--surface0);border:1px solid var(--surface2);border-radius:4px;color:var(--text);font:12px var(--font-ui);outline:none;">${opts}</select></div>`;
+    }
     const inputType = i.type === 'number' ? 'number' : 'text';
-    return `<div style="margin-bottom:10px;"><label style="display:block;font-size:11px;color:var(--subtext0);margin-bottom:4px;">${escapeHtml(i.name)}${req}</label><input type="${inputType}" data-recipe-input="${escapeHtml(i.name)}" value="${escapeHtml(def)}" style="width:100%;padding:6px 8px;background:var(--surface0);border:1px solid var(--surface2);border-radius:4px;color:var(--text);font:12px var(--font-ui);outline:none;"></div>`;
+    return `<div style="margin-bottom:10px;">${label}<input type="${inputType}" data-recipe-input="${escapeHtml(i.name)}" value="${escapeHtml(def)}" style="width:100%;padding:6px 8px;background:var(--surface0);border:1px solid var(--surface2);border-radius:4px;color:var(--text);font:12px var(--font-ui);outline:none;"></div>`;
   }).join('');
 
+  // Always show the active context the recipe body will see
+  const contextHtml = `
+    <div style="background:var(--surface1);border:1px solid var(--surface2);border-radius:var(--radius);padding:8px 10px;margin-bottom:14px;font-size:11px;color:var(--text);line-height:1.6;">
+      <div style="font-size:9px;color:var(--subtext0);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Will run with</div>
+      <div><strong>Repo:</strong> ${escapeHtml(ctx.activeRepo || '(none selected)')}${ctx.activeRepoPath ? ' <span style="color:var(--subtext0);font-size:10px;">at '+escapeHtml(ctx.activeRepoPath)+'</span>' : ''}</div>
+      ${ctx.selectedIterationName ? `<div><strong>Iteration:</strong> ${escapeHtml(ctx.selectedIterationName)}</div>` : ''}
+      <div><strong>AI:</strong> ${aiReady ? escapeHtml(aiState.cli) + ' (in your active terminal)' : (wantsDispatch ? 'fresh worker via orchestrator' : 'none')}</div>
+    </div>`;
+
   overlay.innerHTML = `
-    <div style="background:var(--surface0);border:1px solid var(--surface2);border-radius:var(--radius);padding:20px;min-width:440px;max-width:600px;box-shadow:0 8px 24px rgba(0,0,0,0.4);">
+    <div style="background:var(--surface0);border:1px solid var(--surface2);border-radius:var(--radius);padding:20px;min-width:460px;max-width:620px;box-shadow:0 8px 24px rgba(0,0,0,0.4);">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;color:var(--accent);font-weight:600;font-size:13px;">
         <i data-lucide="${escapeHtml(recipe.icon || 'play')}" style="width:16px;height:16px;"></i>
         <span>${escapeHtml(recipe.name)}</span>
       </div>
       <div style="font-size:11px;color:var(--subtext0);margin-bottom:14px;">${escapeHtml(recipe.description)}</div>
-      <div style="font-size:10px;color:var(--subtext0);margin-bottom:12px;">
-        ${recipe.intent ? 'intent: <code>' + escapeHtml(recipe.intent) + '</code>' : ''}
-        ${recipe.cli ? ' &nbsp;cli: <code>' + escapeHtml(recipe.cli) + '</code>' : ''}
-        ${recipe.mode ? ' &nbsp;advised mode: <code>' + escapeHtml(recipe.mode) + '</code>' : ''}
-      </div>
-      ${inputsHtml || '<div style="font-size:11px;color:var(--subtext0);margin-bottom:8px;">(no inputs)</div>'}
+      ${contextHtml}
+      ${inputsHtml || '<div style="font-size:11px;color:var(--subtext0);margin-bottom:8px;font-style:italic;">No inputs needed - this recipe runs on the context shown above.</div>'}
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
         <button onclick="document.getElementById('recipeRunOverlay').remove()" style="padding:6px 14px;background:var(--surface1);border:1px solid var(--surface2);border-radius:4px;color:var(--text);cursor:pointer;font-size:11px;">Cancel</button>
         <button onclick="submitRecipeRun('${encodeURIComponent(recipe.id)}')" style="padding:6px 14px;background:var(--accent);border:none;border-radius:4px;color:#000;cursor:pointer;font-size:11px;font-weight:600;">Run</button>

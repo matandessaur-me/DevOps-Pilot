@@ -11,22 +11,37 @@ Recipes are reusable markdown files that bundle a recurring AI operation: which 
 
 ```yaml
 ---
-name: Sprint Review                          # display name
+name: Explain This Codebase                  # display name
 description: One-line description
-icon: clipboard-list                          # lucide icon
+icon: book-open                               # lucide icon
 intent: deep-code                             # for the model router; OR set cli/model directly
 mode: edit                                    # advisory; recipe suggests, user controls the chip
 plugins: [release-manager]                    # plugins the recipe expects to use
 mcpServers: [github]                          # external MCP servers it expects
+dispatch: false                               # true = spawn headless worker (needs orchestration); false (default) = inject into active terminal
 inputs:
-  - name: iteration
-    type: string                              # string | number | boolean
-    default: "{{ context.selectedIterationName }}"
+  - name: repo
+    type: repo                                # smart selector; renders a dropdown of /api/repos
+    default: "{{ context.activeRepo }}"
     required: true
 ---
 
 Body of the prompt. Supports {{ inputs.X }}, {{ context.X }}, {{ env.X }}.
 ```
+
+## Input types
+
+Free-text:
+- `string` - text input, default empty
+- `number` - numeric input
+- `boolean` - checkbox
+
+Smart selectors (modal renders a populated dropdown with the active value pre-selected):
+- `repo` - dropdown of all configured repos from `/api/repos`. Active repo marked.
+- `iteration` - dropdown of Azure DevOps iterations from `/api/iterations`. Active iteration marked.
+- `select` with `choices: [...]` - explicit list of options
+
+The modal always shows a "Will run with" panel above the inputs, displaying the active repo / iteration / AI so the user knows what context the recipe will see — even when the recipe declares no inputs.
 
 ## Scripts (primary surface)
 
