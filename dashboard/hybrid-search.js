@@ -149,19 +149,25 @@ class HybridSearchEngine {
       .slice(0, limit)
       .map(([id, score]) => {
         const d = this.docs.get(id);
-        // Count how many times the query terms appear in the doc body
-        // (case-insensitive whole or partial match), so the UI can show
-        // "N matches" alongside the relevance score.
-        let matches = 0;
-        const lowerBody = String(d.body || '').toLowerCase();
+        // Count occurrences across body AND title (and category/cli for
+        // learnings) so the UI count matches what BM25 actually scored.
+        // Also report where the matches live so the UI can decide whether
+        // to open the body view at all.
+        const bodyText = String(d.body || '').toLowerCase();
+        const titleText = String(d.title || '').toLowerCase();
+        const extraText = ((d.category || '') + ' ' + (d.cli || '')).toLowerCase();
+        let bodyMatches = 0, titleMatches = 0, otherMatches = 0;
         for (const t of qTokens) {
-          let i = 0;
-          while ((i = lowerBody.indexOf(t, i)) !== -1) { matches++; i += t.length; }
+          let i;
+          i = 0; while ((i = bodyText.indexOf(t, i))   !== -1) { bodyMatches++;  i += t.length; }
+          i = 0; while ((i = titleText.indexOf(t, i))  !== -1) { titleMatches++; i += t.length; }
+          i = 0; while ((i = extraText.indexOf(t, i))  !== -1) { otherMatches++; i += t.length; }
         }
         return {
           id: d.id, kind: d.kind, title: d.title,
           score: Math.round(score * 100) / 100,
-          matches,
+          matches: bodyMatches + titleMatches + otherMatches,
+          bodyMatches, titleMatches, otherMatches,
           terms: qTokens,
           snippet: makeSnippet(d.body, qTokens),
           category: d.category, cli: d.cli,

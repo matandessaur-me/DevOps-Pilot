@@ -12422,10 +12422,21 @@ async function runNotesSearch() {
     }
     host.style.display = '';
     host.innerHTML = data.results.map((x, i) => {
-      const matchLabel = x.matches != null ? `${x.matches} match${x.matches===1?'':'es'}` : '';
-      const meta = matchLabel + (matchLabel ? ' · ' : '') + 'score ' + x.score;
+      // Build a human label that explains WHERE the match is, since users
+      // were confused by '0 matches' on results that scored only via title.
+      let matchLabel;
+      if (x.bodyMatches > 0) {
+        matchLabel = `${x.bodyMatches} in note`;
+      } else if (x.titleMatches > 0) {
+        matchLabel = 'match in title';
+      } else if (x.matches > 0) {
+        matchLabel = `${x.matches} match${x.matches===1?'':'es'}`;
+      } else {
+        matchLabel = 'related';
+      }
+      const meta = `${matchLabel} · score ${x.score}`;
       return `<div data-note-result-idx="${i}" style="padding:6px 12px;cursor:pointer;border-bottom:1px solid var(--surface0);overflow:hidden;min-width:0;" onmouseenter="this.style.background='var(--surface0)'" onmouseleave="this.style.background='transparent'">
-        <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text);font-weight:500;min-width:0;"><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(x.title)}</span><span title="Number of times your search terms appear in this note, plus a relevance score. Higher score means a better overall match (rare terms count more, very long notes count less)." style="font-size:10px;color:var(--subtext0);cursor:help;flex-shrink:0;white-space:nowrap;">${meta}</span></div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text);font-weight:500;min-width:0;"><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(x.title)}</span><span title="Where matches occur. 'in note' = found in the body. 'match in title' = only in the filename. 'related' = ranked by relevance but no exact substring (rare for whole-word queries). Score: BM25 relevance, higher is better." style="font-size:10px;color:var(--subtext0);cursor:help;flex-shrink:0;white-space:nowrap;">${meta}</span></div>
         <div style="font-size:11px;color:var(--subtext0);margin-top:3px;line-height:1.3;word-break:break-word;overflow-wrap:break-word;">${escapeHtml(x.snippet || '')}</div>
       </div>`;
     }).join('');
@@ -12437,7 +12448,17 @@ async function runNotesSearch() {
       el.addEventListener('click', () => {
         const name = result.id.replace(/^note:/, '');
         const term = result.terms && result.terms[0] ? result.terms[0] : q;
-        openNote(name, { jumpTo: term });
+        // Only ask openNote to jump (and switch to edit mode) when the term
+        // actually appears in the body. Otherwise just open in preview --
+        // the title matched, the user wants to read the note normally.
+        const jumpTo = (result.bodyMatches > 0) ? term : null;
+        openNote(name, jumpTo ? { jumpTo } : null);
+        if (!jumpTo && (result.titleMatches > 0 || result.matches === 0)) {
+          // Toast a hint so they know why no highlight appeared
+          toast(result.titleMatches > 0
+            ? `"${term}" appears in the title only, not in the body.`
+            : `"${term}" is related but not literally in this note.`, 'success');
+        }
       });
     });
   } catch (_) {
