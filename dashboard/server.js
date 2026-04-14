@@ -54,6 +54,7 @@ const permissions = require('./permissions');
 const { MCPClientManager } = require('./mcp-client');
 const mcpClient = new MCPClientManager({ configPath });
 mcpClient.bootstrap().catch(e => console.warn('  [mcp-client] bootstrap error:', e.message));
+const modelRouter = require('./model-router');
 
 async function permGate(res, type, value, label) {
   return permissions.gate(res, { type, value }, { configPath, actionLabel: label });
@@ -112,6 +113,15 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/config/import' && req.method === 'POST') return handleImportConfig(req, res);
     if (url.pathname === '/api/themes' && req.method === 'GET')  return handleGetThemes(res);
     if (url.pathname === '/api/themes' && req.method === 'POST') return handleSaveThemes(req, res);
+
+    // ── Model Router ──────────────────────────────────────────────────────
+    if (url.pathname === '/api/models/catalog' && req.method === 'GET') {
+      return json(res, modelRouter.publicCatalog(configPath));
+    }
+    if (url.pathname === '/api/models/recommend' && req.method === 'POST') {
+      const body = await readBody(req);
+      return json(res, modelRouter.recommend({ ...body, configPath }));
+    }
 
     // ── Permissions ────────────────────────────────────────────────────────
     if (url.pathname === '/api/permissions' && req.method === 'GET') {
