@@ -160,9 +160,11 @@ function readPath(obj, expr) {
 
 // ── Recipe loader ───────────────────────────────────────────────────────────
 function listDirs() {
+  // User dir is listed first so user-authored recipes take precedence over
+  // shipped defaults (a user-saved recipe of the same id overrides the ship).
   const dirs = [];
-  if (fs.existsSync(PROJECT_DIR)) dirs.push({ scope: 'project', dir: PROJECT_DIR });
   if (fs.existsSync(USER_DIR)) dirs.push({ scope: 'user', dir: USER_DIR });
+  if (fs.existsSync(PROJECT_DIR)) dirs.push({ scope: 'project', dir: PROJECT_DIR });
   return dirs;
 }
 
@@ -175,7 +177,7 @@ function listRecipes() {
     for (const f of entries) {
       if (!f.endsWith('.md')) continue;
       const id = f.replace(/\.md$/i, '');
-      if (seen.has(id)) continue; // project-local wins over user-global
+      if (seen.has(id)) continue; // first-seen wins; listDirs puts user-global first
       seen.add(id);
       const r = loadRecipe(id, scope);
       if (r) out.push(r);
