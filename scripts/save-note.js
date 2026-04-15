@@ -7,23 +7,35 @@
 const http = require('http');
 const fs = require('fs');
 
-const [,, name, contentOrFlag, filePath] = process.argv;
+// Accepts both positional and named-flag forms:
+//   node scripts/save-note.js "Name" "content"
+//   node scripts/save-note.js "Name" --file path/to/file.md
+//   node scripts/save-note.js --title "Name" --body "content"
+//   node scripts/save-note.js --title "Name" --file path/to/file.md
+const argv = process.argv.slice(2);
+let name, content, filePath;
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === '--title' || a === '--name') name = argv[++i];
+  else if (a === '--body' || a === '--content') content = argv[++i];
+  else if (a === '--file') filePath = argv[++i];
+  else if (name === undefined) name = a;
+  else if (content === undefined && a !== '--file') content = a;
+}
 
 if (!name) {
   console.error('Usage: node scripts/save-note.js "Name" "content"');
+  console.error('       node scripts/save-note.js --title "Name" --body "content"');
   console.error('       node scripts/save-note.js "Name" --file path/to/file.md');
   process.exit(1);
 }
 
-let content;
-if (contentOrFlag === '--file') {
-  if (!filePath || !fs.existsSync(filePath)) {
+if (filePath) {
+  if (!fs.existsSync(filePath)) {
     console.error(`Error: File not found: ${filePath}`);
     process.exit(1);
   }
   content = fs.readFileSync(filePath, 'utf8');
-} else {
-  content = contentOrFlag || '';
 }
 
 if (!content) {
