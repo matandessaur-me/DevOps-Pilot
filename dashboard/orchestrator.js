@@ -38,8 +38,8 @@ const HEADLESS_FLAGS = {
   claude:  { cmd: 'claude',  args: ['-p'], promptMode: 'stdin' },                                   // -p = print mode, reads prompt from stdin
   gemini:  { cmd: 'gemini',  args: [],                   promptMode: 'stdin' },                    // non-TTY pipes auto-trigger headless mode; no flags needed
   codex:   { cmd: 'codex',   args: ['exec'],             promptMode: 'stdin' },                    // exec subcommand, reads prompt from stdin
-  copilot: { cmd: 'copilot', args: ['-p'],               promptMode: 'flag',  shell: false },      // -p <prompt>; shell:false so Node.js handles quoting
-  grok:    { cmd: 'grok',    args: ['--print'],           promptMode: 'positional', shell: false }, // --print <prompt>; shell:false for safe quoting
+  copilot: { cmd: process.platform === 'win32' ? 'copilot.cmd' : 'copilot', args: ['-p'],     promptMode: 'flag',  shell: false },      // -p <prompt>; shell:false so Node.js handles quoting. On Windows, npm global bins are .cmd shims and spawn can't resolve them without the extension when shell:false.
+  grok:    { cmd: process.platform === 'win32' ? 'grok.cmd'    : 'grok',    args: ['--print'], promptMode: 'positional', shell: false }, // --print <prompt>; shell:false for safe quoting. Same Windows .cmd shim rule as copilot.
 };
 
 // ── CLI Model & Flag Intelligence ───────────────────────────────────────────
@@ -428,13 +428,22 @@ class Orchestrator extends EventEmitter {
    * @param {string} text    — text to inject (newline appended if missing)
    * @returns {{ ok: boolean, error?: string }}
    */
-  inject(termId, text) {
+  inject(termId, text, opts) {
+    opts = opts || {};
     const t = this.terminals.get(termId);
     if (!t) return { ok: false, error: `Terminal "${termId}" not found` };
 
-    // Use \r (carriage return) for terminal submission, not \n (line feed)
-    const payload = text.endsWith('\r') || text.endsWith('\n') ? text : text + '\r';
-    t.pty.write(payload);
+    // Write the raw text without a trailing newline so interactive AI CLIs
+    // (which treat the whole thing as a bracketed paste) land it in the
+    // input buffer. Then send a SEPARATE carriage return after a short
+    // delay so the CLI submits it as its own keystroke -- a trailing \r
+    // inside the same paste is treated as paste content, not submit.
+    const clean = text.replace(/[\r\n]+$/, '');
+    t.pty.write(clean);
+    const submit = opts.autoSubmit !== false;
+    if (submit) {
+      setTimeout(function () { try { t.pty.write('\r'); } catch (_) {} }, 150);
+    }
 
     this.broadcast({
       type: 'orchestrator-event',
@@ -482,10 +491,12 @@ class Orchestrator extends EventEmitter {
       throw new Error(`CLI "${cli}" (${cfg.cmd}) is not installed. Install it first.`);
     }
 
+    const resolvedModel = model || (CLI_MODELS[cli] && CLI_MODELS[cli].defaultModel) || null;
     const task = this._createTask({
       id: taskId,
       type: 'headless',
       cli,
+      model: resolvedModel,
       prompt,
       from: from || null,
       timeout: 0,  // Never timeout — AI runs as long as it needs
@@ -1798,11 +1809,12 @@ class Orchestrator extends EventEmitter {
     return crypto.randomBytes(6).toString('hex');
   }
 
-  _createTask({ id, type, cli, prompt, from, timeout, targetTermId }) {
+  _createTask({ id, type, cli, prompt, from, timeout, targetTermId, model }) {
     const task = {
       id: id || this._id(),
       type,              // 'headless' | 'dispatch' | 'handoff'
       cli: cli || null,
+      model: model || null,
       prompt,
       from,
       targetTermId: targetTermId || null,
