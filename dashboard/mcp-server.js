@@ -27,6 +27,8 @@ const API_HOST = '127.0.0.1';
 const API_PORT = 3800;
 const REPO_ROOT = path.resolve(__dirname, '..');
 const PLUGINS_DIR = path.join(__dirname, 'plugins');
+const CONFIG_PATH = path.join(REPO_ROOT, 'config', 'config.json');
+const TEMPLATE_PATH = path.join(REPO_ROOT, 'config', 'config.template.json');
 
 // ── JSON-RPC framing ────────────────────────────────────────────────────────
 const stdin = process.stdin;
@@ -90,100 +92,6 @@ function apiRequest(method, pathname, body) {
 
 const TOOLS = [
   {
-    name: 'list_work_items',
-    description: 'List Azure DevOps work items for the active iteration and area. Returns id, title, state, assignedTo, type, storyPoints.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        iteration: { type: 'string', description: 'Iteration path. Omit for active iteration.' },
-        state: { type: 'string', description: 'Filter by state (New, Active, Resolved, Closed).' },
-        refresh: { type: 'boolean', description: 'Force refresh the cache.' },
-      },
-    },
-    handler: async (args) => {
-      const params = new URLSearchParams();
-      if (args && args.iteration) params.set('iteration', args.iteration);
-      if (args && args.refresh) params.set('refresh', '1');
-      const qs = params.toString();
-      const res = await apiRequest('GET', '/api/workitems' + (qs ? '?' + qs : ''));
-      let items = Array.isArray(res) ? res : (res.items || res.workItems || []);
-      if (args && args.state) items = items.filter(w => (w.state || '').toLowerCase() === args.state.toLowerCase());
-      return textResult(JSON.stringify(items.map(w => ({
-        id: w.id, title: w.title, state: w.state, type: w.type, assignedTo: w.assignedTo, storyPoints: w.storyPoints,
-      })), null, 2));
-    },
-  },
-  {
-    name: 'get_work_item',
-    description: 'Get full details of a single Azure DevOps work item by id.',
-    inputSchema: {
-      type: 'object',
-      properties: { id: { type: 'number', description: 'Work item id.' } },
-      required: ['id'],
-    },
-    handler: async (args) => {
-      const res = await apiRequest('GET', `/api/workitems/${args.id}`);
-      return textResult(JSON.stringify(res, null, 2));
-    },
-  },
-  {
-    name: 'create_work_item',
-    description: 'Create an Azure DevOps work item. Gated by permissions.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        type: { type: 'string', enum: ['User Story', 'Bug', 'Task', 'Feature', 'Epic'] },
-        title: { type: 'string' },
-        description: { type: 'string' },
-        priority: { type: 'number', enum: [1, 2, 3, 4], default: 2 },
-        storyPoints: { type: 'number' },
-        iterationPath: { type: 'string' },
-      },
-      required: ['type', 'title'],
-    },
-    handler: async (args) => {
-      const res = await apiRequest('POST', '/api/workitems/create', args);
-      return textResult(JSON.stringify(res, null, 2));
-    },
-  },
-  {
-    name: 'set_work_item_state',
-    description: 'Change the state of a work item (New, Active, Resolved, Closed). Gated by permissions.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'number' },
-        state: { type: 'string', enum: ['New', 'Active', 'Resolved', 'Closed', 'Removed'] },
-      },
-      required: ['id', 'state'],
-    },
-    handler: async (args) => {
-      const res = await apiRequest('PATCH', `/api/workitems/${args.id}/state`, { state: args.state });
-      return textResult(JSON.stringify(res, null, 2));
-    },
-  },
-  {
-    name: 'get_sprint_status',
-    description: 'Current sprint overview: iteration name, work items grouped by state, completion ratio.',
-    inputSchema: { type: 'object', properties: {} },
-    handler: async () => {
-      const ctx = await apiRequest('GET', '/api/ui/context').catch(() => ({}));
-      const items = await apiRequest('GET', '/api/workitems');
-      const list = Array.isArray(items) ? items : (items.items || []);
-      const byState = list.reduce((acc, w) => { (acc[w.state] = acc[w.state] || []).push({ id: w.id, title: w.title, sp: w.storyPoints }); return acc; }, {});
-      const totalSp = list.reduce((s, w) => s + (w.storyPoints || 0), 0);
-      const closedSp = list.filter(w => ['Resolved', 'Closed'].includes(w.state)).reduce((s, w) => s + (w.storyPoints || 0), 0);
-      return textResult(JSON.stringify({
-        iteration: ctx.selectedIterationName || 'All Iterations',
-        area: ctx.selectedAreaName || 'Team Default',
-        activeRepo: ctx.activeRepo || null,
-        totalItems: list.length,
-        storyPoints: { total: totalSp, closed: closedSp, pct: totalSp ? Math.round(100 * closedSp / totalSp) : 0 },
-        byState,
-      }, null, 2));
-    },
-  },
-  {
     name: 'save_note',
     description: 'Save a markdown note to DevOps Pilot Notes. Returns the saved file path.',
     inputSchema: {
@@ -195,7 +103,7 @@ const TOOLS = [
       required: ['title', 'content'],
     },
     handler: async (args) => {
-      const res = await apiRequest('POST', '/api/notes', { title: args.title, content: args.content });
+      const res = await apiRequest('POST', '/api/notes/save', { name: args.title, content: args.content });
       return textResult(JSON.stringify(res, null, 2));
     },
   },
@@ -409,6 +317,29 @@ function textResult(text) {
 //     }
 //   }
 // The name is namespaced as "<pluginId>__<declaredName>" so collisions are impossible.
+function readJsonFile(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) { return {}; }
+}
+
+function getMergedConfig() {
+  const merged = { ...readJsonFile(TEMPLATE_PATH), ...readJsonFile(CONFIG_PATH) };
+  if (!fs.existsSync(PLUGINS_DIR)) return merged;
+  try {
+    for (const dir of fs.readdirSync(PLUGINS_DIR)) {
+      if (dir === 'sdk') continue;
+      Object.assign(merged, readJsonFile(path.join(PLUGINS_DIR, dir, 'config.json')));
+    }
+  } catch (_) {}
+  return merged;
+}
+
+function isPluginActiveForMcp(manifest, cfg) {
+  const cond = manifest.activationConditions;
+  if (!cond || cond.always) return true;
+  if (Array.isArray(cond.configKeys)) return cond.configKeys.every(k => !!cfg[k]);
+  return true;
+}
+
 function loadPluginContributions() {
   const tools = [];
   const resources = [];
@@ -416,12 +347,14 @@ function loadPluginContributions() {
   if (!fs.existsSync(PLUGINS_DIR)) return { tools, resources, prompts };
   let dirs = [];
   try { dirs = fs.readdirSync(PLUGINS_DIR); } catch (_) { return { tools, resources, prompts }; }
+  const cfg = getMergedConfig();
   for (const dir of dirs) {
     if (dir === 'sdk') continue;
     const manifestPath = path.join(PLUGINS_DIR, dir, 'plugin.json');
     if (!fs.existsSync(manifestPath)) continue;
     let manifest;
     try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); } catch (_) { continue; }
+    if (!isPluginActiveForMcp(manifest, cfg)) continue;
     const mcp = manifest && manifest.contributions && manifest.contributions.mcp;
     if (!mcp) continue;
     const id = manifest.id || dir;
@@ -536,47 +469,7 @@ const RESOURCES = [
 ];
 
 // ── Prompts ─────────────────────────────────────────────────────────────────
-const PROMPTS = [
-  {
-    name: 'standup_summary',
-    description: 'Generate a daily standup summary from recent work item activity.',
-    arguments: [{ name: 'iteration', description: 'Iteration path (optional).', required: false }],
-    render: async (args) => {
-      const iter = args && args.iteration ? `?iteration=${encodeURIComponent(args.iteration)}` : '';
-      const items = await apiRequest('GET', '/api/workitems' + iter).catch(() => []);
-      const list = Array.isArray(items) ? items : (items.items || []);
-      return [
-        {
-          role: 'user',
-          content: {
-            type: 'text',
-            text: `Write a concise daily standup summary based on these Azure DevOps work items. Group by engineer. Call out blockers and items stalled for more than 2 days.\n\n${JSON.stringify(list, null, 2)}`,
-          },
-        },
-      ];
-    },
-  },
-  {
-    name: 'retro_analysis',
-    description: 'Generate a sprint retrospective starter from closed and carried-over items.',
-    arguments: [],
-    render: async () => {
-      const items = await apiRequest('GET', '/api/workitems').catch(() => []);
-      const list = Array.isArray(items) ? items : (items.items || []);
-      const closed = list.filter(w => ['Resolved', 'Closed'].includes(w.state));
-      const open = list.filter(w => ['New', 'Active'].includes(w.state));
-      return [
-        {
-          role: 'user',
-          content: {
-            type: 'text',
-            text: `Produce a sprint retrospective in three sections: What went well, What did not go well, Action items. Base it on these work items.\n\nClosed (${closed.length}):\n${JSON.stringify(closed, null, 2)}\n\nStill open (${open.length}):\n${JSON.stringify(open, null, 2)}`,
-          },
-        },
-      ];
-    },
-  },
-];
+const PROMPTS = [];
 
 // ── Request routing ─────────────────────────────────────────────────────────
 let initialized = false;
@@ -600,7 +493,7 @@ async function handleRequest(msg) {
           version: '0.1.0',
           title: 'DevOps Pilot MCP Server',
         },
-        instructions: 'DevOps Pilot is an Azure DevOps workstation. Tools perform work item management, sprint queries, orchestrator spawns, and notes. Resources expose live UI context, instructions, learnings, and the active permission mode. All mutating tools are gated by the DevOps Pilot permission layer.',
+        instructions: 'DevOps Pilot is a shell-first workstation. Core tools manage notes, orchestration, and shell resources; installed plugins contribute provider-specific tools and prompts. All mutating tools are gated by the DevOps Pilot permission layer.',
       });
     }
 

@@ -17,6 +17,47 @@ const { SWRCache } = require('./utils/swr-cache');
 const { atomicWriteSync } = require('./utils/atomic-write');
 const { BusyGuard } = require('./utils/busy-guard');
 
+// Core-owned SWR caches. ADO/GitHub caches moved into their plugins in v0.4.0;
+// core keeps git-branch cache + a general-purpose plugin cache.
+const swrGit     = new SWRCache({ staleTTL: 10000, maxAge: 60000 });
+const swrPlugins = new SWRCache({ staleTTL: 30000, maxAge: 300000 });
+const guard      = new BusyGuard();
+
+// Return plugin info when a /api/ path matches routes a known extracted plugin
+// owns but no plugin currently has a handler registered. Lets core give a
+// useful {pluginRequired} 404 instead of bare "Not found" when the plugin is
+// uninstalled or inactive. Hardcoded to the two first-party extractions; add
+// future plugin prefixes here as needed.
+const EXTRACTED_PLUGIN_ROUTES = [
+  { pluginId: 'azure-devops', pluginName: 'Azure DevOps', prefix: /^\/api\/(workitems|iterations|teams|areas|velocity|burndown|start-working|team-members)(?:\/|$|\?)/ },
+  { pluginId: 'github',       pluginName: 'GitHub',       prefix: /^\/api\/(github\/|pull-request(?:$|\?))/ },
+];
+function matchUnclaimedPluginRoute(pathname, plugins) {
+  for (const spec of EXTRACTED_PLUGIN_ROUTES) {
+    if (!spec.prefix.test(pathname)) continue;
+    const installed = Array.isArray(plugins) && plugins.some(p => p.id === spec.pluginId);
+    return { pluginId: spec.pluginId, pluginName: spec.pluginName, installed };
+  }
+  return null;
+}
+
+// Strip non-ASCII control chars, smart quotes, and replacement characters.
+// Generic text hygiene shared by core and plugins via ctx.shell.
+function sanitizeText(str) {
+  if (!str) return str;
+  return str
+    .replace(/[\u2014]/g, '--')
+    .replace(/[\u2013]/g, '-')
+    .replace(/[\u2018\u2019\u201A]/g, "'")
+    .replace(/[\u201C\u201D\u201E]/g, '"')
+    .replace(/[\u2026]/g, '...')
+    .replace(/[\u00A0]/g, ' ')
+    .replace(/[\uFFFD\uFFFE\uFFFF]/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/[\uD800-\uDFFF]/g, '')
+    .trim();
+}
+
 const PORT = 3800;
 const HOST = '127.0.0.1';
 const repoRoot = path.resolve(__dirname, '..');
@@ -35,6 +76,7 @@ const ROUTES = {
   '/xterm-addon-web-links.js':{ file: path.join(nodeModules, '@xterm/addon-web-links/lib/addon-web-links.js'),       type: 'application/javascript' },
   '/xterm-addon-unicode11.js':{ file: path.join(nodeModules, '@xterm/addon-unicode11/lib/addon-unicode11.js'),       type: 'application/javascript' },
   '/logo.svg':                { file: path.join(publicDir, 'logo.svg'),                                            type: 'image/svg+xml' },
+  '/contributions-client.js': { file: path.join(publicDir, 'contributions-client.js'),                             type: 'application/javascript' },
 };
 
 // ── Pluggable route handlers (Electron adds its own via addRoute) ────────────
@@ -44,7 +86,7 @@ function addRoute(method, pathname, handler) {
 }
 
 // ── Plugin system ────────────────────────────────────────────────────────────
-const { loadPlugins } = require('./plugin-loader');
+const { loadPlugins, checkActivation } = require('./plugin-loader');
 const pluginsDir = path.join(__dirname, 'plugins');
 let loadedPlugins = [];
 
@@ -124,7 +166,15 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname.startsWith(r.pathname + '/') || url.pathname === r.pathname) {
         const subpath = url.pathname.slice(r.pathname.length) || '/';
         const result = r.handler(req, res, url, subpath);
-        if (result !== false) return;
+        // Async prefix handlers return a Promise; await it so a Promise<false>
+        // correctly falls through to the next route instead of being treated
+        // as "handled" just because the Promise is truthy.
+        if (result && typeof result.then === 'function') {
+          const resolved = await result;
+          if (resolved !== false) return;
+        } else if (result !== false) {
+          return;
+        }
       }
     } else if (url.pathname === r.pathname && req.method === r.method) {
       return r.handler(req, res, url);
@@ -137,6 +187,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/config' && req.method === 'POST') return handleSaveConfig(req, res);
     if (url.pathname === '/api/config/export' && req.method === 'GET')  return handleExportConfig(res);
     if (url.pathname === '/api/config/import' && req.method === 'POST') return handleImportConfig(req, res);
+    if (url.pathname === '/api/config/reset' && req.method === 'POST')  return handleFactoryReset(req, res);
     if (url.pathname === '/api/themes' && req.method === 'GET')  return handleGetThemes(res);
     if (url.pathname === '/api/themes' && req.method === 'POST') return handleSaveThemes(req, res);
 
@@ -164,8 +215,13 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const id = String(body.id || '').toLowerCase().replace(/[^a-z0-9_-]/g, '');
       if (!id) return json(res, { error: 'id required' }, 400);
-      const file = path.join(repoRoot, 'recipes', id + '.md');
-      if (fs.existsSync(file) && !body.overwrite) {
+      // User-authored recipes live in ~/.devops-pilot/recipes/ so they stay
+      // machine-local and never get committed alongside the shipped recipes.
+      const userRecipesDir = path.join(require('os').homedir(), '.devops-pilot', 'recipes');
+      const shippedFile = path.join(repoRoot, 'recipes', id + '.md');
+      const file = path.join(userRecipesDir, id + '.md');
+      const alreadyExists = fs.existsSync(file) || fs.existsSync(shippedFile);
+      if (alreadyExists && !body.overwrite) {
         return json(res, { error: `A recipe with id '${id}' already exists. Pass overwrite:true to replace it.`, exists: true }, 409);
       }
       if (!await permGate(res, 'api', 'POST /api/recipes/save', `${body.overwrite ? 'Update' : 'Save'} recipe: ${id}`)) return;
@@ -228,10 +284,18 @@ const server = http.createServer(async (req, res) => {
       if (!id) return json(res, { error: 'id required' }, 400);
       if (!await permGate(res, 'api', `DELETE /api/recipes/${id}`, `Delete recipe: ${id}`)) return;
       try {
-        const file = path.join(repoRoot, 'recipes', id + '.md');
-        if (!fs.existsSync(file)) return json(res, { error: 'not found' }, 404);
-        fs.unlinkSync(file);
-        return json(res, { ok: true, id });
+        // Prefer the user-scoped file; only shipped recipes should be in the
+        // repo folder, and we refuse to delete those here.
+        const userFile = path.join(require('os').homedir(), '.devops-pilot', 'recipes', id + '.md');
+        const repoFile = path.join(repoRoot, 'recipes', id + '.md');
+        if (fs.existsSync(userFile)) {
+          fs.unlinkSync(userFile);
+          return json(res, { ok: true, id, scope: 'user' });
+        }
+        if (fs.existsSync(repoFile)) {
+          return json(res, { error: 'Shipped recipes cannot be deleted from the UI.' }, 403);
+        }
+        return json(res, { error: 'not found' }, 404);
       } catch (e) { return json(res, { error: e.message }, 500); }
     }
     if (url.pathname === '/api/recipes/run' && req.method === 'POST') {
@@ -267,6 +331,11 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // ── Plugin recommendations (local git remote detection, no network) ───
+    if (url.pathname === '/api/plugins/recommendations' && req.method === 'GET') {
+      return json(res, getPluginRecommendations());
+    }
+
     // ── Repo Map (always available) ──────────────────────────────────────
     if (url.pathname === '/api/repo/map' && req.method === 'GET') {
       const repoName = url.searchParams.get('repo') || (getUiContextWithPath().activeRepo);
@@ -285,7 +354,10 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/ui/open-path' && req.method === 'POST') {
       const body = await readBody(req);
       const safe = String(body.path || '').replace(/\.\./g, '');
-      const target = path.join(repoRoot, safe);
+      // scope: 'repo' (default) joins with repoRoot; 'home' joins with the user home dir.
+      const scope = body.scope === 'home' ? 'home' : 'repo';
+      const rootDir = scope === 'home' ? require('os').homedir() : repoRoot;
+      const target = path.join(rootDir, safe);
       try { fs.mkdirSync(target, { recursive: true }); } catch (_) {}
       const opener = process.platform === 'win32' ? 'explorer.exe' : (process.platform === 'darwin' ? 'open' : 'xdg-open');
       try { spawnSync(opener, [target], { detached: true, stdio: 'ignore' }); return json(res, { ok: true, path: target }); }
@@ -407,118 +479,18 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/prerequisites')                   return handlePrerequisites(res);
     if (url.pathname === '/api/cli/install' && req.method === 'POST') return handleCliInstall(req, res);
 
-    // ── Azure DevOps: Iterations ──────────────────────────────────────────
-    if (url.pathname === '/api/iterations' && req.method === 'GET') {
-      if (incognitoGuard(res, 'read iterations')) return; return handleIterations(res, url);
-    }
-
-    // ── Azure DevOps: Work Items ──────────────────────────────────────────
-    if (url.pathname === '/api/workitems' && req.method === 'GET') {
-      if (incognitoGuard(res, 'read work items')) return; return handleWorkItems(url, res);
-    }
-    if (url.pathname === '/api/workitems/create' && req.method === 'POST') {
-      if (incognitoGuard(res, 'create work item')) return;
-      if (!await permGate(res, 'api', 'POST /api/workitems/create', 'Create work item')) return;
-      return handleCreateWorkItem(req, res);
-    }
-
-    const wiMatch = url.pathname.match(/^\/api\/workitems\/(\d+)$/);
-    if (wiMatch && req.method === 'GET') {
-      if (incognitoGuard(res, 'read work item')) return; return handleWorkItemDetail(wiMatch[1], res);
-    }
-    if (wiMatch && req.method === 'PATCH') {
-      if (incognitoGuard(res, 'update work item')) return;
-      if (!await permGate(res, 'api', `PATCH /api/workitems/${wiMatch[1]}`, `Update work item #${wiMatch[1]}`)) return;
-      return handleUpdateWorkItem(wiMatch[1], req, res);
-    }
-
-    const wiStateMatch = url.pathname.match(/^\/api\/workitems\/(\d+)\/state$/);
-    if (wiStateMatch && req.method === 'PATCH') {
-      if (incognitoGuard(res, 'change work item state')) return;
-      if (!await permGate(res, 'api', `PATCH /api/workitems/${wiStateMatch[1]}/state`, `Change state of work item #${wiStateMatch[1]}`)) return;
-      return handleWorkItemState(wiStateMatch[1], req, res);
-    }
-
-    const wiCommentMatch = url.pathname.match(/^\/api\/workitems\/(\d+)\/comments$/);
-    if (wiCommentMatch && req.method === 'POST') {
-      if (incognitoGuard(res, 'add work item comment')) return;
-      if (!await permGate(res, 'api', `POST /api/workitems/${wiCommentMatch[1]}/comments`, `Comment on work item #${wiCommentMatch[1]}`)) return;
-      return handleAddWorkItemComment(wiCommentMatch[1], req, res);
-    }
-
-    // ── Azure DevOps: Velocity ────────────────────────────────────────────
-    if (url.pathname === '/api/velocity' && req.method === 'GET') {
-      if (incognitoGuard(res, 'read velocity')) return; return handleVelocity(res);
-    }
-
-    // ── Azure DevOps: Teams & Members ─────────────────────────────────────
-    if (url.pathname === '/api/teams' && req.method === 'GET') {
-      if (incognitoGuard(res, 'read teams')) return; return handleTeams(res);
-    }
-    if (url.pathname === '/api/team-members' && req.method === 'GET') {
-      if (incognitoGuard(res, 'read team members')) return; return handleTeamMembers(res);
-    }
-    if (url.pathname === '/api/areas' && req.method === 'GET') {
-      if (incognitoGuard(res, 'read areas')) return; return handleAreas(res);
-    }
-
-    // ── Azure DevOps: Burndown ────────────────────────────────────────────
-    if (url.pathname === '/api/burndown' && req.method === 'GET') {
-      if (incognitoGuard(res, 'read burndown')) return; return handleBurndown(url, res);
-    }
-
     // ── Repos ─────────────────────────────────────────────────────────────
     if (url.pathname === '/api/repos' && req.method === 'GET')  return handleGetRepos(res);
     if (url.pathname === '/api/repos' && req.method === 'POST') return handleSaveRepo(req, res);
 
-    // ── Start Working ─────────────────────────────────────────────────────
-    if (url.pathname === '/api/start-working' && req.method === 'POST') {
-      if (incognitoGuard(res, 'start working on work item')) return; return handleStartWorking(req, res);
-    }
-
-    // ── Pull Requests (ADO) ────────────────────────────────────────────────
-    if (url.pathname === '/api/pull-request' && req.method === 'POST') {
-      if (incognitoGuard(res, 'create pull request')) return;
-      if (!await permGate(res, 'api', 'POST /api/pull-request', 'Create pull request')) return;
-      return handleCreatePullRequest(req, res);
-    }
-
-    // ── GitHub Pull Requests ────────────────────────────────────────────────
-    if (url.pathname === '/api/github/repo-info' && req.method === 'GET') {
-      if (incognitoGuard(res, 'read GitHub repo info')) return; return handleGitHubRepoInfo(url, res);
-    }
-    if (url.pathname === '/api/github/pulls' && req.method === 'GET') {
-      if (incognitoGuard(res, 'read GitHub pull requests')) return; return handleGitHubPulls(url, res);
-    }
-    if (url.pathname === '/api/github/pulls/detail' && req.method === 'GET') {
-      if (incognitoGuard(res, 'read GitHub pull request detail')) return; return handleGitHubPullDetail(url, res);
-    }
-    if (url.pathname === '/api/github/pulls/files' && req.method === 'GET') {
-      if (incognitoGuard(res, 'read GitHub pull request files')) return; return handleGitHubPullFiles(url, res);
-    }
-    if (url.pathname === '/api/github/pulls/comments' && req.method === 'GET') {
-      if (incognitoGuard(res, 'read GitHub pull request comments')) return; return handleGitHubPullComments(url, res);
-    }
-    if (url.pathname === '/api/github/pulls/timeline' && req.method === 'GET') {
-      if (incognitoGuard(res, 'read GitHub pull request timeline')) return; return handleGitHubPullTimeline(url, res);
-    }
-    if (url.pathname === '/api/github/pulls/comment' && req.method === 'POST') {
-      if (incognitoGuard(res, 'comment on pull request')) return;
-      if (!await permGate(res, 'api', 'POST /api/github/pulls/comment', 'Comment on GitHub PR')) return;
-      return handleGitHubAddComment(req, res);
-    }
-    if (url.pathname === '/api/github/pulls/review' && req.method === 'POST') {
-      if (incognitoGuard(res, 'submit pull request review')) return;
-      if (!await permGate(res, 'api', 'POST /api/github/pulls/review', 'Submit GitHub PR review')) return;
-      return handleGitHubSubmitReview(req, res);
-    }
-    if (url.pathname === '/api/github/image' && req.method === 'GET')          return handleGitHubImageProxy(url, res);
-    if (url.pathname === '/api/github/user-repos' && req.method === 'GET') {
-      if (incognitoGuard(res, 'read GitHub repositories')) return; return handleGitHubUserRepos(url, res);
-    }
-    if (url.pathname === '/api/github/clone' && req.method === 'POST') {
-      if (incognitoGuard(res, 'clone GitHub repository')) return; return handleGitHubClone(req, res);
-    }
+    // Azure DevOps routes (/api/workitems/*, /api/iterations, /api/teams,
+    // /api/areas, /api/velocity, /api/burndown, /api/team-members,
+    // /api/start-working) are fully owned by the azure-devops plugin as
+    // of v0.4.0 -- registered via ctx.addAbsoluteRoute against the same
+    // URLs. Same story for GitHub (/api/github/*, /api/pull-request):
+    // owned by the github plugin v0.4.0. When a plugin is uninstalled or
+    // unconfigured, the route 404s naturally because no handler is
+    // registered -- no explicit gate needed in core.
 
     // ── Notes ─────────────────────────────────────────────────────────────
     if (url.pathname === '/api/notes' && req.method === 'GET')    return handleListNotes(res);
@@ -526,6 +498,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/notes/save' && req.method === 'POST') return handleSaveNote(req, res);
     if (url.pathname === '/api/notes/delete' && req.method === 'DELETE') return handleDeleteNote(req, res);
     if (url.pathname === '/api/notes/create' && req.method === 'POST') return handleCreateNote(req, res);
+    if (url.pathname === '/api/notes/export' && req.method === 'GET')  return handleExportNote(url, res);
+    if (url.pathname === '/api/notes/export-all' && req.method === 'GET') return handleExportAllNotes(res);
+    if (url.pathname === '/api/notes/import' && req.method === 'POST')  return handleImportNotes(req, res);
 
     // ── File Browser & Git ─────────────────────────────────────────────────
     if (url.pathname === '/api/files/tree' && req.method === 'GET')    return handleFileTree(url, res);
@@ -612,6 +587,11 @@ const server = http.createServer(async (req, res) => {
             if (bi !== -1) return 1;
             return a.localeCompare(b);
           });
+          // Core instructions are fully plugin-agnostic. Per-plugin guidance
+          // (work-item linking, PR creation, CMS flows, etc.) lives in each
+          // plugin's own instructions.md and is fetched via
+          // /api/plugins/instructions on demand, keeping the core payload
+          // identical regardless of which plugins the user has installed.
           instructions = files.map(f => fs.readFileSync(path.join(instrDir, f), 'utf8')).join('\n\n---\n\n');
         } catch (_) {}
         // Plugins: lightweight index (full instructions remain at /api/plugins/instructions)
@@ -665,6 +645,21 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': route.type });
       fs.createReadStream(route.file).pipe(res);
     } else {
+      // Plugin-aware 404 for /api/ paths owned by extracted plugins. Keeps the
+      // UI and AI seeing a structured 'this feature lives in a plugin -- install
+      // it' response instead of a bare "Not found" when the plugin is absent.
+      const unclaimed = matchUnclaimedPluginRoute(url.pathname, loadedPlugins);
+      if (unclaimed) {
+        return json(res, {
+          error: unclaimed.installed
+            ? `${unclaimed.pluginName} plugin is installed but not configured.`
+            : `${unclaimed.pluginName} plugin is not installed.`,
+          hint: unclaimed.installed
+            ? `Open Settings > Plugins > ${unclaimed.pluginName} and add the required config.`
+            : 'Install it from Settings > Plugins > Browse Plugins.',
+          pluginRequired: unclaimed.pluginId,
+        }, 404);
+      }
       res.writeHead(404);
       res.end('Not found');
     }
@@ -675,16 +670,76 @@ const server = http.createServer(async (req, res) => {
 
 // ── Config API ──────────────────────────────────────────────────────────────
 function getConfig() {
-  try { return JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch (_) {}
-  try { return JSON.parse(fs.readFileSync(templatePath, 'utf8')); } catch (_) {}
-  return {};
+  let template = {};
+  let root = {};
+  try { template = JSON.parse(fs.readFileSync(templatePath, 'utf8')); } catch (_) {}
+  try { root = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch (_) {}
+  return { ...template, ...root, ...readAllPluginConfigs() };
+}
+
+function readAllPluginConfigs() {
+  const merged = {};
+  try {
+    if (!fs.existsSync(pluginsDir)) return merged;
+    for (const dir of fs.readdirSync(pluginsDir)) {
+      if (dir === 'sdk') continue;
+      const cfgFile = path.join(pluginsDir, dir, 'config.json');
+      if (!fs.existsSync(cfgFile)) continue;
+      try { Object.assign(merged, JSON.parse(fs.readFileSync(cfgFile, 'utf8'))); } catch (_) {}
+    }
+  } catch (_) {}
+  return merged;
+}
+
+function getPluginConfigKeyMap() {
+  const map = new Map();
+  try {
+    if (!fs.existsSync(pluginsDir)) return map;
+    for (const dir of fs.readdirSync(pluginsDir)) {
+      if (dir === 'sdk') continue;
+      const manifestPath = path.join(pluginsDir, dir, 'plugin.json');
+      if (!fs.existsSync(manifestPath)) continue;
+      let manifest;
+      try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); } catch (_) { continue; }
+      const keys = (manifest.contributions && manifest.contributions.configKeys) || [];
+      for (const key of keys) {
+        if (typeof key === 'string' && key) map.set(key, manifest.id || dir);
+      }
+    }
+  } catch (_) {}
+  return map;
+}
+
+function persistPluginConfigKeys(config) {
+  const keyMap = getPluginConfigKeyMap();
+  if (!keyMap.size) return config;
+  const rootConfig = { ...config };
+  const byPlugin = {};
+  for (const [key, pluginId] of keyMap.entries()) {
+    if (Object.prototype.hasOwnProperty.call(rootConfig, key)) {
+      byPlugin[pluginId] = byPlugin[pluginId] || {};
+      byPlugin[pluginId][key] = rootConfig[key];
+      delete rootConfig[key];
+    }
+  }
+  for (const [pluginId, pluginCfg] of Object.entries(byPlugin)) {
+    try {
+      const pluginDir = path.join(pluginsDir, pluginId);
+      const cfgFile = path.join(pluginDir, 'config.json');
+      if (!fs.existsSync(pluginDir)) continue;
+      let existing = {};
+      try { if (fs.existsSync(cfgFile)) existing = JSON.parse(fs.readFileSync(cfgFile, 'utf8')); } catch (_) {}
+      fs.writeFileSync(cfgFile, JSON.stringify({ ...existing, ...pluginCfg }, null, 2), 'utf8');
+    } catch (_) {}
+  }
+  return rootConfig;
 }
 
 // ── Incognito Mode guard ─────────────────────────────────────────────────
 function isIncognito() { return getConfig().IncognitoMode === true; }
 function incognitoGuard(res, action) {
   if (isIncognito()) {
-    json(res, { error: `Blocked by Incognito Mode: "${action}" is not available in incognito. All Azure DevOps, GitHub, and remote operations are disabled. Turn off incognito in Settings to proceed.`, incognito: true }, 403);
+    json(res, { error: `Blocked by Incognito Mode: "${action}" is not available in incognito. Plugin-backed integrations and remote operations are disabled. Turn off incognito in Settings to proceed.`, incognito: true }, 403);
     return true;
   }
   return false;
@@ -722,28 +777,37 @@ async function handleSaveConfig(req, res) {
   try { template = JSON.parse(fs.readFileSync(templatePath, 'utf8')); } catch (_) {}
   let existing = {};
   try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch (_) {}
-  const config = { ...template, ...existing, ...incoming };
+  const config = persistPluginConfigKeys({ ...template, ...existing, ...incoming });
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   atomicWriteSync(configPath, JSON.stringify(config, null, 2));
   // Immediately clear all caches so the next request uses the new config
-  teamAreasCache = { data: null, team: null, ts: 0 };
-  areasCache = { data: null, ts: 0 };
-  iterationsCache = { data: null, ts: 0 };
-  workItemsCache = { data: null, key: null, ts: 0 };
-  swrIterations.clear(); swrWorkItems.clear(); swrTeamAreas.clear(); swrAreas.clear(); swrGit.clear(); swrGitHub.clear(); swrPlugins.clear();
+  // Core caches that survive in core. Plugin caches (ADO, GH) are invalidated
+  // via the 'config-changed' broadcast the next step already emits.
+  swrGit.clear(); swrPlugins.clear();
   // Regenerate AI instructions (incognito, orchestration, etc. may have changed)
   try { writePluginHints(); } catch (_) {}
   json(res, { ok: true });
 }
 
-// Sensitive fields to strip from exports (PATs, API keys)
-const SENSITIVE_KEYS = ['AzureDevOpsPAT', 'GitHubPAT', 'WhisperKey', 'AiApiKeys'];
+// Sensitive fields to strip from exports (PATs, API keys).
+// Core owns only its own shell-level secrets; plugins contribute their own via
+// contributions.sensitiveKeys. This keeps core zero-coupled from ADO/GH/etc.
+const CORE_SENSITIVE_KEYS = ['WhisperKey', 'AiApiKeys'];
+function getSensitiveKeys() {
+  const keys = new Set(CORE_SENSITIVE_KEYS);
+  for (const p of (loadedPlugins || [])) {
+    const c = (p.contributions || {});
+    if (Array.isArray(c.sensitiveKeys)) for (const k of c.sensitiveKeys) if (typeof k === 'string') keys.add(k);
+  }
+  return [...keys];
+}
 
 function handleExportConfig(res) {
   const cfg = getConfig();
   // Strip machine-specific fields only (repos have local paths)
   const exportCfg = { ...cfg };
   delete exportCfg.Repos;
+  for (const key of getSensitiveKeys()) delete exportCfg[key];
   exportCfg._exportedAt = new Date().toISOString();
   exportCfg._exportedFrom = 'DevOps Pilot';
   // Collect plugin configs
@@ -753,9 +817,13 @@ function handleExportConfig(res) {
     for (const dir of dirs) {
       if (dir === 'sdk') continue;
       const cfgFile = path.join(pluginsDir, dir, 'config.json');
-      if (fs.existsSync(cfgFile)) {
-        try { pluginConfigs[dir] = JSON.parse(fs.readFileSync(cfgFile, 'utf8')); } catch (_) {}
-      }
+        if (fs.existsSync(cfgFile)) {
+          try {
+            const pcfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
+            for (const key of getSensitiveKeys()) delete pcfg[key];
+            pluginConfigs[dir] = pcfg;
+          } catch (_) {}
+        }
     }
   } catch (_) {}
   if (Object.keys(pluginConfigs).length) exportCfg._pluginConfigs = pluginConfigs;
@@ -764,6 +832,42 @@ function handleExportConfig(res) {
     if (fs.existsSync(themesPath)) {
       exportCfg._themes = JSON.parse(fs.readFileSync(themesPath, 'utf8'));
     }
+  } catch (_) {}
+  // Include notes (markdown bodies keyed by filename without extension)
+  try {
+    const notesRoot = path.join(repoRoot, 'notes');
+    if (fs.existsSync(notesRoot)) {
+      const map = {};
+      for (const f of fs.readdirSync(notesRoot)) {
+        if (!f.endsWith('.md')) continue;
+        try { map[f.replace(/\.md$/, '')] = fs.readFileSync(path.join(notesRoot, f), 'utf8'); } catch (_) {}
+      }
+      if (Object.keys(map).length) exportCfg._notes = map;
+    }
+  } catch (_) {}
+  // Include user-authored recipes (from both project-local and ~/.devops-pilot/recipes).
+  // We bundle whatever is on disk; on import we only write non-shipped names to avoid overwriting the built-ins.
+  try {
+    const recipeMap = {};
+    const dirs = [path.join(repoRoot, 'recipes'), path.join(require('os').homedir(), '.devops-pilot', 'recipes')];
+    for (const d of dirs) {
+      if (!fs.existsSync(d)) continue;
+      for (const f of fs.readdirSync(d)) {
+        if (!f.endsWith('.md')) continue;
+        try { recipeMap[f.replace(/\.md$/, '')] = fs.readFileSync(path.join(d, f), 'utf8'); } catch (_) {}
+      }
+    }
+    if (Object.keys(recipeMap).length) exportCfg._recipes = recipeMap;
+  } catch (_) {}
+  // Include learnings
+  try {
+    const lp = path.join(learningsDataDir, 'learnings.json');
+    if (fs.existsSync(lp)) exportCfg._learnings = JSON.parse(fs.readFileSync(lp, 'utf8'));
+  } catch (_) {}
+  // Include display preferences (sidebar widths, collapsed state)
+  try {
+    const dp = path.join(repoRoot, 'config', 'display-pref.json');
+    if (fs.existsSync(dp)) exportCfg._displayPref = JSON.parse(fs.readFileSync(dp, 'utf8'));
   } catch (_) {}
   res.writeHead(200, {
     'Content-Type': 'application/json',
@@ -780,8 +884,7 @@ async function handleImportConfig(req, res) {
   // Remove export metadata and machine-specific fields
   delete incoming._exportedAt;
   delete incoming._exportedFrom;
-  delete incoming.Repos;  // Repos have local paths -- never import them
-  // Restore plugin configs
+  delete incoming.Repos;
   // Restore themes
   const importedThemes = incoming._themes;
   delete incoming._themes;
@@ -791,23 +894,79 @@ async function handleImportConfig(req, res) {
       fs.writeFileSync(themesPath, JSON.stringify(importedThemes, null, 2), 'utf8');
     } catch (_) {}
   }
-  // Restore plugin configs (and auto-install missing plugins from registry)
+  // Restore notes
+  const importedNotes = incoming._notes;
+  delete incoming._notes;
+  if (importedNotes && typeof importedNotes === 'object') {
+    try {
+      const notesRoot = path.join(repoRoot, 'notes');
+      fs.mkdirSync(notesRoot, { recursive: true });
+      for (const [name, body] of Object.entries(importedNotes)) {
+        const safe = String(name).replace(/[\\/:*?"<>|]/g, '_');
+        const dest = path.join(notesRoot, safe + '.md');
+        if (path.resolve(dest).startsWith(path.resolve(notesRoot))) {
+          try { fs.writeFileSync(dest, String(body || ''), 'utf8'); } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
+  // Restore user recipes into ~/.devops-pilot/recipes (never overwrite shipped defaults).
+  const importedRecipes = incoming._recipes;
+  delete incoming._recipes;
+  if (importedRecipes && typeof importedRecipes === 'object') {
+    try {
+      const shippedDir = path.join(repoRoot, 'recipes');
+      const shipped = new Set();
+      if (fs.existsSync(shippedDir)) {
+        for (const f of fs.readdirSync(shippedDir)) {
+          if (f.endsWith('.md')) shipped.add(f.replace(/\.md$/, ''));
+        }
+      }
+      const userDir = path.join(require('os').homedir(), '.devops-pilot', 'recipes');
+      fs.mkdirSync(userDir, { recursive: true });
+      for (const [name, body] of Object.entries(importedRecipes)) {
+        if (shipped.has(name)) continue;
+        const safe = String(name).replace(/[\\/:*?"<>|]/g, '_');
+        const dest = path.join(userDir, safe + '.md');
+        if (path.resolve(dest).startsWith(path.resolve(userDir))) {
+          try { fs.writeFileSync(dest, String(body || ''), 'utf8'); } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
+  // Restore learnings
+  const importedLearnings = incoming._learnings;
+  delete incoming._learnings;
+  if (importedLearnings && typeof importedLearnings === 'object') {
+    try {
+      fs.mkdirSync(learningsDataDir, { recursive: true });
+      fs.writeFileSync(path.join(learningsDataDir, 'learnings.json'), JSON.stringify(importedLearnings, null, 2), 'utf8');
+    } catch (_) {}
+  }
+  // Restore display preferences
+  const importedDisplayPref = incoming._displayPref;
+  delete incoming._displayPref;
+  if (importedDisplayPref && typeof importedDisplayPref === 'object') {
+    try {
+      const dp = path.join(repoRoot, 'config', 'display-pref.json');
+      fs.mkdirSync(path.dirname(dp), { recursive: true });
+      fs.writeFileSync(dp, JSON.stringify(importedDisplayPref, null, 2), 'utf8');
+    } catch (_) {}
+  }
+  // Restore plugin configs (and auto-install missing plugins from registry).
   const pluginConfigs = incoming._pluginConfigs;
   delete incoming._pluginConfigs;
   const installedPlugins = [];
   if (pluginConfigs && typeof pluginConfigs === 'object') {
-    // Find which plugins need installing
     const missingPluginIds = [];
     for (const pluginId of Object.keys(pluginConfigs)) {
       const pluginDir = path.join(pluginsDir, pluginId);
       if (fs.existsSync(pluginDir)) {
-        // Already installed, just write config
         try { fs.writeFileSync(path.join(pluginDir, 'config.json'), JSON.stringify(pluginConfigs[pluginId], null, 2), 'utf8'); } catch (_) {}
       } else {
         missingPluginIds.push(pluginId);
       }
     }
-    // Auto-install missing plugins from registry
     if (missingPluginIds.length > 0) {
       try {
         const https = require('https');
@@ -829,45 +988,75 @@ async function handleImportConfig(req, res) {
             try {
               execSync('git clone "' + entry.repo + '.git" "' + destDir + '"', { encoding: 'utf8', timeout: 60000, stdio: ['pipe', 'pipe', 'pipe'] });
               if (fs.existsSync(path.join(destDir, 'plugin.json'))) {
-                // Write the config from the export
                 fs.writeFileSync(path.join(destDir, 'config.json'), JSON.stringify(pluginConfigs[pluginId], null, 2), 'utf8');
                 installedPlugins.push(pluginId);
               } else {
-                // Not a valid plugin, clean up
                 fs.rmSync(destDir, { recursive: true, force: true });
               }
             } catch (_) {
-              // Clone failed, skip this plugin
               try { fs.rmSync(destDir, { recursive: true, force: true }); } catch (_) {}
             }
           }
         }
-      } catch (_) {
-        // Registry fetch failed, skip auto-install
-      }
+      } catch (_) {}
     }
-    if (installedPlugins.length > 0) writePluginHints();
+    if (installedPlugins.length > 0 && typeof writePluginHints === 'function') writePluginHints();
   }
-  // Merge with existing config (preserve existing PATs if not provided)
-  let existing = {};
-  try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch (_) {}
-  const config = { ...existing, ...incoming };
-  // Restore sensitive fields from existing if not in import
-  for (const key of SENSITIVE_KEYS) {
-    if (!incoming[key] && existing[key]) config[key] = existing[key];
+  // Merge with existing config; preserve sensitive values (PATs, API keys) when
+  // the import doesn't include them. The list comes from core + every plugin's
+  // contributions.sensitiveKeys, so third-party plugins automatically opt in.
+  const existing = getConfig();
+  const merged = { ...existing, ...incoming };
+  for (const key of getSensitiveKeys()) {
+    if (!incoming[key] && existing[key]) merged[key] = existing[key];
   }
+  const config = persistPluginConfigKeys(merged);
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   atomicWriteSync(configPath, JSON.stringify(config, null, 2));
-  teamAreasCache = { data: null, team: null, ts: 0 };
-  areasCache = { data: null, ts: 0 };
-  iterationsCache = { data: null, ts: 0 };
-  workItemsCache = { data: null, key: null, ts: 0 };
-  swrIterations.clear(); swrWorkItems.clear(); swrTeamAreas.clear(); swrAreas.clear(); swrGit.clear(); swrGitHub.clear(); swrPlugins.clear();
+  swrGit.clear(); swrPlugins.clear();
+  broadcast({ type: 'config-changed' });
   const result = { ok: true };
   if (installedPlugins.length > 0) {
     result.pluginsInstalled = installedPlugins;
     result.restartRequired = true;
   }
+  json(res, result);
+}
+
+// Wipe everything a clean install would not have. Bundled plugins that ship with the app stay,
+// third-party plugin dirs are deleted. Caller must set { confirm: true } in the body.
+async function handleFactoryReset(req, res) {
+  const body = await readBody(req).catch(() => ({}));
+  if (!body || body.confirm !== true) return json(res, { error: 'confirm:true required' }, 400);
+  const rmIfExists = (p) => { try { if (fs.existsSync(p)) fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} };
+  // 1. Core state
+  rmIfExists(configPath);
+  rmIfExists(themesPath);
+  rmIfExists(path.join(repoRoot, 'config', 'display-pref.json'));
+  // 2. Notes + user recipes + learnings
+  rmIfExists(path.join(repoRoot, 'notes'));
+  rmIfExists(path.join(require('os').homedir(), '.devops-pilot', 'recipes'));
+  rmIfExists(path.join(learningsDataDir, 'learnings.json'));
+  // 3. Third-party plugins (keep only the SDK docs that ship from the main repo).
+  const BUNDLED_PLUGIN_IDS = new Set(['sdk']);
+  try {
+    for (const d of fs.readdirSync(pluginsDir)) {
+      if (BUNDLED_PLUGIN_IDS.has(d)) continue;
+      rmIfExists(path.join(pluginsDir, d));
+    }
+  } catch (_) {}
+  // 4. Also wipe each remaining plugin's config.json so bundled plugins come back blank
+  try {
+    for (const d of fs.readdirSync(pluginsDir)) {
+      if (d === 'sdk') continue;
+      rmIfExists(path.join(pluginsDir, d, 'config.json'));
+    }
+  } catch (_) {}
+  // 5. Reset in-memory caches so subsequent requests don't serve stale values
+  // Core caches that survive in core. Plugin caches (ADO, GH) are invalidated
+  // via the 'config-changed' broadcast the next step already emits.
+  swrGit.clear(); swrPlugins.clear();
+  const result = { ok: true };
   json(res, result);
 }
 
@@ -883,10 +1072,7 @@ try {
       if (Date.now() - _configSelfWriteAt < 1500) return;
       if (configWatchDebounce) clearTimeout(configWatchDebounce);
       configWatchDebounce = setTimeout(() => {
-        teamAreasCache = { data: null, team: null, ts: 0 };
-        areasCache = { data: null, ts: 0 };
-        iterationsCache = { data: null, ts: 0 };
-        workItemsCache = { data: null, key: null, ts: 0 };
+  swrGit.clear();
         broadcast({ type: 'config-changed' });
       }, 500);
     }
@@ -910,7 +1096,9 @@ function handlePrerequisites(res) {
   try {
     const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     result.config.exists = true;
-    result.config.complete = !!(cfg.AzureDevOpsOrg && cfg.AzureDevOpsProject && cfg.AzureDevOpsPAT);
+    // "Complete" no longer means ADO is configured -- the shell ships plugin-first, so
+    // a DefaultUser + at least one configured repo is enough to be a usable install.
+    result.config.complete = !!(cfg.DefaultUser && cfg.Repos && Object.keys(cfg.Repos).length > 0);
   } catch (_) {}
 
   const anyCliInstalled = Object.values(result.cliTools).some(c => c.installed);
@@ -1050,743 +1238,14 @@ function handlePwshInstall(res) {
   });
 }
 
-// ── Azure DevOps API Helper ─────────────────────────────────────────────────
-function adoRequest(method, apiPath, body, contentType, _skipTeam) {
-  return new Promise((resolve, reject) => {
-    const cfg = getConfig();
-    const org = cfg.AzureDevOpsOrg;
-    const project = cfg.AzureDevOpsProject;
-    const pat = cfg.AzureDevOpsPAT;
-    const team = cfg.DefaultTeam;
-    if (!org || !project || !pat) {
-      return reject(new Error('Azure DevOps not configured. Set Org, Project, and PAT in Settings.'));
-    }
-
-    // Only /work/ endpoints are team-scoped in ADO. /wit/ endpoints are project-scoped.
-    const useTeam = !_skipTeam && team && apiPath.startsWith('/work/');
-    const teamSegment = useTeam ? `/${encodeURIComponent(team)}` : '';
-    const url = new URL(`https://dev.azure.com/${encodeURIComponent(org)}/${encodeURIComponent(project)}${teamSegment}/_apis${apiPath}`);
-    const payload = body ? JSON.stringify(body) : null;
-    const options = {
-      hostname: url.hostname,
-      path: url.pathname + url.search,
-      method,
-      headers: {
-        'Authorization': 'Basic ' + Buffer.from(':' + pat).toString('base64'),
-        'Content-Type': contentType || 'application/json',
-        'Accept': 'application/json',
-      },
-    };
-    if (payload) options.headers['Content-Length'] = Buffer.byteLength(payload);
-
-    const req = https.request(options, (resp) => {
-      let data = '';
-      resp.on('data', chunk => { data += chunk; });
-      resp.on('end', () => {
-        if (resp.statusCode >= 200 && resp.statusCode < 300) {
-          try { resolve(JSON.parse(data)); } catch (_) { resolve(data); }
-        } else if (resp.statusCode === 404 && useTeam && !_skipTeam) {
-          // Team not found in this project — retry without team segment
-          adoRequest(method, apiPath, body, contentType, true).then(resolve, reject);
-        } else {
-          const msg = resp.statusCode === 401
-            ? 'Authentication failed — PAT may be expired or invalid'
-            : `Azure DevOps API error (${resp.statusCode}): ${data.slice(0, 200)}`;
-          reject(new Error(msg));
-        }
-      });
-    });
-    req.on('error', reject);
-    if (payload) req.write(payload);
-    req.end();
-  });
-}
-
-// ADO request to org-level APIs (no project in path)
-function adoOrgRequest(method, apiPath) {
-  return new Promise((resolve, reject) => {
-    const cfg = getConfig();
-    const org = cfg.AzureDevOpsOrg;
-    const pat = cfg.AzureDevOpsPAT;
-    if (!org || !pat) return reject(new Error('Azure DevOps not configured.'));
-
-    const url = new URL(`https://dev.azure.com/${encodeURIComponent(org)}/_apis${apiPath}`);
-    const options = {
-      hostname: url.hostname,
-      path: url.pathname + url.search,
-      method,
-      headers: {
-        'Authorization': 'Basic ' + Buffer.from(':' + pat).toString('base64'),
-        'Accept': 'application/json',
-      },
-    };
-
-    const req = https.request(options, (resp) => {
-      let data = '';
-      resp.on('data', chunk => { data += chunk; });
-      resp.on('end', () => {
-        if (resp.statusCode >= 200 && resp.statusCode < 300) {
-          try { resolve(JSON.parse(data)); } catch (_) { resolve(data); }
-        } else {
-          reject(new Error(`ADO org API error (${resp.statusCode})`));
-        }
-      });
-    });
-    req.on('error', reject);
-    req.end();
-  });
-}
-
-// ── GitHub API Helper ────────────────────────────────────────────────────────
-function parseGitHubRemote(repoPath) {
-  const url = gitExec(repoPath, 'remote get-url origin');
-  const m = url.match(/github\.com[:/]([^/]+)\/([^/.]+)/);
-  if (!m) return null;
-  return { owner: m[1], repo: m[2] };
-}
-
-function ghRequest(method, apiPath, body, accept) {
-  return new Promise((resolve, reject) => {
-    const cfg = getConfig();
-    const pat = cfg.GitHubPAT;
-    if (!pat) return reject(new Error('GitHub PAT not configured. Set it in Settings.'));
-    const payload = body ? JSON.stringify(body) : null;
-    const options = {
-      hostname: 'api.github.com',
-      path: apiPath,
-      method,
-      headers: {
-        'Authorization': `token ${pat}`,
-        'Accept': accept || 'application/vnd.github+json',
-        'User-Agent': 'DevOps-Pilot',
-        'Content-Type': 'application/json',
-      },
-    };
-    if (payload) options.headers['Content-Length'] = Buffer.byteLength(payload);
-    const req = https.request(options, (resp) => {
-      let data = '';
-      resp.on('data', chunk => { data += chunk; });
-      resp.on('end', () => {
-        if (resp.statusCode >= 200 && resp.statusCode < 300) {
-          try { resolve(JSON.parse(data)); } catch (_) { resolve(data); }
-        } else {
-          const msg = resp.statusCode === 401
-            ? 'GitHub auth failed — PAT may be expired or invalid'
-            : `GitHub API error (${resp.statusCode}): ${data.slice(0, 300)}`;
-          reject(new Error(msg));
-        }
-      });
-    });
-    req.on('error', reject);
-    if (payload) req.write(payload);
-    req.end();
-  });
-}
-
-// ── SWR Caches (stale-while-revalidate) ─────────────────────────────────────
-// Legacy cache vars kept for backward compatibility with cache invalidation code.
-// New SWR caches provide better UX: return stale data instantly, refresh in background.
-let iterationsCache = { data: null, ts: 0 };
-let workItemsCache = { data: null, key: null, ts: 0 };
-let teamAreasCache = { data: null, team: null, ts: 0 };
-let areasCache = { data: null, ts: 0 };
-const ITER_CACHE_TTL = 300000;
-const WI_CACHE_TTL = 30000;
-const TEAM_AREAS_TTL = 600000; // 10 min
-const AREAS_CACHE_TTL = 600000; // 10 min
-
-const swrIterations = new SWRCache({ staleTTL: 60000, maxAge: 300000, onRevalidate: (key, data) => broadcast({ type: 'cache-updated', cache: 'iterations', data }) });
-const swrWorkItems = new SWRCache({ staleTTL: 15000, maxAge: 60000, onRevalidate: (key, data) => broadcast({ type: 'cache-updated', cache: 'workitems', key, data }) });
-const swrTeamAreas = new SWRCache({ staleTTL: 300000, maxAge: 600000 });
-const swrAreas = new SWRCache({ staleTTL: 300000, maxAge: 600000 });
-const swrGit = new SWRCache({ staleTTL: 10000, maxAge: 60000 });        // git branches/status (10s fresh, 60s max)
-const swrGitHub = new SWRCache({ staleTTL: 30000, maxAge: 120000 });    // github PRs (30s fresh, 2min max)
-const swrPlugins = new SWRCache({ staleTTL: 30000, maxAge: 300000 });   // general purpose for plugins
-
-// ── Busy Guards ─────────────────────────────────────────────────────────────
-const guard = new BusyGuard();
-
-// ── Get team area paths (SWR cached) ────────────────────────────────────────
-async function getTeamAreaPaths() {
-  const cfg = getConfig();
-  const team = cfg.DefaultTeam;
-  if (!team) return null;
-
-  try {
-    return await swrTeamAreas.get('teamAreas:' + team, async () => {
-      const data = await adoRequest('GET', `/work/teamsettings/teamfieldvalues?api-version=7.1`);
-      const areas = (data.values || []).map(v => v.value).filter(Boolean);
-      teamAreasCache = { data: areas, team, ts: Date.now() };
-      return areas;
-    });
-  } catch (_) {
-    return null;
-  }
-}
-
-// ── Iterations (SWR cached -- returns stale data instantly, refreshes in background) ──
-async function fetchIterations() {
-  const data = await adoRequest('GET', '/work/teamsettings/iterations?api-version=7.1');
-  const now = new Date();
-  const iterations = (data.value || []).map(it => {
-    const startDate = it.attributes?.startDate ? new Date(it.attributes.startDate) : null;
-    const finishDate = it.attributes?.finishDate ? new Date(it.attributes.finishDate) : null;
-    const isCurrent = startDate && finishDate && now >= startDate && now <= finishDate;
-    return {
-      id: it.id, name: it.name, path: it.path,
-      startDate: it.attributes?.startDate || null,
-      finishDate: it.attributes?.finishDate || null,
-      timeFrame: it.attributes?.timeFrame || null,
-      isCurrent,
-    };
-  });
-  iterations.sort((a, b) => {
-    if (a.isCurrent && !b.isCurrent) return -1;
-    if (!a.isCurrent && b.isCurrent) return 1;
-    const da = a.startDate ? new Date(a.startDate) : new Date(0);
-    const db = b.startDate ? new Date(b.startDate) : new Date(0);
-    return db - da;
-  });
-  // Also update legacy cache for backward compat
-  iterationsCache = { data: iterations, ts: Date.now() };
-  return iterations;
-}
-
-async function handleIterations(res, url) {
-  try {
-    const forceRefresh = url && url.searchParams.get('refresh') === '1';
-    const iterations = await swrIterations.get('iterations', fetchIterations, { forceRefresh });
-    json(res, iterations);
-  } catch (e) {
-    json(res, { error: e.message }, e.message.includes('not configured') ? 400 : 502);
-  }
-}
-
-// ── Work Items List ─────────────────────────────────────────────────────────
-async function handleWorkItems(url, res) {
-  const refresh = url.searchParams.get('refresh') === '1';
-  const iterationPath = url.searchParams.get('iteration') || '';
-  const state = url.searchParams.get('state') || '';
-  const type = url.searchParams.get('type') || '';
-  const assignedTo = url.searchParams.get('assignedTo') || '';
-  const areaPath = url.searchParams.get('area') || '';
-  const closedTopParam = url.searchParams.get('closedTop');
-  const closedTop = Math.min(parseInt(closedTopParam || '10', 10) || 10, 200);
-  // When closedTop is explicitly passed (by the dashboard), fetch closed items separately
-  // When not passed (by scripts), use legacy behavior (exclude closed entirely)
-  const noClosedFilter = !iterationPath && !state;
-  const fetchClosedSeparately = noClosedFilter && closedTopParam !== null;
-  const cacheKey = `${iterationPath}|${state}|${type}|${assignedTo}|${areaPath}|ct${closedTopParam !== null ? closedTop : '-'}`;
-
-  try {
-    const result = await swrWorkItems.get('wi:' + cacheKey, () => fetchWorkItemsData(iterationPath, state, type, assignedTo, areaPath, closedTop, fetchClosedSeparately, noClosedFilter, cacheKey), { forceRefresh: refresh });
-    return json(res, result);
-  } catch (e) {
-    json(res, { error: e.message }, e.message.includes('not configured') ? 400 : 502);
-  }
-}
-
-async function fetchWorkItemsData(iterationPath, state, type, assignedTo, areaPath, closedTop, fetchClosedSeparately, noClosedFilter, cacheKey) {
-    // Build area path clause (reused for both queries)
-    // If an explicit area is selected, use it; otherwise fall back to team area paths
-    let areaClause = '';
-    if (areaPath) {
-      areaClause = ` AND [System.AreaPath] UNDER '${areaPath}'`;
-    } else {
-      const teamAreas = await getTeamAreaPaths();
-      if (teamAreas && teamAreas.length > 0) {
-        const areaConditions = teamAreas.map(a => `[System.AreaPath] UNDER '${a}'`).join(' OR ');
-        areaClause = ` AND (${areaConditions})`;
-      }
-    }
-
-    let wiqlQuery = `SELECT [System.Id] FROM WorkItems WHERE [System.State] NOT IN ('Removed')`;
-    // Without an iteration filter, exclude Closed to avoid 20k+ results
-    if (noClosedFilter) wiqlQuery += ` AND [System.State] NOT IN ('Closed', 'Done')`;
-    wiqlQuery += areaClause;
-    if (iterationPath) wiqlQuery += ` AND [System.IterationPath] = '${iterationPath}'`;
-    if (state)         wiqlQuery += ` AND [System.State] = '${state}'`;
-    if (type)          wiqlQuery += ` AND [System.WorkItemType] = '${type}'`;
-    if (assignedTo)    wiqlQuery += ` AND [System.AssignedTo] = '${assignedTo}'`;
-    wiqlQuery += ` ORDER BY [System.ChangedDate] DESC`;
-
-    // Run main query (and closed query in parallel when needed)
-    const mainPromise = adoRequest('POST', '/wit/wiql?$top=200&api-version=7.1', { query: wiqlQuery });
-
-    let closedPromise = null;
-    if (fetchClosedSeparately) {
-      // Fetch closed IDs with a cap -- only need closedTop items + 1 to know if there are more
-      let closedQuery = `SELECT [System.Id] FROM WorkItems WHERE [System.State] IN ('Closed', 'Done') AND [System.State] NOT IN ('Removed')`;
-      closedQuery += areaClause;
-      if (type)       closedQuery += ` AND [System.WorkItemType] = '${type}'`;
-      if (assignedTo) closedQuery += ` AND [System.AssignedTo] = '${assignedTo}'`;
-      closedQuery += ` ORDER BY [System.ChangedDate] DESC`;
-      // Cap the WIQL query to avoid fetching 20k+ IDs on large projects.
-      // Use max(closedTop, 200) + 1 so we get a useful count for the "X of Y" label
-      // while still knowing if there are more beyond the cap.
-      const closedCap = Math.max(closedTop, 200) + 1;
-      closedPromise = adoRequest('POST', `/wit/wiql?$top=${closedCap}&api-version=7.1`, { query: closedQuery });
-    }
-
-    const [wiql, closedWiql] = await Promise.all([mainPromise, closedPromise]);
-
-    const mainIds = (wiql.workItems || []).map(w => w.id).slice(0, 200);
-    let closedIds = [];
-    let hasMoreClosed = false;
-    let totalClosed = 0;
-    let totalClosedCapped = false;
-
-    if (closedWiql) {
-      const returnedClosedIds = (closedWiql.workItems || []).map(w => w.id);
-      const closedCap = Math.max(closedTop, 200);
-      // If ADO returned more than closedCap, the true total is unknown (capped)
-      totalClosedCapped = returnedClosedIds.length > closedCap;
-      hasMoreClosed = returnedClosedIds.length > closedTop;
-      closedIds = returnedClosedIds.slice(0, closedTop);
-      totalClosed = totalClosedCapped ? closedCap : returnedClosedIds.length;
-    }
-
-    const allIds = [...new Set([...mainIds, ...closedIds])];
-
-    if (allIds.length === 0) {
-      const emptyResult = fetchClosedSeparately ? { items: [], hasMoreClosed: false, totalClosed: 0, totalClosedCapped: false } : [];
-      workItemsCache = { data: emptyResult, key: cacheKey, ts: Date.now() };
-      return json(res, emptyResult);
-    }
-
-    // Fetch details in batches of 200 (API limit)
-    const batches = [];
-    for (let i = 0; i < allIds.length; i += 200) {
-      batches.push(allIds.slice(i, i + 200));
-    }
-    const detailResults = await Promise.all(batches.map(batch =>
-      adoRequest('GET',
-        `/wit/workitems?ids=${batch.join(',')}&fields=System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.Tags,System.CreatedDate,System.ChangedDate,Microsoft.VSTS.Common.Priority,System.IterationPath,Microsoft.VSTS.Scheduling.StoryPoints,Microsoft.VSTS.Scheduling.Effort,System.Parent&api-version=7.1`
-      )
-    ));
-
-    const items = detailResults.flatMap(d => (d.value || []).map(wi => {
-      const f = wi.fields;
-      return {
-        id: wi.id,
-        title: f['System.Title'],
-        state: f['System.State'],
-        type: f['System.WorkItemType'],
-        assignedTo: f['System.AssignedTo'] ? f['System.AssignedTo'].displayName : '',
-        tags: f['System.Tags'] || '',
-        changedDate: f['System.ChangedDate'],
-        priority: f['Microsoft.VSTS.Common.Priority'] || 0,
-        iterationPath: f['System.IterationPath'] || '',
-        storyPoints: f['Microsoft.VSTS.Scheduling.StoryPoints'] || f['Microsoft.VSTS.Scheduling.Effort'] || '',
-        createdDate: f['System.CreatedDate'] || '',
-        parentId: f['System.Parent'] || null,
-      };
-    }));
-
-    // When excluding closed (no iteration/state filter), return wrapped format with pagination info
-    // Otherwise return flat array for backward compat with scripts
-    const result = fetchClosedSeparately ? { items, hasMoreClosed, totalClosed, totalClosedCapped } : items;
-    workItemsCache = { data: result, key: cacheKey, ts: Date.now() };
-    return result;
-}
-
-// ── Work Item Detail ────────────────────────────────────────────────────────
-async function handleWorkItemDetail(id, res) {
-  try {
-    const cfg = getConfig();
-    const org = cfg.AzureDevOpsOrg;
-    const project = cfg.AzureDevOpsProject;
-
-    const [wi, commentsData] = await Promise.all([
-      adoRequest('GET', `/wit/workitems/${id}?$expand=all&api-version=7.1`),
-      adoRequest('GET', `/wit/workitems/${id}/comments?api-version=7.1-preview.4`).catch(() => ({ comments: [] })),
-    ]);
-
-    const f = wi.fields;
-
-    const attachments = [];
-    const linkedItems = [];
-    (wi.relations || []).forEach(rel => {
-      if (rel.rel === 'AttachedFile') {
-        attachments.push({
-          name: rel.attributes?.name || 'attachment',
-          url: rel.url,
-          comment: rel.attributes?.comment || '',
-        });
-      } else {
-        const idMatch = rel.url?.match(/workItems\/(\d+)/i);
-        linkedItems.push({
-          rel: rel.rel,
-          title: rel.attributes?.name || '',
-          comment: rel.attributes?.comment || '',
-          id: idMatch ? parseInt(idMatch[1]) : null,
-          url: rel.url,
-        });
-      }
-    });
-
-    const comments = (commentsData.comments || []).map(c => ({
-      id: c.id,
-      text: proxyHtmlImages(c.text || ''),
-      author: c.createdBy ? c.createdBy.displayName : '',
-      date: c.createdDate || '',
-    }));
-
-    json(res, {
-      id: wi.id,
-      title: f['System.Title'],
-      state: f['System.State'],
-      type: f['System.WorkItemType'],
-      assignedTo: f['System.AssignedTo'] ? f['System.AssignedTo'].displayName : '',
-      createdBy: f['System.CreatedBy'] ? f['System.CreatedBy'].displayName : '',
-      tags: f['System.Tags'] || '',
-      createdDate: f['System.CreatedDate'] || '',
-      changedDate: f['System.ChangedDate'],
-      priority: f['Microsoft.VSTS.Common.Priority'] || 0,
-      severity: f['Microsoft.VSTS.Common.Severity'] || '',
-      storyPoints: f['Microsoft.VSTS.Scheduling.StoryPoints'] || '',
-      effort: f['Microsoft.VSTS.Scheduling.Effort'] || '',
-      reason: f['System.Reason'] || '',
-      description: proxyHtmlImages(f['System.Description'] || ''),
-      acceptanceCriteria: proxyHtmlImages(f['Microsoft.VSTS.Common.AcceptanceCriteria'] || ''),
-      reproSteps: proxyHtmlImages(f['Microsoft.VSTS.TCM.ReproSteps'] || ''),
-      areaPath: f['System.AreaPath'] || '',
-      iterationPath: f['System.IterationPath'] || '',
-      attachments,
-      linkedItems,
-      comments,
-      webUrl: org && project ? `https://dev.azure.com/${org}/${project}/_workitems/edit/${wi.id}` : '',
-    });
-  } catch (e) {
-    json(res, { error: e.message }, e.message.includes('not configured') ? 400 : 502);
-  }
-}
-
-// ── Update Work Item (with busy guard) ──────────────────────────────────────
-async function handleUpdateWorkItem(id, req, res) {
-  try {
-    await guard.run(`workitem:${id}`, `Updating work item ${id}`, async () => {
-      const body = await readBody(req);
-      const patchDoc = [];
-
-      const fieldMap = {
-        title: '/fields/System.Title',
-        description: '/fields/System.Description',
-        state: '/fields/System.State',
-        assignedTo: '/fields/System.AssignedTo',
-        priority: '/fields/Microsoft.VSTS.Common.Priority',
-        tags: '/fields/System.Tags',
-        iterationPath: '/fields/System.IterationPath',
-        areaPath: '/fields/System.AreaPath',
-        storyPoints: '/fields/Microsoft.VSTS.Scheduling.StoryPoints',
-        acceptanceCriteria: '/fields/Microsoft.VSTS.Common.AcceptanceCriteria',
-      };
-
-      const textFields = ['title', 'description', 'tags', 'acceptanceCriteria'];
-      for (const [key, path] of Object.entries(fieldMap)) {
-        if (body[key] !== undefined) {
-          const val = textFields.includes(key) ? sanitizeText(body[key]) : body[key];
-          patchDoc.push({ op: 'replace', path, value: val });
-        }
-      }
-
-      if (patchDoc.length === 0) return json(res, { error: 'No fields to update' }, 400);
-
-      const result = await adoRequest('PATCH', `/wit/workitems/${id}?api-version=7.1`, patchDoc, 'application/json-patch+json');
-      workItemsCache = { data: null, ts: 0 };
-      swrWorkItems.invalidate('wi:');
-      broadcast({ type: 'ui-action', action: 'refresh-workitems' });
-      json(res, { ok: true, id: result.id });
-    });
-  } catch (e) {
-    const status = e.message.includes('busy') ? 409 : 502;
-    json(res, { error: e.message }, status);
-  }
-}
-
-// ── Change Work Item State ──────────────────────────────────────────────────
-async function handleWorkItemState(id, req, res) {
-  try {
-    const { state } = await readBody(req);
-    if (!state) return json(res, { error: 'state is required' }, 400);
-
-    const result = await adoRequest('PATCH',
-      `/wit/workitems/${id}?api-version=7.1`,
-      [{ op: 'replace', path: '/fields/System.State', value: state }],
-      'application/json-patch+json'
-    );
-    workItemsCache = { data: null, ts: 0 };
-    swrWorkItems.invalidate('wi:');
-    broadcast({ type: 'ui-action', action: 'refresh-workitems' });
-    json(res, { ok: true, id: result.id, state: result.fields['System.State'] });
-  } catch (e) {
-    json(res, { error: e.message }, 502);
-  }
-}
-
-// ── Add Work Item Comment ──────────────────────────────────────────────────
-async function handleAddWorkItemComment(id, req, res) {
-  try {
-    const { text } = await readBody(req);
-    if (!text) return json(res, { error: 'text is required' }, 400);
-    const result = await adoRequest('POST',
-      `/wit/workitems/${id}/comments?api-version=7.1-preview.4`,
-      { text: sanitizeText(text) }
-    );
-    json(res, { ok: true, id: result.id, text: result.text, author: result.createdBy?.displayName || '', date: result.createdDate || '' });
-  } catch (e) {
-    json(res, { error: e.message }, 502);
-  }
-}
-
-// ── Create Work Item ────────────────────────────────────────────────────────
-// Strip non-ASCII control chars and replacement characters (U+FFFD, etc.)
-// Keeps standard printable ASCII, common Unicode letters/symbols, and whitespace.
-function sanitizeText(str) {
-  if (!str) return str;
-  return str
-    .replace(/[\u2014]/g, '--')                   // em dash -> --
-    .replace(/[\u2013]/g, '-')                    // en dash -> -
-    .replace(/[\u2018\u2019\u201A]/g, "'")        // smart single quotes -> '
-    .replace(/[\u201C\u201D\u201E]/g, '"')        // smart double quotes -> "
-    .replace(/[\u2026]/g, '...')                   // ellipsis -> ...
-    .replace(/[\u00A0]/g, ' ')                     // non-breaking space -> space
-    .replace(/[\uFFFD\uFFFE\uFFFF]/g, '')         // replacement/noncharacters
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '') // control chars (keep \t \n \r)
-    .replace(/[\uD800-\uDFFF]/g, '')              // lone surrogates
-    .trim();
-}
-
-async function handleCreateWorkItem(req, res) {
-  try {
-    const { type, title, description, priority, tags, assignedTo, iterationPath, storyPoints, acceptanceCriteria } = await readBody(req);
-    if (!type || !title) return json(res, { error: 'type and title are required' }, 400);
-
-    const patchDoc = [
-      { op: 'add', path: '/fields/System.Title', value: sanitizeText(title) },
-    ];
-    if (description)       patchDoc.push({ op: 'add', path: '/fields/System.Description', value: sanitizeText(description) });
-    if (priority)          patchDoc.push({ op: 'add', path: '/fields/Microsoft.VSTS.Common.Priority', value: parseInt(priority, 10) || 2 });
-    if (tags)              patchDoc.push({ op: 'add', path: '/fields/System.Tags', value: sanitizeText(tags) });
-    if (assignedTo)        patchDoc.push({ op: 'add', path: '/fields/System.AssignedTo', value: assignedTo });
-    if (iterationPath)     patchDoc.push({ op: 'add', path: '/fields/System.IterationPath', value: iterationPath });
-    if (storyPoints)       patchDoc.push({ op: 'add', path: '/fields/Microsoft.VSTS.Scheduling.StoryPoints', value: parseFloat(storyPoints) });
-    if (acceptanceCriteria) patchDoc.push({ op: 'add', path: '/fields/Microsoft.VSTS.Common.AcceptanceCriteria', value: sanitizeText(acceptanceCriteria) });
-
-    const wiType = encodeURIComponent(type);
-    const result = await adoRequest('POST', `/wit/workitems/$${wiType}?api-version=7.1`, patchDoc, 'application/json-patch+json');
-    workItemsCache = { data: null, ts: 0 };
-    broadcast({ type: 'ui-action', action: 'refresh-workitems' });
-
-    const cfg = getConfig();
-    json(res, {
-      ok: true,
-      id: result.id,
-      title: result.fields['System.Title'],
-      url: cfg.AzureDevOpsOrg && cfg.AzureDevOpsProject
-        ? `https://dev.azure.com/${cfg.AzureDevOpsOrg}/${cfg.AzureDevOpsProject}/_workitems/edit/${result.id}`
-        : null,
-    });
-  } catch (e) {
-    json(res, { error: e.message }, 502);
-  }
-}
-
-// ── Velocity (story points per completed sprint) ────────────────────────────
-async function handleVelocity(res) {
-  try {
-    // Get all iterations
-    const iterData = await adoRequest('GET', '/work/teamsettings/iterations?api-version=7.1');
-    const now = new Date();
-    // Only past (finished) sprints — last 10
-    const pastIterations = (iterData.value || [])
-      .filter(it => {
-        const finish = it.attributes?.finishDate ? new Date(it.attributes.finishDate) : null;
-        return finish && finish < now;
-      })
-      .sort((a, b) => new Date(a.attributes.startDate) - new Date(b.attributes.startDate))
-      .slice(-10);
-
-    const velocity = [];
-    for (const it of pastIterations) {
-      // Get completed items in this iteration
-      const wiql = await adoRequest('POST', '/wit/wiql?$top=200&api-version=7.1', {
-        query: `SELECT [System.Id] FROM WorkItems WHERE [System.IterationPath] = '${it.path}' AND [System.State] IN ('Closed', 'Resolved', 'Done') ORDER BY [System.Id]`,
-      });
-      const ids = (wiql.workItems || []).map(w => w.id).slice(0, 200);
-      let totalPoints = 0;
-      let completedCount = 0;
-
-      if (ids.length > 0) {
-        const details = await adoRequest('GET',
-          `/wit/workitems?ids=${ids.join(',')}&fields=Microsoft.VSTS.Scheduling.StoryPoints,Microsoft.VSTS.Scheduling.Effort&api-version=7.1`
-        );
-        for (const wi of (details.value || [])) {
-          const pts = wi.fields['Microsoft.VSTS.Scheduling.StoryPoints'] || wi.fields['Microsoft.VSTS.Scheduling.Effort'] || 0;
-          totalPoints += pts;
-          completedCount++;
-        }
-      }
-
-      velocity.push({
-        iteration: it.name,
-        path: it.path,
-        startDate: it.attributes?.startDate,
-        finishDate: it.attributes?.finishDate,
-        completedPoints: totalPoints,
-        completedCount,
-      });
-    }
-
-    const avg = velocity.length > 0
-      ? velocity.reduce((sum, v) => sum + v.completedPoints, 0) / velocity.length
-      : 0;
-
-    json(res, { velocity, averageVelocity: Math.round(avg * 10) / 10 });
-  } catch (e) {
-    json(res, { error: e.message }, 502);
-  }
-}
-
-// ── Burndown ────────────────────────────────────────────────────────────────
-async function handleBurndown(url, res) {
-  const iterationPath = url.searchParams.get('iteration') || '';
-  if (!iterationPath) return json(res, { error: 'iteration parameter required' }, 400);
-
-  try {
-    // Get iteration dates
-    const iterData = await adoRequest('GET', '/work/teamsettings/iterations?api-version=7.1');
-    const iteration = (iterData.value || []).find(it => it.path === iterationPath);
-    if (!iteration) return json(res, { error: 'Iteration not found' }, 404);
-
-    const startDate = new Date(iteration.attributes?.startDate);
-    const finishDate = new Date(iteration.attributes?.finishDate);
-
-    // Get all items in this iteration with points
-    const wiql = await adoRequest('POST', '/wit/wiql?$top=200&api-version=7.1', {
-      query: `SELECT [System.Id] FROM WorkItems WHERE [System.IterationPath] = '${iterationPath}' AND [System.State] NOT IN ('Removed') ORDER BY [System.Id]`,
-    });
-    const ids = (wiql.workItems || []).map(w => w.id).slice(0, 200);
-
-    let totalPoints = 0;
-    let completedPoints = 0;
-    let items = [];
-
-    if (ids.length > 0) {
-      const details = await adoRequest('GET',
-        `/wit/workitems?ids=${ids.join(',')}&fields=System.Id,System.Title,System.State,Microsoft.VSTS.Scheduling.StoryPoints,Microsoft.VSTS.Scheduling.Effort,System.ChangedDate&api-version=7.1`
-      );
-      items = (details.value || []).map(wi => {
-        const pts = wi.fields['Microsoft.VSTS.Scheduling.StoryPoints'] || wi.fields['Microsoft.VSTS.Scheduling.Effort'] || 0;
-        const state = wi.fields['System.State'];
-        const isDone = ['Closed', 'Resolved', 'Done'].includes(state);
-        totalPoints += pts;
-        if (isDone) completedPoints += pts;
-        return { id: wi.id, title: wi.fields['System.Title'], state, points: pts, isDone, changedDate: wi.fields['System.ChangedDate'] };
-      });
-    }
-
-    json(res, {
-      iteration: iteration.name,
-      startDate: iteration.attributes?.startDate,
-      finishDate: iteration.attributes?.finishDate,
-      totalPoints,
-      completedPoints,
-      remainingPoints: totalPoints - completedPoints,
-      totalItems: items.length,
-      completedItems: items.filter(i => i.isDone).length,
-      items,
-    });
-  } catch (e) {
-    json(res, { error: e.message }, 502);
-  }
-}
-
-// ── Team Members ────────────────────────────────────────────────────────────
-// List all teams in the project
-async function handleTeams(res) {
-  try {
-    const cfg = getConfig();
-    const project = cfg.AzureDevOpsProject;
-    const data = await adoOrgRequest('GET',
-      `/projects/${encodeURIComponent(project)}/teams?api-version=7.1`
-    );
-    const teams = (data.value || []).map(t => ({
-      id: t.id,
-      name: t.name,
-      description: t.description || '',
-    }));
-    json(res, teams);
-  } catch (e) {
-    json(res, { error: e.message }, 502);
-  }
-}
-
-// ── Area Paths ──────────────────────────────────────────────────────────────
-async function handleAreas(res) {
-  try {
-    const areas = await swrAreas.get('areas', async () => {
-      const data = await adoRequest('GET',
-        `/wit/classificationnodes/Areas?$depth=10&api-version=7.1`, null, null, true
-      );
-      const result = [];
-      function walk(node, prefix) {
-        const p = prefix ? `${prefix}\\${node.name}` : node.name;
-        result.push(p);
-        if (node.children) {
-          for (const child of node.children) walk(child, p);
-        }
-      }
-      if (data.name) walk(data, '');
-      areasCache = { data: result, ts: Date.now() };
-      return result;
-    });
-    json(res, areas);
-  } catch (e) {
-    json(res, { error: e.message }, 502);
-  }
-}
-
-// List members — collect from ALL teams to get full picture
-async function handleTeamMembers(res) {
-  try {
-    const cfg = getConfig();
-    const project = cfg.AzureDevOpsProject;
-
-    // Get all teams first
-    const teamsData = await adoOrgRequest('GET',
-      `/projects/${encodeURIComponent(project)}/teams?api-version=7.1`
-    );
-
-    // Fetch members from all teams in parallel
-    const memberMap = new Map();
-    const fetches = (teamsData.value || []).map(t =>
-      adoOrgRequest('GET',
-        `/projects/${encodeURIComponent(project)}/teams/${encodeURIComponent(t.name)}/members?api-version=7.1`
-      ).catch(() => ({ value: [] }))
-    );
-    const results = await Promise.all(fetches);
-
-    for (const data of results) {
-      for (const m of (data.value || [])) {
-        const id = m.identity?.id;
-        if (id && !memberMap.has(id)) {
-          memberMap.set(id, {
-            id,
-            displayName: m.identity?.displayName || '',
-            uniqueName: m.identity?.uniqueName || '',
-            imageUrl: m.identity?.imageUrl || '',
-          });
-        }
-      }
-    }
-
-    const members = [...memberMap.values()].sort((a, b) => a.displayName.localeCompare(b.displayName));
-    json(res, members);
-  } catch (e) {
-    json(res, { error: e.message }, 502);
-  }
-}
+// All Azure DevOps HTTP helpers and handlers moved to the azure-devops plugin
+// (dashboard/plugins/azure-devops/routes.js) as of plugin v0.4.0. This includes:
+//   adoRequest, adoOrgRequest, getTeamAreaPaths, proxyHtmlImages,
+//   SWR caches (swrIterations, swrWorkItems, swrTeamAreas, swrAreas),
+//   handleIterations, handleWorkItems (+ dynamic routes), handleWorkItemDetail,
+//   handleUpdateWorkItem, handleWorkItemState, handleAddWorkItemComment,
+//   handleCreateWorkItem, handleVelocity, handleBurndown, handleTeams,
+//   handleAreas, handleTeamMembers.
 
 // ── Repos Management ────────────────────────────────────────────────────────
 function handleGetRepos(res) {
@@ -1797,473 +1256,69 @@ function handleGetRepos(res) {
 async function handleSaveRepo(req, res) {
   const { name, path: repoPath } = await readBody(req);
   if (!name || !repoPath) return json(res, { error: 'name and path are required' }, 400);
-  const cfg = getConfig();
+  let cfg = {};
+  try { cfg = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {}; } catch (_) { cfg = {}; }
   cfg.Repos = cfg.Repos || {};
   cfg.Repos[name] = repoPath;
-  atomicWriteSync(configPath, JSON.stringify(cfg, null, 2));
+  atomicWriteSync(configPath, JSON.stringify(persistPluginConfigKeys(cfg), null, 2));
   broadcast({ type: 'config-changed' });
   json(res, { ok: true });
 }
 
-// ── Start Working on a Work Item ────────────────────────────────────────────
-async function handleStartWorking(req, res) {
-  try {
-    const { workItemId, repoName } = await readBody(req);
-    const cfg = getConfig();
-    const repoPath = cfg.Repos?.[repoName];
-    if (!repoPath) return json(res, { error: `Repo "${repoName}" not found in config` }, 400);
-    if (!fs.existsSync(repoPath)) return json(res, { error: `Path does not exist: ${repoPath}` }, 400);
-
-    // Fetch work item for branch name
-    const wi = await adoRequest('GET', `/wit/workitems/${workItemId}?fields=System.Title,System.WorkItemType,System.Description&api-version=7.1`);
-    const title = wi.fields['System.Title'] || 'work';
-    const description = (wi.fields['System.Description'] || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
-    const wiType = wi.fields['System.WorkItemType'] || 'feature';
-    const prefix = wiType.toLowerCase() === 'bug' ? 'bugfix' : 'feature';
-
-    // Use AI to generate a concise branch slug from the work item context.
-    // Pass the prompt via stdin (not argv) so titles/descriptions with quotes,
-    // commas, backticks, etc. don't break shell escaping and cause Claude to
-    // reply with a clarifying question instead of a slug.
-    const fallbackSlug = () => title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
-    const sanitizeSlug = (s) => String(s || '').trim().split('\n')[0].trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
-    const looksLikeQuestion = (s) => /\?|^(which|what|can|could|should|how|who|where|why)\b/i.test(String(s || '').trim());
-
-    let slug;
-    try {
-      const prompt = `Generate a short git branch slug (2 to 5 words, lowercase, hyphen-separated, no special chars) that clearly describes this work item. Reply with ONLY the slug, nothing else. Do not ask questions. Do not add quotes or commentary.\n\nTitle: ${title}\nType: ${wiType}${description ? `\nDescription: ${description}` : ''}`;
-      const result = spawnSync('claude', ['--print'], {
-        input: prompt,
-        encoding: 'utf8',
-        timeout: 20000,
-        windowsHide: true,
-        shell: true,
-      });
-      const raw = (result.stdout || '').trim();
-      if (result.status === 0 && raw && !looksLikeQuestion(raw)) {
-        slug = sanitizeSlug(raw);
-      }
-    } catch (_) { /* fall through to fallback */ }
-    if (!slug) slug = fallbackSlug();
-    const branchName = `${prefix}/AB#${workItemId}-${slug}`;
-
-    // Move work item to Active
-    try {
-      await adoRequest('PATCH',
-        `/wit/workitems/${workItemId}?api-version=7.1`,
-        [{ op: 'replace', path: '/fields/System.State', value: 'Active' }],
-        'application/json-patch+json'
-      );
-      workItemsCache = { data: null, ts: 0 };
-    } catch (_) { /* may already be active */ }
-
-    // Perform git operations server-side so they don't collide with the AI prompt in the terminal PTY.
-    const gitSteps = [];
-    try {
-      let baseBranch = 'main';
-      try {
-        gitExec(repoPath, 'checkout main');
-      } catch (_) {
-        baseBranch = 'master';
-        gitExec(repoPath, 'checkout master');
-      }
-      gitSteps.push(`checked out ${baseBranch}`);
-      try { gitExec(repoPath, 'fetch origin'); gitSteps.push('fetched origin'); } catch (e) { gitSteps.push(`fetch failed: ${e.message}`); }
-      try { gitExec(repoPath, 'pull'); gitSteps.push('pulled'); } catch (e) { gitSteps.push(`pull failed: ${e.message}`); }
-      gitExec(repoPath, `checkout -b ${branchName}`);
-      gitSteps.push(`created branch ${branchName}`);
-    } catch (e) {
-      return json(res, { error: `Git operation failed: ${e.message}`, steps: gitSteps }, 500);
-    }
-
-    json(res, { ok: true, branchName, repoPath, steps: gitSteps });
-  } catch (e) {
-    json(res, { error: e.message }, 500);
-  }
-}
-
-// ── Pull Request Creation (GitHub) ───────────────────────────────────────────
-async function handleCreatePullRequest(req, res) {
-  try {
-    const { repoName, title, description, sourceBranch, targetBranch, workItemId } = await readBody(req);
-    const cfg = getConfig();
-
-    if (!repoName) return json(res, { error: 'repoName is required' }, 400);
-    if (!title) return json(res, { error: 'title is required' }, 400);
-
-    // Resolve GitHub owner/repo from git remote
-    const gh = resolveGitHub(repoName);
-    if (gh.error) return json(res, gh, 400);
-
-    // Determine source branch — use provided or detect from local git
-    let source = sourceBranch;
-    if (!source) {
-      const repoPath = cfg.Repos?.[repoName];
-      if (repoPath) source = gitExec(repoPath, 'rev-parse --abbrev-ref HEAD');
-    }
-    if (!source) return json(res, { error: 'Could not determine source branch' }, 400);
-
-    const target = targetBranch || 'main';
-
-    // Build PR description — append AB# link if work item provided
-    let body = description || '';
-    if (workItemId) {
-      const adoUrl = `https://dev.azure.com/${cfg.AzureDevOpsOrg}/${encodeURIComponent(cfg.AzureDevOpsProject)}/_workitems/edit/${workItemId}`;
-      body += `${body ? '\n\n' : ''}AB#${workItemId} - [View in Azure DevOps](${adoUrl})`;
-    }
-
-    const pr = await ghRequest('POST', `/repos/${gh.owner}/${gh.repo}/pulls`, {
-      title: sanitizeText(title),
-      body: sanitizeText(body),
-      head: source,
-      base: target,
-    });
-
-    json(res, { ok: true, pullRequestId: pr.number, url: pr.html_url, title: pr.title });
-  } catch (e) {
-    json(res, { error: e.message }, 500);
-  }
-}
-
-// ── GitHub Pull Request Handlers ─────────────────────────────────────────────
-function resolveGitHub(repoName) {
-  const repoPath = getRepoPath(repoName);
-  if (!repoPath) return { error: 'Repo not found' };
-  const gh = parseGitHubRemote(repoPath);
-  if (!gh) return { error: 'Not a GitHub repository' };
-  return gh;
-}
-
-function handleGitHubRepoInfo(url, res) {
-  const gh = resolveGitHub(url.searchParams.get('repo'));
-  if (gh.error) return json(res, gh, 400);
-  json(res, gh);
-}
-
-async function handleGitHubPulls(url, res) {
-  try {
-    const gh = resolveGitHub(url.searchParams.get('repo'));
-    if (gh.error) return json(res, gh, 400);
-    const state = url.searchParams.get('state') || 'open';
-    const cacheKey = `pulls:${gh.owner}/${gh.repo}:${state}`;
-
-    const result = await swrGitHub.get(cacheKey, async () => {
-      const data = await ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls?state=${state}&per_page=30&sort=updated&direction=desc`);
-      const reviewResults = await Promise.all(data.map(pr =>
-        ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls/${pr.number}/reviews`).catch(() => [])
-      ));
-      const pulls = data.map((pr, i) => {
-        const reviews = reviewResults[i] || [];
-        const byUser = {};
-        for (const r of reviews) {
-          if (r.state && r.state !== 'PENDING' && r.state !== 'COMMENTED') byUser[r.user?.login] = r.state;
-        }
-        const reviewStates = Object.values(byUser);
-        const reviewStatus = reviewStates.includes('CHANGES_REQUESTED') ? 'changes_requested'
-          : reviewStates.includes('APPROVED') ? 'approved' : null;
-        return {
-          number: pr.number, title: pr.title, state: pr.state, draft: pr.draft,
-          author: pr.user?.login || '', authorAvatar: pr.user?.avatar_url || '',
-          createdAt: pr.created_at, updatedAt: pr.updated_at,
-          headRef: pr.head?.ref || '', baseRef: pr.base?.ref || '',
-          labels: (pr.labels || []).map(l => ({ name: l.name, color: l.color })),
-          reviewers: (pr.requested_reviewers || []).map(r => r.login),
-          additions: pr.additions, deletions: pr.deletions,
-          comments: (pr.comments || 0) + (pr.review_comments || 0),
-          reviewStatus,
-        };
-      });
-      return { pulls };
-    });
-    json(res, result);
-  } catch (e) { json(res, { error: e.message }, 500); }
-}
-
-async function handleGitHubPullDetail(url, res) {
-  try {
-    const gh = resolveGitHub(url.searchParams.get('repo'));
-    if (gh.error) return json(res, gh, 400);
-    const num = url.searchParams.get('number');
-    // Request with html media type to get body_html with signed image URLs
-    const [pr, reviews] = await Promise.all([
-      ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls/${num}`, null, 'application/vnd.github.html+json'),
-      ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls/${num}/reviews`).catch(() => []),
-    ]);
-    // Determine latest review state per reviewer
-    const byUser = {};
-    for (const r of reviews) {
-      if (r.state && r.state !== 'PENDING' && r.state !== 'COMMENTED') byUser[r.user?.login] = r.state;
-    }
-    const reviewStates = Object.values(byUser);
-    const reviewStatus = reviewStates.includes('CHANGES_REQUESTED') ? 'changes_requested'
-      : reviewStates.includes('APPROVED') ? 'approved' : null;
-    json(res, {
-      number: pr.number, title: pr.title, state: pr.state, draft: pr.draft,
-      body: pr.body || '', bodyHtml: pr.body_html || '',
-      mergeable: pr.mergeable, merged: pr.merged,
-      author: pr.user?.login || '', authorAvatar: pr.user?.avatar_url || '',
-      createdAt: pr.created_at, updatedAt: pr.updated_at,
-      headRef: pr.head?.ref || '', baseRef: pr.base?.ref || '',
-      additions: pr.additions, deletions: pr.deletions,
-      changedFiles: pr.changed_files,
-      labels: (pr.labels || []).map(l => ({ name: l.name, color: l.color })),
-      reviewers: (pr.requested_reviewers || []).map(r => r.login),
-      htmlUrl: pr.html_url || '',
-      reviewStatus,
-      comments: (pr.comments || 0) + (pr.review_comments || 0),
-    });
-  } catch (e) { json(res, { error: e.message }, 500); }
-}
-
-async function handleGitHubPullFiles(url, res) {
-  try {
-    const gh = resolveGitHub(url.searchParams.get('repo'));
-    if (gh.error) return json(res, gh, 400);
-    const num = url.searchParams.get('number');
-    const data = await ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls/${num}/files?per_page=100`);
-    const files = data.map(f => ({
-      filename: f.filename, status: f.status,
-      additions: f.additions, deletions: f.deletions,
-      patch: f.patch || null,
-    }));
-    json(res, { files });
-  } catch (e) { json(res, { error: e.message }, 500); }
-}
-
-async function handleGitHubPullComments(url, res) {
-  try {
-    const gh = resolveGitHub(url.searchParams.get('repo'));
-    if (gh.error) return json(res, gh, 400);
-    const num = url.searchParams.get('number');
-    const [issueComments, reviewComments] = await Promise.all([
-      ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/issues/${num}/comments?per_page=100`),
-      ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls/${num}/comments?per_page=100`),
-    ]);
-    const all = [
-      ...issueComments.map(c => ({ id: c.id, author: c.user?.login || '', avatar: c.user?.avatar_url || '', body: c.body, createdAt: c.created_at, type: 'comment' })),
-      ...reviewComments.map(c => ({ id: c.id, author: c.user?.login || '', avatar: c.user?.avatar_url || '', body: c.body, createdAt: c.created_at, type: 'review', path: c.path, line: c.line })),
-    ].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    json(res, { comments: all });
-  } catch (e) { json(res, { error: e.message }, 500); }
-}
-
-async function handleGitHubPullTimeline(url, res) {
-  try {
-    const gh = resolveGitHub(url.searchParams.get('repo'));
-    if (gh.error) return json(res, gh, 400);
-    const num = url.searchParams.get('number');
-    // Fetch timeline and review comments in parallel
-    const [data, reviewComments] = await Promise.all([
-      ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/issues/${num}/timeline?per_page=100`, null, 'application/vnd.github.html+json'),
-      ghRequest('GET', `/repos/${gh.owner}/${gh.repo}/pulls/${num}/comments?per_page=100`),
-    ]);
-    // Group review comments by pull_request_review_id
-    const reviewCommentsMap = {};
-    for (const c of reviewComments) {
-      const rid = c.pull_request_review_id;
-      if (!rid) continue;
-      if (!reviewCommentsMap[rid]) reviewCommentsMap[rid] = [];
-      reviewCommentsMap[rid].push({
-        id: c.id, author: c.user?.login || '', avatar: c.user?.avatar_url || '',
-        body: c.body || '', bodyHtml: c.body_html || '',
-        path: c.path || '', line: c.line || c.original_line || null,
-        createdAt: c.created_at || '',
-        diffHunk: c.diff_hunk || '',
-      });
-    }
-    const events = [];
-    for (const e of data) {
-      const ev = { type: e.event || e.node_id?.split('/')[0] || 'unknown', createdAt: e.created_at || e.submitted_at || e.timestamp || '' };
-      if (e.event === 'commented' || (!e.event && e.body !== undefined)) {
-        ev.type = 'commented';
-        ev.author = e.user?.login || e.actor?.login || '';
-        ev.avatar = e.user?.avatar_url || e.actor?.avatar_url || '';
-        ev.body = e.body || '';
-        ev.bodyHtml = e.body_html || '';
-      } else if (e.event === 'reviewed') {
-        ev.author = e.user?.login || '';
-        ev.avatar = e.user?.avatar_url || '';
-        ev.state = e.state; // APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED
-        ev.body = e.body || '';
-        ev.bodyHtml = e.body_html || '';
-        // Attach inline review comments to this review event
-        const rid = e.id;
-        if (rid && reviewCommentsMap[rid]) {
-          ev.comments = reviewCommentsMap[rid];
-          delete reviewCommentsMap[rid]; // mark as used
-        }
-      } else if (e.event === 'committed') {
-        ev.sha = e.sha;
-        ev.message = e.message;
-        ev.author = e.author?.name || '';
-      } else if (e.event === 'review_requested') {
-        ev.actor = e.actor?.login || '';
-        ev.reviewer = e.requested_reviewer?.login || '';
-      } else if (e.event === 'assigned' || e.event === 'unassigned') {
-        ev.actor = e.actor?.login || '';
-        ev.assignee = e.assignee?.login || '';
-      } else if (e.event === 'labeled' || e.event === 'unlabeled') {
-        ev.actor = e.actor?.login || '';
-        ev.label = e.label?.name || '';
-        ev.labelColor = e.label?.color || '';
-      } else if (e.event === 'head_ref_force_pushed' || e.event === 'head_ref_deleted') {
-        ev.actor = e.actor?.login || '';
-      } else if (e.event === 'merged') {
-        ev.actor = e.actor?.login || '';
-        ev.commitId = e.commit_id || '';
-      } else if (e.event === 'closed' || e.event === 'reopened') {
-        ev.actor = e.actor?.login || '';
-      } else {
-        ev.actor = e.actor?.login || '';
-      }
-      events.push(ev);
-    }
-    // Add any orphaned review comments (not attached to a timeline review event)
-    for (const [, comments] of Object.entries(reviewCommentsMap)) {
-      for (const c of comments) {
-        events.push({
-          type: 'review_comment', createdAt: c.createdAt,
-          author: c.author, avatar: c.avatar,
-          body: c.body, bodyHtml: c.bodyHtml,
-          path: c.path, line: c.line, diffHunk: c.diffHunk,
-        });
-      }
-    }
-    // Re-sort by createdAt to keep chronological order
-    events.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    json(res, { events });
-  } catch (e) { json(res, { error: e.message }, 500); }
-}
-
-async function handleGitHubAddComment(req, res) {
-  try {
-    const { repo, number, body } = await readBody(req);
-    if (!repo || !number || !body) return json(res, { error: 'repo, number, and body are required' }, 400);
-    const gh = resolveGitHub(repo);
-    if (gh.error) return json(res, gh, 400);
-    const result = await ghRequest('POST', `/repos/${gh.owner}/${gh.repo}/issues/${number}/comments`, { body: sanitizeText(body) });
-    json(res, { ok: true, id: result.id });
-  } catch (e) { json(res, { error: e.message }, 500); }
-}
-
-async function handleGitHubSubmitReview(req, res) {
-  try {
-    const { repo, number, event, body } = await readBody(req);
-    if (!repo || !number || !event) return json(res, { error: 'repo, number, and event are required' }, 400);
-    const gh = resolveGitHub(repo);
-    if (gh.error) return json(res, gh, 400);
-    const payload = { event };
-    if (body) payload.body = sanitizeText(body);
-    const result = await ghRequest('POST', `/repos/${gh.owner}/${gh.repo}/pulls/${number}/reviews`, payload);
-    json(res, { ok: true, state: result.state });
-  } catch (e) { json(res, { error: e.message }, 500); }
-}
-
-function handleGitHubImageProxy(url, res) {
-  const imgUrl = url.searchParams.get('url');
-  if (!imgUrl || !imgUrl.startsWith('https://github.com/')) {
-    res.writeHead(400); res.end('Invalid URL'); return;
-  }
+function getPluginRecommendations() {
   const cfg = getConfig();
-  const pat = cfg.GitHubPAT;
-  const parsed = new URL(imgUrl);
-  const options = {
-    hostname: parsed.hostname,
-    path: parsed.pathname + parsed.search,
-    method: 'GET',
-    headers: {
-      'Authorization': `token ${pat}`,
-      'User-Agent': 'DevOps-Pilot',
-      'Accept': '*/*',
-    },
-  };
-  const proxy = https.request(options, (upstream) => {
-    // Follow redirects (GitHub returns 302 to the actual blob URL)
-    if (upstream.statusCode === 301 || upstream.statusCode === 302) {
-      const loc = upstream.headers.location;
-      if (loc) {
-        const redir = new URL(loc);
-        const redirOpts = {
-          hostname: redir.hostname,
-          path: redir.pathname + redir.search,
-          method: 'GET',
-          headers: { 'User-Agent': 'DevOps-Pilot', 'Accept': '*/*' },
-        };
-        // The redirected URL is usually publicly accessible with a token in the query
-        const r2 = https.request(redirOpts, (resp2) => {
-          res.writeHead(resp2.statusCode, {
-            'Content-Type': resp2.headers['content-type'] || 'image/png',
-            'Cache-Control': 'public, max-age=3600',
-          });
-          resp2.pipe(res);
-        });
-        r2.on('error', () => { res.writeHead(502); res.end(); });
-        r2.end();
-        return;
+  const repos = cfg.Repos || {};
+  const uiCtx = getUiContextWithPath();
+  const repoEntries = [];
+  if (uiCtx.activeRepo && repos[uiCtx.activeRepo]) repoEntries.push([uiCtx.activeRepo, repos[uiCtx.activeRepo]]);
+  for (const entry of Object.entries(repos)) {
+    if (!repoEntries.some(([name]) => name === entry[0])) repoEntries.push(entry);
+  }
+
+  const remotes = [];
+  for (const [repoName, repoPath] of repoEntries.slice(0, 20)) {
+    if (!repoPath || !fs.existsSync(repoPath)) continue;
+    const out = gitSync(repoPath, 'remote -v', 5000);
+    if (out) remotes.push({ repoName, text: out.toLowerCase() });
+  }
+
+  const installedIds = new Set();
+  try {
+    if (fs.existsSync(pluginsDir)) {
+      for (const dir of fs.readdirSync(pluginsDir)) {
+        if (dir !== 'sdk' && fs.existsSync(path.join(pluginsDir, dir, 'plugin.json'))) installedIds.add(dir);
       }
     }
-    res.writeHead(upstream.statusCode, {
-      'Content-Type': upstream.headers['content-type'] || 'image/png',
-      'Cache-Control': 'public, max-age=3600',
-    });
-    upstream.pipe(res);
-  });
-  proxy.on('error', () => { res.writeHead(502); res.end(); });
-  proxy.end();
-}
+  } catch (_) {}
+  const activeIds = new Set((loadedPlugins || []).filter(p => checkActivation(p, getConfig)).map(p => p.id));
+  const byId = new Map();
+  const add = (id, label, reason, repoName, score) => {
+    const item = byId.get(id) || { id, label, reasons: [], repoNames: [], score: 0, installed: installedIds.has(id), configured: activeIds.has(id) };
+    if (reason && !item.reasons.includes(reason)) item.reasons.push(reason);
+    if (repoName && !item.repoNames.includes(repoName)) item.repoNames.push(repoName);
+    item.score = Math.max(item.score, score || 0);
+    byId.set(id, item);
+  };
 
-// ── GitHub: List user repos ──────────────────────────────────────────────────
-async function handleGitHubUserRepos(url, res) {
-  try {
-    const query = (url.searchParams.get('q') || '').toLowerCase();
-    const page = parseInt(url.searchParams.get('page')) || 1;
-    const perPage = 50;
-    // Fetch repos the authenticated user has access to, sorted by recent push
-    const repos = await ghRequest('GET', `/user/repos?sort=pushed&per_page=${perPage}&page=${page}&affiliation=owner,collaborator,organization_member`);
-    const items = repos.map(r => ({
-      name: r.name,
-      full_name: r.full_name,
-      description: r.description || '',
-      private: r.private,
-      clone_url: r.clone_url,
-      ssh_url: r.ssh_url,
-      html_url: r.html_url,
-      default_branch: r.default_branch,
-      pushed_at: r.pushed_at,
-      language: r.language,
-    }));
-    const filtered = query ? items.filter(r =>
-      r.name.toLowerCase().includes(query) || r.full_name.toLowerCase().includes(query)
-    ) : items;
-    json(res, { repos: filtered, page, hasMore: repos.length === perPage });
-  } catch (e) {
-    json(res, { error: e.message }, 502);
-  }
-}
-
-// ── GitHub: Clone repo ──────────────────────────────────────────────────────
-async function handleGitHubClone(req, res) {
-  try {
-    const { cloneUrl, destPath } = await readBody(req);
-    if (!cloneUrl || !destPath) return json(res, { error: 'cloneUrl and destPath are required' }, 400);
-    if (!fs.existsSync(destPath)) return json(res, { error: `Destination does not exist: ${destPath}` }, 400);
-    // Extract repo name from clone URL for the folder name
-    const match = cloneUrl.match(/\/([^/]+?)(?:\.git)?$/);
-    const repoFolder = match ? match[1] : 'repo';
-    const fullDest = path.join(destPath, repoFolder);
-    if (fs.existsSync(fullDest)) return json(res, { error: `Folder already exists: ${fullDest}` }, 400);
-    // Inject PAT for HTTPS clone
-    const cfg = getConfig();
-    let authUrl = cloneUrl;
-    if (cfg.GitHubPAT && cloneUrl.startsWith('https://')) {
-      authUrl = cloneUrl.replace('https://', `https://${cfg.GitHubPAT}@`);
+  for (const r of remotes) {
+    if (r.text.includes('github.com')) {
+      add('github', 'GitHub', `Detected a GitHub remote in ${r.repoName}.`, r.repoName, 100);
     }
-    execSync(`git clone "${authUrl}" "${fullDest}"`, { encoding: 'utf8', timeout: 120000, stdio: ['pipe', 'pipe', 'pipe'] });
-    json(res, { ok: true, path: fullDest, name: repoFolder });
-  } catch (e) {
-    json(res, { error: e.message }, 500);
+    if (r.text.includes('dev.azure.com') || r.text.includes('visualstudio.com')) {
+      add('azure-devops', 'Azure DevOps', `Detected an Azure DevOps remote in ${r.repoName}.`, r.repoName, 95);
+    }
   }
+
+  return {
+    recommendations: [...byId.values()].sort((a, b) => b.score - a.score || a.label.localeCompare(b.label)),
+    scannedRepos: repoEntries.length,
+  };
 }
+
+// handleStartWorking moved to the azure-devops plugin (dashboard/plugins/azure-devops/routes.js) as of plugin v0.4.0.
+
+// GitHub handlers (handleCreatePullRequest, handleGitHub*) moved to the github plugin
+// in dashboard/plugins/github/routes.js as of plugin v0.4.0.
 
 // ── UI Actions (AI -> Dashboard) ─────────────────────────────────────────────
 // ── File Browser ────────────────────────────────────────────────────────────
@@ -2910,12 +1965,35 @@ async function handleOpenExternal(req, res) {
 }
 
 // ── Image Proxy ─────────────────────────────────────────────────────────────
+// Plugins contribute contributions.imageAuth entries to register URL-pattern
+// auth headers. Core never hardcodes service-specific auth -- it just walks
+// the contributed rules. Each rule: { hostnamePattern, authType, authConfigKey }.
+//   authType 'basic-pat' -> 'Basic ' + base64(':' + config[authConfigKey])
+//   authType 'bearer'    -> 'Bearer ' + config[authConfigKey]
+//   authType 'token'     -> 'token '  + config[authConfigKey]
+function resolveImageAuth(hostname, cfg) {
+  for (const p of (loadedPlugins || [])) {
+    const rules = (p.contributions && p.contributions.imageAuth) || [];
+    for (const rule of rules) {
+      if (!rule || !rule.hostnamePattern || !rule.authConfigKey) continue;
+      if (!hostname.includes(rule.hostnamePattern)) continue;
+      const secret = cfg[rule.authConfigKey];
+      if (!secret) continue;
+      switch (rule.authType) {
+        case 'bearer':    return 'Bearer ' + secret;
+        case 'token':     return 'token ' + secret;
+        case 'basic-pat':
+        default:          return 'Basic ' + Buffer.from(':' + secret).toString('base64');
+      }
+    }
+  }
+  return null;
+}
 function handleImageProxy(url, res) {
   const imageUrl = url.searchParams.get('url');
   if (!imageUrl) { res.writeHead(400); return res.end('Missing url param'); }
 
   const cfg = getConfig();
-  const pat = cfg.AzureDevOpsPAT;
   const parsedUrl = new URL(imageUrl);
 
   const options = {
@@ -2924,9 +2002,8 @@ function handleImageProxy(url, res) {
     method: 'GET',
     headers: { 'Accept': '*/*' },
   };
-  if (pat && parsedUrl.hostname.includes('dev.azure.com')) {
-    options.headers['Authorization'] = 'Basic ' + Buffer.from(':' + pat).toString('base64');
-  }
+  const authHeader = resolveImageAuth(parsedUrl.hostname, cfg);
+  if (authHeader) options.headers['Authorization'] = authHeader;
 
   const proto = parsedUrl.protocol === 'https:' ? https : http;
   const proxyReq = proto.request(options, (proxyRes) => {
@@ -3042,6 +2119,60 @@ async function handleCreateNote(req, res) {
   json(res, { ok: true, name: safeName });
 }
 
+function handleExportNote(url, res) {
+  const name = url.searchParams.get('name');
+  if (!name) return json(res, { error: 'name required' }, 400);
+  const filePath = path.join(notesDir, name + '.md');
+  const resolved = path.resolve(filePath);
+  if (!resolved.startsWith(path.resolve(notesDir))) return json(res, { error: 'Invalid path' }, 403);
+  if (!fs.existsSync(resolved)) return json(res, { error: 'Not found' }, 404);
+  const body = fs.readFileSync(resolved, 'utf8');
+  const safeName = name.replace(/[\\/:*?"<>|]/g, '_');
+  res.writeHead(200, {
+    'Content-Type': 'text/markdown; charset=utf-8',
+    'Content-Disposition': 'attachment; filename="' + safeName + '.md"',
+  });
+  res.end(body);
+}
+
+function handleExportAllNotes(res) {
+  const payload = { _exportedAt: new Date().toISOString(), _exportedFrom: 'DevOps Pilot', notes: {} };
+  try {
+    if (fs.existsSync(notesDir)) {
+      for (const f of fs.readdirSync(notesDir)) {
+        if (!f.endsWith('.md')) continue;
+        try { payload.notes[f.replace(/\.md$/, '')] = fs.readFileSync(path.join(notesDir, f), 'utf8'); } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  res.writeHead(200, {
+    'Content-Type': 'application/json',
+    'Content-Disposition': 'attachment; filename="devops-pilot-notes.json"',
+  });
+  res.end(JSON.stringify(payload, null, 2));
+}
+
+async function handleImportNotes(req, res) {
+  const body = await readBody(req);
+  // Accept either { notes: {name: body} } (from export-all) or a flat map, or a single {name, content}.
+  let map = null;
+  if (body && body.notes && typeof body.notes === 'object') map = body.notes;
+  else if (body && body.name && typeof body.content === 'string') map = { [body.name]: body.content };
+  else if (body && typeof body === 'object' && !Array.isArray(body)) map = body;
+  if (!map) return json(res, { error: 'Invalid payload' }, 400);
+  let written = 0, skipped = 0;
+  fs.mkdirSync(notesDir, { recursive: true });
+  for (const [name, content] of Object.entries(map)) {
+    if (typeof content !== 'string') { skipped++; continue; }
+    const safe = String(name).replace(/[\\/:*?"<>|]/g, '_');
+    const dest = path.join(notesDir, safe + '.md');
+    if (!path.resolve(dest).startsWith(path.resolve(notesDir))) { skipped++; continue; }
+    try { fs.writeFileSync(dest, content, 'utf8'); written++; } catch (_) { skipped++; }
+  }
+  broadcast({ type: 'ui-action', action: 'refresh-notes' });
+  json(res, { ok: true, written, skipped });
+}
+
 async function handleDeleteNote(req, res) {
   const { name } = await readBody(req);
   if (!name) return json(res, { error: 'name required' }, 400);
@@ -3053,16 +2184,7 @@ async function handleDeleteNote(req, res) {
   json(res, { ok: true });
 }
 
-// Rewrite ADO-hosted image src URLs to go through our proxy
-function proxyHtmlImages(html) {
-  if (!html) return html;
-  return html.replace(/<img([^>]+)src=["']([^"']+)["']/gi, (match, before, url) => {
-    if (url.includes('dev.azure.com') || url.includes('visualstudio.com')) {
-      return `<img${before}src="/api/image-proxy?url=${encodeURIComponent(url)}"`;
-    }
-    return match;
-  });
-}
+// proxyHtmlImages moved to the azure-devops plugin (it only rewrites ADO-hosted image URLs).
 
 function formatAge(date) {
   const ms = Date.now() - new Date(date).getTime();
@@ -3370,9 +2492,85 @@ try {
 }
 
 // ── Load plugins ─────────────────────────────────────────────────────────────
-loadedPlugins = loadPlugins(pluginsDir, { addRoute, getConfig, broadcast, json, writePluginHints, swrCache: swrPlugins });
+loadedPlugins = loadPlugins(pluginsDir, {
+  addRoute, getConfig, broadcast, json, writePluginHints,
+  swrCache: swrPlugins,
+  shellDeps: {
+    gitExec, sanitizeText, permGate, incognitoGuard,
+    getRepoPath, repoRoot,
+    https: require('https'),
+    fs: require('fs'),
+    path: require('path'),
+    execSync: require('child_process').execSync,
+    spawnSync: require('child_process').spawnSync,
+    SWRCache,
+    broadcast,
+  },
+});
 if (loadedPlugins.length) console.log(`  Loaded ${loadedPlugins.length} plugin(s)`);
+try {
+  const rootCfg = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
+  const migratedRootCfg = persistPluginConfigKeys(rootCfg);
+  if (JSON.stringify(migratedRootCfg) !== JSON.stringify(rootCfg)) {
+    atomicWriteSync(configPath, JSON.stringify(migratedRootCfg, null, 2));
+    console.log('  Migrated plugin-owned config keys into plugin config files');
+  }
+} catch (_) {}
 writePluginHints();
+
+// One-time migration for users upgrading from pre-plugin-first builds: if the
+// main config still has AzureDevOpsPAT or GitHubPAT but the corresponding
+// plugin is not installed, clone it from the registry so the user's existing
+// workflow keeps working after the upgrade. Silent, best-effort; any failure
+// leaves the plugin uninstalled and the user can Browse Plugins manually.
+(async () => {
+  try {
+    const cfg = getConfig();
+    const wants = [];
+    const installedIds = new Set((loadedPlugins || []).map(p => p.id));
+    // Skip anything the user uninstalled on purpose -- re-cloning a plugin the
+    // user just removed is exactly the "I uninstalled it, restarted, it came
+    // back" bug we are fixing.
+    let tombstoned = [];
+    try {
+      const tombPath = path.join(repoRoot, 'config', 'uninstalled-plugins.json');
+      if (fs.existsSync(tombPath)) tombstoned = JSON.parse(fs.readFileSync(tombPath, 'utf8')) || [];
+    } catch (_) {}
+    const isTomb = (id) => Array.isArray(tombstoned) && tombstoned.includes(id);
+    if (cfg.AzureDevOpsPAT && !installedIds.has('azure-devops') && !isTomb('azure-devops')) wants.push('azure-devops');
+    if (cfg.GitHubPAT       && !installedIds.has('github')       && !isTomb('github'))       wants.push('github');
+    if (!wants.length) return;
+    console.log(`  Migration: detected ${wants.join('+')} config without plugin. Auto-installing from registry...`);
+    const httpsLib = require('https');
+    const { execSync } = require('child_process');
+    const registry = await new Promise((resolve, reject) => {
+      httpsLib.get('https://api.github.com/repos/matandessaur-me/devops-pilot-plugins/contents/registry.json',
+        { headers: { 'User-Agent': 'DevOps-Pilot', 'Accept': 'application/vnd.github.v3+json' } },
+        (resp) => { let d = ''; resp.on('data', c => d += c); resp.on('end', () => { try { resolve(JSON.parse(d)); } catch (e) { reject(e); } }); }
+      ).on('error', reject);
+    });
+    if (!registry.content) return;
+    const reg = JSON.parse(Buffer.from(registry.content, 'base64').toString());
+    for (const id of wants) {
+      const entry = (reg.plugins || []).find(p => p.id === id);
+      if (!entry || !entry.repo) continue;
+      const destDir = path.join(pluginsDir, id);
+      try {
+        execSync('git clone "' + entry.repo + '.git" "' + destDir + '"', { encoding: 'utf8', timeout: 60000, stdio: ['pipe', 'pipe', 'pipe'] });
+        if (!fs.existsSync(path.join(destDir, 'plugin.json'))) {
+          fs.rmSync(destDir, { recursive: true, force: true });
+          continue;
+        }
+        console.log(`  Migration: installed ${id}. Restart to activate.`);
+      } catch (e) {
+        console.warn(`  Migration: failed to install ${id}: ${e.message}`);
+        try { fs.rmSync(destDir, { recursive: true, force: true }); } catch (_) {}
+      }
+    }
+  } catch (e) {
+    console.warn('  Migration: auto-install skipped --', e.message);
+  }
+})();
 
 // ── AI Instructions endpoint ────────────────────────────────────────────────
 // Serves split instruction files from dashboard/instructions/ so CLAUDE.md stays small.
@@ -3385,6 +2583,10 @@ writePluginHints();
     if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
     return null;
   }
+  // Core instructions are plugin-agnostic. Plugin-specific rules live in each
+  // plugin's own instructions.md (served by /api/plugins/instructions), so no
+  // runtime stripping is needed here.
+  function stripPluginMarkers(content) { return content; }
   // Merged: returns all instruction files concatenated (config-aware)
   addRoute('GET', '/api/instructions', (req, res) => {
     try {
@@ -3403,7 +2605,7 @@ writePluginHints();
         if (bi !== -1) return 1;
         return a.localeCompare(b);
       });
-      const sections = files.map(f => fs.readFileSync(path.join(instrDir, f), 'utf8'));
+      const sections = files.map(f => stripPluginMarkers(fs.readFileSync(path.join(instrDir, f), 'utf8')));
       res.writeHead(200, { 'Content-Type': 'text/markdown' });
       res.end(sections.join('\n\n---\n\n'));
     } catch (e) {
@@ -3412,13 +2614,13 @@ writePluginHints();
     }
   });
   // Individual: /api/instructions/{name} serves a single file
-  addRoute('__PREFIX__', '/api/instructions/', (req, res, url, subpath) => {
-    const name = (subpath || '').replace(/\.md$/i, '').replace(/[^a-zA-Z0-9_-]/g, '');
+  addRoute('__PREFIX__', '/api/instructions', (req, res, url, subpath) => {
+    const name = (subpath || '').replace(/^\//, '').replace(/\.md$/i, '').replace(/[^a-zA-Z0-9_-]/g, '');
     if (!name) { json(res, { error: 'Missing instruction name' }, 400); return; }
     const content = readInstrFile(name);
     if (!content) { json(res, { error: `Instruction "${name}" not found` }, 404); return; }
     res.writeHead(200, { 'Content-Type': 'text/markdown' });
-    res.end(content);
+    res.end(stripPluginMarkers(content));
   });
   console.log('  AI Instructions endpoint mounted (/api/instructions/*)');
 })();
