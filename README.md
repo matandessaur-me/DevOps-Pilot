@@ -1,4 +1,4 @@
-<img src="https://repository-images.githubusercontent.com/1187508410/001d4330-d22f-4655-bb5f-0cb51022fdab" alt="symphonee-logo"/>
+<img src="https://repository-images.githubusercontent.com/1187508410/facc0c4e-1126-42b7-81c6-eabbb7b5da07" alt="symphonee-logo"/>
 
 # Symphonee
 
