@@ -815,7 +815,7 @@ async function handleSaveConfig(req, res) {
 // Sensitive fields to strip from exports (PATs, API keys).
 // Core owns only its own shell-level secrets; plugins contribute their own via
 // contributions.sensitiveKeys. This keeps core zero-coupled from ADO/GH/etc.
-const CORE_SENSITIVE_KEYS = ['WhisperKey', 'AiApiKeys'];
+const CORE_SENSITIVE_KEYS = ['WhisperKey', 'AiApiKeys', 'BrowserCredentials'];
 function getSensitiveKeys() {
   const keys = new Set(CORE_SENSITIVE_KEYS);
   for (const p of (loadedPlugins || [])) {
