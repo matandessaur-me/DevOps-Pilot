@@ -10002,7 +10002,7 @@ function editThemeInEditor(idx) {
   }
 }
 
-function applyBuiltinTheme(themeId) {
+function applyBuiltinTheme(themeId, opts) {
   _themeEditorDirty = false;
   const status = document.getElementById('themeEditorStatus');
   if (status) status.style.display = 'none';
@@ -10021,11 +10021,11 @@ function applyBuiltinTheme(themeId) {
   delete TERM_THEMES['_active'];
   root.setAttribute('data-theme', themeId);
   applyShellTheme();
-  restartAllTerminalsForTheme();
+  if (!(opts && opts.skipRestart)) restartAllTerminalsForTheme();
   renderThemeList();
 }
 
-function applyCustomTheme(idx) {
+function applyCustomTheme(idx, opts) {
   _themeEditorDirty = false;
   const statusEl = document.getElementById('themeEditorStatus');
   if (statusEl) statusEl.style.display = 'none';
@@ -10042,7 +10042,7 @@ function applyCustomTheme(idx) {
   } else {
     _applyVarsAsCustom(t.vars);
   }
-  restartAllTerminalsForTheme();
+  if (!(opts && opts.skipRestart)) restartAllTerminalsForTheme();
   renderThemeList();
 }
 
@@ -10102,18 +10102,23 @@ function importThemes() {
 // Restore theme on load (with migration from old CLI-based names)
 function restoreCustomTheme() {
   const stored = localStorage.getItem(ACTIVE_THEME_KEY);
-  if (!stored) { applyBuiltinTheme('industrial-blue'); return; }
+  // The startup path must NOT restart terminals -- the main shell has
+  // already spawned (or is about to) and the Symphonee banner is queued
+  // to print on term-started. A restart here would race with the banner
+  // write and leave the main shell blank until the user switches tabs.
+  const startupOpts = { skipRestart: true };
+  if (!stored) { applyBuiltinTheme('industrial-blue', startupOpts); return; }
   if (stored.startsWith('__builtin_')) {
     let id = stored.replace('__builtin_', '');
     // Migrate old CLI-based theme IDs
     const migrate = { claude: 'warm-metallic', gemini: 'industrial-blue', codex: 'futuristic-green', copilot: 'warm-metallic', grok: 'warm-metallic' };
     if (migrate[id]) { id = migrate[id]; localStorage.setItem(ACTIVE_THEME_KEY, `__builtin_${id}`); }
-    if (BUILTIN_THEMES.some(b => b.id === id)) applyBuiltinTheme(id);
+    if (BUILTIN_THEMES.some(b => b.id === id)) applyBuiltinTheme(id, startupOpts);
     return;
   }
   const themes = getSavedThemes();
   const idx = themes.findIndex(t => t.name === stored);
-  if (idx >= 0) applyCustomTheme(idx);
+  if (idx >= 0) applyCustomTheme(idx, startupOpts);
 }
 // Load themes from server, then restore the active theme
 _loadThemesFromServer().then(() => restoreCustomTheme()).catch(() => restoreCustomTheme());
