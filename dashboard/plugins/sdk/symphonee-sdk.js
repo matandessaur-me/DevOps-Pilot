@@ -1,35 +1,40 @@
 /**
  * Symphonee -- Plugin SDK
- * Include this in plugin iframes: <script src="/plugins/sdk/devops-pilot-sdk.js"></script>
- * Provides: DevOpsPilot.getContext(), .switchTab(), .askAi(), .toast(), .api(), .on()
- * Note: the JS global and message-key names (DevOpsPilot / __devopsPilot / devops-pilot:*)
- * are preserved for plugin compatibility. The product is branded Symphonee.
+ * Include this in plugin iframes: <script src="/plugins/sdk/symphonee-sdk.js"></script>
+ * Provides: Symphonee.getContext(), .switchTab(), .askAi(), .toast(), .api(), .on()
+ *
+ * Backwards compatibility:
+ *   - Plugins that still reference the legacy globals (DevOpsPilot, __devopsPilot,
+ *     'devops-pilot:*' events) keep working. Both message-key shapes and both
+ *     event prefixes are handled so live plugin iframes do not break during
+ *     upgrade.
  */
 (function () {
   'use strict';
-  const pending = new Map();
-  let reqId = 0;
+  var pending = new Map();
+  var reqId = 0;
 
-  // Listen for messages from the host app
+  // Listen for messages from the host app. Accept both the new and legacy keys.
   window.addEventListener('message', function (event) {
     var msg = event.data;
-    if (!msg || !msg.__devopsPilot) return;
+    if (!msg || (!msg.__symphonee && !msg.__devopsPilot)) return;
 
-    // Handle context response
     if (msg.type === 'contextResponse' && pending.has(msg.requestId)) {
       pending.get(msg.requestId)(msg.data);
       pending.delete(msg.requestId);
     }
 
-    // Dispatch as custom events plugins can listen to
     var eventTypes = ['repoChanged', 'tabActivated', 'configChanged', 'iterationChanged'];
     if (eventTypes.indexOf(msg.type) !== -1) {
+      // Emit the new event; mirror to the legacy name so existing listeners still fire.
+      window.dispatchEvent(new CustomEvent('symphonee:' + msg.type, { detail: msg.data }));
       window.dispatchEvent(new CustomEvent('devops-pilot:' + msg.type, { detail: msg.data }));
     }
   });
 
   function postToHost(msg) {
-    msg.__devopsPilot = true;
+    msg.__symphonee = true;
+    msg.__devopsPilot = true; // legacy key, host still accepts both
     window.parent.postMessage(msg, '*');
   }
 
@@ -49,8 +54,6 @@
     var style = document.createElement('style');
     var baseCss = ':root { ' + css + ' } body { font-family: var(--font-ui); color: var(--text); background: var(--base); margin: 0; }';
 
-    // Plugin tint: read from the iframe's data-tint attribute
-    // Applies a subtle colored overlay to all background colors
     var tintCss = '';
     try {
       var iframes = window.parent.document.querySelectorAll('iframe[data-plugin-id]');
@@ -70,8 +73,7 @@
     // Silently fail if cross-origin
   }
 
-  window.DevOpsPilot = {
-    // Get current app context (async)
+  var api = {
     getContext: function () {
       return new Promise(function (resolve) {
         var id = ++reqId;
@@ -83,18 +85,14 @@
       });
     },
 
-    // Navigation
     switchTab: function (tab) { postToHost({ type: 'switchTab', tab: tab }); },
     viewWorkItem: function (id) { postToHost({ type: 'viewWorkItem', id: id }); },
     openSettings: function (tab) { postToHost({ type: 'openSettings', tab: tab || 'plugins' }); },
 
-    // AI
     askAi: function (prompt) { postToHost({ type: 'askAi', prompt: prompt }); },
 
-    // Notifications
     toast: function (message, level) { postToHost({ type: 'toast', message: message, level: level || 'info' }); },
 
-    // REST API helper
     api: function (apiPath, options) {
       options = options || {};
       return fetch('http://127.0.0.1:3800' + apiPath, {
@@ -104,9 +102,12 @@
       }).then(function (r) { return r.json(); });
     },
 
-    // Event listeners
     on: function (event, callback) {
-      window.addEventListener('devops-pilot:' + event, function (e) { callback(e.detail); });
+      window.addEventListener('symphonee:' + event, function (e) { callback(e.detail); });
     },
   };
+
+  window.Symphonee = api;
+  // Legacy alias -- remove once no installed plugin references DevOpsPilot.
+  window.DevOpsPilot = api;
 })();

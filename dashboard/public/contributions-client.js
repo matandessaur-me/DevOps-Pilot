@@ -1,9 +1,9 @@
 /**
- * DevOpsPilot.contributions - client helper for the plugin-first shell.
+ * Symphonee.contributions - client helper for the plugin-first shell.
  *
  * Phase 4/6 foundation (additive, non-breaking):
  * - Fetches /api/plugins/contributions on load and on plugin list changes.
- * - Exposes window.DevOpsPilot.contributions with helpers so the existing
+ * - Exposes window.Symphonee.contributions with helpers so the existing
  *   Backlog, PR, Teams, Activity, GitLog, Settings modules can switch from
  *   hardcoded /api/workitems and /api/github/* calls to provider-driven
  *   calls one at a time.
@@ -48,7 +48,7 @@
       notify();
       return state.data;
     } catch (e) {
-      console.warn('DevOpsPilot.contributions: refresh failed', e);
+      console.warn('Symphonee.contributions: refresh failed', e);
       // Keep previous state on failure; surface null-safe shape so callers can short-circuit.
       if (!state.data) {
         state.data = {
@@ -75,14 +75,14 @@
     activePrProvider() { return (state.data && state.data.prProviders && state.data.prProviders[0]) || null; },
 
     // Route resolver - accepts a provider object and a route field name, returns an absolute path or null.
-    // Usage: DevOpsPilot.contributions.resolve(provider, 'listRoute')
+    // Usage: Symphonee.contributions.resolve(provider, 'listRoute')
     resolve: resolveRoute,
 
     // Provider-driven fetch helper for Phase 4b.
     // Picks the active workItem/pr provider, resolves the route field, substitutes :id path
     // params, appends query string, and calls fetch. Returns null when no provider is available
     // so existing call sites can fall back to their hardcoded URL:
-    //   const r = await DevOpsPilot.contributions.providerFetch('workItem','listRoute',{query}) ||
+    //   const r = await Symphonee.contributions.providerFetch('workItem','listRoute',{query}) ||
     //             await fetch('/api/workitems?'+query);
     async providerFetch(kind, routeField, opts) {
       const p = kind === 'workItem' ? api.activeWorkItemProvider()
@@ -177,8 +177,10 @@
     },
   };
 
-  window.DevOpsPilot = window.DevOpsPilot || {};
-  window.DevOpsPilot.contributions = api;
+  window.Symphonee = window.Symphonee || {};
+  window.Symphonee.contributions = api;
+  // Legacy alias for plugins that still reference the old global.
+  window.DevOpsPilot = window.Symphonee;
 
   // Kick off an initial load; don't block anything if it fails.
   refresh();

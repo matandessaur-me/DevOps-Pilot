@@ -1913,7 +1913,7 @@ async function handleVoiceTranscribe(req, res) {
     const wavBuffer = Buffer.from(audio, 'base64');
 
     // Build multipart/form-data for OpenAI Whisper API
-    const boundary = '----DevOpsPilotVoice' + Date.now();
+    const boundary = '----SymphoneeVoice' + Date.now();
     const parts = [];
 
     // File part

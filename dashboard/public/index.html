@@ -5385,7 +5385,7 @@ async function loadPRs() {
   list.innerHTML = '<div class="empty-state" style="padding:20px;"><div class="spinner"></div></div>';
   try {
     const prQs = `repo=${encodeURIComponent(repo)}&state=${state}`;
-    const res = await (window.DevOpsPilot?.contributions?.providerFetch?.('pr', 'listRoute', { query: prQs }));
+    const res = await (window.Symphonee?.contributions?.providerFetch?.('pr', 'listRoute', { query: prQs }));
     if (!res) { prsData = []; renderPRList(); return; }
     const data = await res.json();
     if (data.error) { list.innerHTML = `<div class="empty-state" style="padding:20px;"><div class="empty-state-text">${esc(data.error)}</div></div>`; return; }
@@ -5449,7 +5449,7 @@ async function viewPR(number) {
   detail.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
   try {
     const repo = prsCurrentRepo;
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     if (!pf) { detail.innerHTML = '<div class="empty-state"><div class="empty-state-text">No pull request provider installed</div></div>'; return; }
     const [prRes, filesRes, timelineRes] = await Promise.all([
       pf('pr', 'detailRoute',   { query: { repo, number } }),
@@ -5504,7 +5504,7 @@ function renderPRDetail(pr, files, timeline) {
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
           <div class="pr-detail-title">${esc(pr.title)}</div>
           ${pr.htmlUrl ? (() => {
-            const _prov = window.DevOpsPilot?.contributions?.activePrProvider?.();
+            const _prov = window.Symphonee?.contributions?.activePrProvider?.();
             const _lbl = 'Open on ' + ((_prov && _prov.label) || 'provider');
             return `<a href="${esc(pr.htmlUrl)}" target="_blank" class="pr-btn pr-btn-github" title="${esc(_lbl)}" style="flex-shrink:0;display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:4px 10px;white-space:nowrap;text-decoration:none;"><i data-lucide="external-link" style="width:13px;height:13px;"></i> ${esc(_lbl)}</a>`;
           })() : ''}
@@ -5540,7 +5540,7 @@ function renderPRDetail(pr, files, timeline) {
       <button class="pr-btn pr-btn-changes" onclick="openRequestChangesModal()">Request Changes</button>
       ${pr.reviewStatus === 'approved' && pr.htmlUrl
         ? (() => {
-            const _prov = window.DevOpsPilot?.contributions?.activePrProvider?.();
+            const _prov = window.Symphonee?.contributions?.activePrProvider?.();
             const _lbl = 'Merge on ' + ((_prov && _prov.label) || 'provider');
             return `<a href="${esc(pr.htmlUrl)}" target="_blank" class="pr-btn pr-btn-merge" style="text-decoration:none;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="git-merge" style="width:13px;height:13px;"></i> ${esc(_lbl)}</a>`;
           })()
@@ -5702,7 +5702,7 @@ async function submitPRCommentModal() {
   const body = textarea.value.trim();
   if (!body) return;
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('pr', 'commentRoute', {
       init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ repo: prsCurrentRepo, number: prsCurrentNumber, body }) },
     });
@@ -5722,7 +5722,7 @@ async function addPRComment() {
   const body = input.value.trim();
   if (!body) return;
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('pr', 'commentRoute', {
       init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ repo: prsCurrentRepo, number: prsCurrentNumber, body }) },
     });
@@ -5737,7 +5737,7 @@ async function addPRComment() {
 
 async function submitPRReview(event, body) {
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('pr', 'reviewRoute', {
       init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ repo: prsCurrentRepo, number: prsCurrentNumber, event, body: body || '' }) },
     });
@@ -7323,7 +7323,7 @@ function handleUiAction(msg) {
     if (msg.message) {
       var _sendToPlugin = function() {
         var iframes = document.querySelectorAll('iframe[data-plugin-id="' + msg.plugin + '"]');
-        iframes.forEach(function(f) { f.contentWindow.postMessage(Object.assign({ __devopsPilot: true }, msg.message), location.origin); });
+        iframes.forEach(function(f) { f.contentWindow.postMessage(Object.assign({ __symphonee: true }, msg.message), location.origin); });
       };
       setTimeout(_sendToPlugin, 300);
       setTimeout(_sendToPlugin, 1500);
@@ -7392,7 +7392,7 @@ async function loadConfig(autoSelectSprint) {
 // ── Iterations ──────────────────────────────────────────────────────────
 async function loadIterations(autoSelectCurrent) {
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('workItem', 'iterationsRoute', {});
     if (!res) return;
     const data = await res.json();
@@ -7462,7 +7462,7 @@ async function loadWorkItems(refresh = false) {
   const taskId = addBackgroundTask('wi-load-' + Date.now(), 'Loading work items', 'list-checks');
 
   try {
-    const res = await (window.DevOpsPilot?.contributions?.providerFetch?.('workItem', 'listRoute', { query: params.toString() }));
+    const res = await (window.Symphonee?.contributions?.providerFetch?.('workItem', 'listRoute', { query: params.toString() }));
     if (!res) { workItems = []; renderBacklog(); return; }
     const data = await res.json();
     if (data.error) { toast(data.error, 'error'); return; }
@@ -7920,7 +7920,7 @@ async function onCardDrop(e, targetState) {
   if (!wi || wi.state === targetState) return;
 
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('workItem', 'updateStateRoute', {
       params: { id: wiId },
       init: { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state: targetState }) },
@@ -8032,7 +8032,7 @@ async function viewWorkItem(id) {
   container.innerHTML = '<div class="empty-state"><div class="spinner"></div><div class="empty-state-text">Loading...</div></div>';
 
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('workItem', 'getRoute', { params: { id } });
     if (!res) { container.innerHTML = '<div class="empty-state"><div class="empty-state-text">No work item provider installed</div></div>'; return; }
     const wi = await res.json();
@@ -8047,7 +8047,7 @@ async function viewWorkItem(id) {
         </div>
         <div class="wi-detail-actions">
           ${wi.webUrl ? (() => {
-            const prov = window.DevOpsPilot?.contributions?.activeWorkItemProvider?.();
+            const prov = window.Symphonee?.contributions?.activeWorkItemProvider?.();
             const label = (prov && prov.label) ? ('Open in ' + prov.label) : 'Open in provider';
             return `<button class="btn btn-sm" onclick="window.open('${wi.webUrl}','_blank')"><i data-lucide="external-link"></i> ${esc(label)}</button>`;
           })() : ''}
@@ -8138,7 +8138,7 @@ let _mentionStart = -1;    // caret position of the '@'
 async function getMentionMembers() {
   if (_mentionCache) return _mentionCache;
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('workItem', 'teamMembersRoute', {});
     if (!res) { _mentionCache = []; return _mentionCache; }
     const data = await res.json();
@@ -8304,7 +8304,7 @@ async function submitWICommentModal() {
   const text = textarea.value.trim();
   if (!text || !_wiCommentTargetId) return;
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('workItem', 'commentRoute', {
       params: { id: _wiCommentTargetId },
       init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) },
@@ -8326,7 +8326,7 @@ async function addWIComment(wiId) {
   const text = input.value.trim();
   if (!text) return;
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('workItem', 'commentRoute', {
       params: { id: wiId },
       init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) },
@@ -8352,7 +8352,7 @@ async function startWorking(wiId) {
   }
 
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('workItem', 'startWorkingRoute', {
       init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workItemId: wiId, repoName }) },
     });
@@ -8367,9 +8367,9 @@ async function startWorking(wiId) {
     // stays provider-agnostic. Falls back to a bootstrap lookup instruction
     // when no provider is resolvable (should not happen since startWorking
     // already required a provider to succeed).
-    const provider = window.DevOpsPilot?.contributions?.activeWorkItemProvider?.();
+    const provider = window.Symphonee?.contributions?.activeWorkItemProvider?.();
     const getRouteUrl = provider
-      ? (window.DevOpsPilot.contributions.resolve(provider, 'getRoute') || '').replace(':id', String(wiId))
+      ? (window.Symphonee.contributions.resolve(provider, 'getRoute') || '').replace(':id', String(wiId))
       : '';
     const fetchInstruction = getRouteUrl
       ? `1. Fetch the full work item details from the active work-item provider at http://127.0.0.1:3800${getRouteUrl}`
@@ -8426,7 +8426,7 @@ async function loadBurndown(iterationPath) {
   const info = document.getElementById('burndownInfo');
   info.innerHTML = '<div class="spinner" style="margin:10px auto;"></div>';
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('workItem', 'burndownRoute', { query: { iteration: iterationPath } });
     if (!res) { info.textContent = 'No work item provider'; return; }
     const data = await res.json();
@@ -8450,7 +8450,7 @@ async function loadVelocity() {
   const info = document.getElementById('velocityInfo');
   info.innerHTML = '<div class="spinner" style="margin:10px auto;"></div>';
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('workItem', 'velocityRoute', {});
     if (!res) { info.textContent = 'No work item provider'; return; }
     const data = await res.json();
@@ -8542,7 +8542,7 @@ function drawVelocityChart(velocity, avg) {
 // ── Team ────────────────────────────────────────────────────────────────
 async function loadTeams() {
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('workItem', 'teamsRoute', {});
     if (!res) return;
     const teams = await res.json();
@@ -8585,7 +8585,7 @@ async function switchTeam(teamName) {
 // ── Area Paths ──────────────────────────────────────────────────────────
 async function loadAreas() {
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('workItem', 'areasRoute', {});
     if (!res) return;
     const areas = await res.json();
@@ -8618,7 +8618,7 @@ async function loadTeamMembers() {
   const container = document.getElementById('teamList');
   container.innerHTML = '<div class="spinner" style="margin:10px auto;"></div>';
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('workItem', 'teamMembersRoute', {});
     if (!res) { container.textContent = 'No work item provider'; return; }
     const data = await res.json();
@@ -8893,7 +8893,7 @@ async function submitCreateWorkItem() {
   if (!body.title) { toast('Title is required', 'error'); return; }
 
   try {
-    const pf = window.DevOpsPilot?.contributions?.providerFetch;
+    const pf = window.Symphonee?.contributions?.providerFetch;
     const res = pf && await pf('workItem', 'createRoute', {
       init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
     });
@@ -9221,14 +9221,14 @@ async function repoAddBrowse(ctx) {
 const _repoSrcCache = new Map(); // sourceId -> { list, ts }
 
 function _repoSources() {
-  const d = window.DevOpsPilot?.contributions?.data;
+  const d = window.Symphonee?.contributions?.data;
   return (d && Array.isArray(d.repoSources)) ? d.repoSources : [];
 }
 function _repoSourceById(id) {
   return _repoSources().find(s => s.id === id) || null;
 }
 function _resolveRoute(source, field) {
-  return window.DevOpsPilot?.contributions?.resolve?.(source, field) || null;
+  return window.Symphonee?.contributions?.resolve?.(source, field) || null;
 }
 
 async function _fetchPluginRepos(source, query) {
@@ -11048,7 +11048,7 @@ async function loadPluginCmdItems() {
               action: () => {
                 openPluginTab('plugin-wrike-board');
                 var iframes = document.querySelectorAll('iframe[data-plugin-id="wrike"]');
-                iframes.forEach(function(f) { f.contentWindow.postMessage({ __devopsPilot: true, type: 'viewTask', taskId: t.id }, location.origin); });
+                iframes.forEach(function(f) { f.contentWindow.postMessage({ __symphonee: true, type: 'viewTask', taskId: t.id }, location.origin); });
               },
               category: 'Wrike',
             });
@@ -11069,7 +11069,7 @@ async function loadPluginCmdItems() {
               action: () => {
                 openPluginTab('plugin-builderio-manager');
                 var iframes = document.querySelectorAll('iframe[data-plugin-id="builderio"]');
-                iframes.forEach(function(f) { f.contentWindow.postMessage({ __devopsPilot: true, type: 'openModel', modelId: m.id }, location.origin); });
+                iframes.forEach(function(f) { f.contentWindow.postMessage({ __symphonee: true, type: 'openModel', modelId: m.id }, location.origin); });
               },
               category: 'Builder.io',
             });
@@ -11393,7 +11393,7 @@ async function liveSearchPlugins(q) {
               action: function() {
                 openPluginTab('plugin-wrike-board');
                 var iframes = document.querySelectorAll('iframe[data-plugin-id="wrike"]');
-                iframes.forEach(function(f) { f.contentWindow.postMessage({ __devopsPilot: true, type: 'viewTask', taskId: t.id }, location.origin); });
+                iframes.forEach(function(f) { f.contentWindow.postMessage({ __symphonee: true, type: 'viewTask', taskId: t.id }, location.origin); });
               },
               category: 'Wrike',
             });
@@ -11630,7 +11630,7 @@ function renderTimeline() {
 function notifyPluginIframes(eventType, data) {
   document.querySelectorAll('iframe[data-plugin-id]').forEach(function (iframe) {
     try {
-      iframe.contentWindow.postMessage({ __devopsPilot: true, type: eventType, data: data }, location.origin);
+      iframe.contentWindow.postMessage({ __symphonee: true, type: eventType, data: data }, location.origin);
     } catch (_) {}
   });
 }
@@ -11639,7 +11639,7 @@ function notifyPluginIframes(eventType, data) {
 window.addEventListener('message', function (event) {
   if (event.origin !== location.origin) return;
   var msg = event.data;
-  if (!msg || !msg.__devopsPilot) return;
+  if (!msg || (!msg.__symphonee && !msg.__devopsPilot)) return;
 
   switch (msg.type) {
     case 'switchTab':
@@ -11669,7 +11669,7 @@ window.addEventListener('message', function (event) {
         }
       }
       event.source.postMessage({
-        __devopsPilot: true, type: 'contextResponse', requestId: msg.requestId, data: ctxData
+        __symphonee: true, type: 'contextResponse', requestId: msg.requestId, data: ctxData
       }, event.origin);
       break;
     case 'viewWorkItem':
@@ -11699,7 +11699,7 @@ window.addEventListener('message', function (event) {
       if (msg.plugin) {
         document.querySelectorAll('iframe[data-plugin-id="' + msg.plugin + '"]').forEach(function (f) {
           if (f.contentWindow !== event.source) {
-            f.contentWindow.postMessage({ __devopsPilot: true, type: 'configChanged', data: {} }, location.origin);
+            f.contentWindow.postMessage({ __symphonee: true, type: 'configChanged', data: {} }, location.origin);
           }
         });
       }
@@ -13234,7 +13234,7 @@ async function openRecipeRunModal(recipeId) {
   }
 
   // Fetch live data the smart selectors will need
-  const pf = window.DevOpsPilot?.contributions?.providerFetch;
+  const pf = window.Symphonee?.contributions?.providerFetch;
   const [reposObj, iterations, ctx] = await Promise.all([
     fetch('/api/repos').then(r => r.json()).catch(() => ({})),
     (pf ? pf('workItem', 'iterationsRoute', {}) : Promise.resolve(null)).then(r => r ? r.json() : []).catch(() => []),
