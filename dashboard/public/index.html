@@ -11917,6 +11917,11 @@ function injectCenterTab(plugin, tab) {
 var pluginTabRegistry = [];
 
 function registerPluginTab(plugin, tabDef) {
+  // Only openable iframe-backed plugin tabs belong in the '+ Open Tab' menu.
+  // Pinned tabs slot in permanently, popup tabs have their own triggers, and
+  // claims-based tabs take over a hardcoded built-in slot -- none of those are
+  // "openable from the menu".
+  if (!tabDef || tabDef.pinned || tabDef.popup || tabDef.claims || !tabDef.html) return;
   var tabId = 'plugin-' + plugin.id + '-' + tabDef.id;
   if (!pluginTabRegistry.some(function(r) { return r.tabId === tabId; })) {
     pluginTabRegistry.push({ tabId: tabId, label: tabDef.label, plugin: plugin, tabDef: tabDef });
@@ -12163,9 +12168,10 @@ function applyPluginPinnedTabs(isIncognito, opts) {
       }
       _collectPinnedTabs('centerTabs').forEach(function(entry) {
         var tab = entry.tab;
-        // Popup tabs have their own triggers (viewWorkItem, openActivityTimeline)
-        // and should not appear in the + Open Tab menu.
-        if (!tab.claims || tab.popup) return;
+        // Only claims-based, ephemeral tabs belong here. Pinned tabs are already
+        // a permanent slot (no + menu entry needed) and popup tabs have their
+        // own triggers (viewWorkItem, openActivityTimeline, etc.).
+        if (!tab.claims || tab.pinned || tab.popup) return;
         var btn = document.getElementById(tab.claims.tabBtnId);
         if (!btn) return;
         pluginTabRegistry.push({
