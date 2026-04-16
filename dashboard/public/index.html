@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="warm-metallic">
+<html lang="en" data-theme="industrial-blue">
 <head>
   <meta charset="utf-8">
   <title>Symphonee</title>
@@ -70,8 +70,8 @@
       --term-bar-h: 40px;
     }
 
-    /* ── Theme: Warm Metallic (default) ──────────────────────────────────── */
-    :root, [data-theme="warm-metallic"] {
+    /* ── Theme: Warm Metallic ────────────────────────────────────────────── */
+    [data-theme="warm-metallic"] {
       --crust:    #141413;  --mantle:   #1a1a18;  --base:     #1e1e1c;
       --surface0: #262624;  --surface1: #2e2e2b;  --surface2: #363632;
       --overlay0: #45453f;  --overlay1: #5a5a52;
@@ -81,8 +81,8 @@
       --mauve:    #c49be8;  --teal:     #7ce8d4;  --accent:   #d97757;
     }
 
-    /* ── Theme: Industrial Blue ──────────────────────────────────────────── */
-    [data-theme="industrial-blue"] {
+    /* ── Theme: Industrial Blue (default) ────────────────────────────────── */
+    :root, [data-theme="industrial-blue"] {
       --crust:    #0d0d0d;  --mantle:   #131314;  --base:     #1b1b1f;
       --surface0: #232328;  --surface1: #2b2b31;  --surface2: #35353b;
       --overlay0: #44444c;  --overlay1: #5c5c66;
@@ -3474,9 +3474,9 @@ const TERM_THEMES = {
   'warm-sand':        { background: '#f8f5f0', foreground: '#2d2418', cursor: '#c2703e', selectionBackground: '#d0c5b580' },
 };
 
-let activeThemeId = 'warm-metallic';
+let activeThemeId = 'industrial-blue';
 function getActiveTermTheme() {
-  return TERM_THEMES['_active'] || TERM_THEMES[activeThemeId] || TERM_THEMES['warm-metallic'];
+  return TERM_THEMES['_active'] || TERM_THEMES[activeThemeId] || TERM_THEMES['industrial-blue'];
 }
 
 let activeCli = localStorage.getItem('symphonee-cli') || 'claude';
@@ -6930,6 +6930,26 @@ function applyShellTheme() {
   try { if (typeof _defineMonacoTheme === 'function' && monacoReady) _defineMonacoTheme(); } catch (_) {}
 }
 
+// Restart every connected terminal's PTY so the new theme is applied cleanly.
+// Called when the user picks or saves a theme; no-op before the WebSocket is up.
+function restartAllTerminalsForTheme() {
+  if (!ws || ws.readyState !== 1) return;
+  const th = getActiveTermTheme();
+  for (const [tid, inst] of termInstances) {
+    if (!inst || !inst.term) continue;
+    inst.term.options.theme = th;
+    const msg = JSON.stringify({ type: 'restart', termId: tid, cols: inst.term.cols || 80, rows: inst.term.rows || 24 });
+    try { ws.send(msg); } catch (_) {}
+    try { inst.term.clear(); } catch (_) {}
+    const st = termAiState.get(tid);
+    if (st) { st.launched = false; st.cli = null; }
+  }
+  try {
+    document.getElementById('termStatus').textContent = 'Shell ready';
+    document.getElementById('aiBtn').textContent = 'Launch AI';
+  } catch (_) {}
+}
+
 // Update the shared AI button/status for the current active shell
 function syncAiControls() {
   const st = getTermAi(activeTermId);
@@ -9947,6 +9967,7 @@ function saveCustomThemeFromEditor() {
   if (status) status.style.display = 'none';
   document.getElementById('themeNameInput').value = '';
   renderThemeList();
+  restartAllTerminalsForTheme();
   toast('Theme "' + name + '" saved', 'success');
 }
 
@@ -9989,6 +10010,7 @@ function applyBuiltinTheme(themeId) {
   delete TERM_THEMES['_active'];
   root.setAttribute('data-theme', themeId);
   applyShellTheme();
+  restartAllTerminalsForTheme();
   renderThemeList();
 }
 
@@ -10009,6 +10031,7 @@ function applyCustomTheme(idx) {
   } else {
     _applyVarsAsCustom(t.vars);
   }
+  restartAllTerminalsForTheme();
   renderThemeList();
 }
 
@@ -10018,7 +10041,7 @@ function deleteTheme(idx) {
   setSavedThemes(themes);
   if (deleted && localStorage.getItem(ACTIVE_THEME_KEY) === deleted.name) {
     localStorage.removeItem(ACTIVE_THEME_KEY);
-    applyBuiltinTheme('warm-metallic');
+    applyBuiltinTheme('industrial-blue');
   }
   renderThemeList();
   toast('Theme deleted', 'success');
@@ -10068,7 +10091,7 @@ function importThemes() {
 // Restore theme on load (with migration from old CLI-based names)
 function restoreCustomTheme() {
   const stored = localStorage.getItem(ACTIVE_THEME_KEY);
-  if (!stored) { applyBuiltinTheme('warm-metallic'); return; }
+  if (!stored) { applyBuiltinTheme('industrial-blue'); return; }
   if (stored.startsWith('__builtin_')) {
     let id = stored.replace('__builtin_', '');
     // Migrate old CLI-based theme IDs
@@ -10163,8 +10186,18 @@ function esc(str) {
 
 // ── Onboarding Wizard ───────────────────────────────────────────────────
 let _obStep = 0;
-let _obData = { displayName: '', org: '', project: '', pat: '', team: '', ghPat: '', whisperKey: '', defaultCli: 'claude', repos: {} };
+let _obData = { displayName: '', org: '', project: '', pat: '', team: '', ghPat: '', whisperKey: '', defaultCli: 'claude', repos: {}, theme: 'industrial-blue' };
 let _obAiStatus = {};
+
+function obPickTheme(themeId) {
+  _obData.theme = themeId;
+  applyBuiltinTheme(themeId);
+  document.querySelectorAll('.ob-theme-card').forEach(el => {
+    const isSel = el.dataset.themeId === themeId;
+    el.classList.toggle('selected', isSel);
+    el.style.borderColor = isSel ? 'var(--accent)' : 'var(--surface2)';
+  });
+}
 
 const OB_STEPS = [
   // 0: Display name
@@ -10193,7 +10226,31 @@ const OB_STEPS = [
       </button>
     </div>`,
   }),
-  // 2: AI Tools
+  // 2: Theme picker (fresh-start only; import path skips the wizard entirely)
+  () => ({
+    title: 'Pick a theme',
+    subtitle: 'Choose a look for Symphonee. You can change this any time from Settings > Appearance.',
+    html: (function() {
+      const sel = _obData.theme || 'industrial-blue';
+      return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:8px;">
+        ${BUILTIN_THEMES.map(t => {
+          const isSel = t.id === sel ? ' selected' : '';
+          return `<button type="button" class="ob-theme-card${isSel}" data-theme-id="${t.id}" onclick="obPickTheme('${t.id}')"
+            style="background:var(--surface0);border:2px solid ${t.id === sel ? 'var(--accent)' : 'var(--surface2)'};border-radius:var(--radius);padding:12px;cursor:pointer;text-align:left;transition:border-color .15s,transform .1s;display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;gap:6px;align-items:center;">
+              <span style="width:14px;height:14px;border-radius:50%;background:${t.tint};border:1px solid var(--overlay0);"></span>
+              <span style="width:14px;height:14px;border-radius:50%;background:${t.accent};border:1px solid var(--overlay0);"></span>
+              <span style="width:14px;height:14px;border-radius:3px;background:${t.text};border:1px solid var(--overlay0);"></span>
+            </div>
+            <div style="font-size:12px;font-weight:600;color:var(--text);">${esc(t.name)}</div>
+            <div style="font-size:10px;color:var(--subtext0);text-transform:uppercase;letter-spacing:0.5px;">${t.mode}</div>
+          </button>`;
+        }).join('')}
+      </div>
+      <div class="onboarding-hint" style="margin-top:12px;">Click a theme to preview it instantly. The current terminal(s) will refresh so the new colors apply cleanly.</div>`;
+    })(),
+  }),
+  // 3: AI Tools
   () => ({
     title: 'AI Tools',
     subtitle: 'Symphonee works with AI assistants to help you write code and manage your work. Check which ones are installed, then pick your default.',
@@ -10210,7 +10267,7 @@ const OB_STEPS = [
       <div class="onboarding-hint">Don't have any installed? Each tool has a one-click Install button above. They require <code>npm</code> (Node.js) which is already installed since this app is running.</div>`,
     onEnter: () => obDetectAiTools(),
   }),
-  // 3: Install Plugins (optional)
+  // 4: Install Plugins (optional)
   () => ({
     title: 'Install Plugins (optional)',
     subtitle: 'Browse the plugin registry and install whatever integrations you need. You can always add more later from Settings > Plugins > Browse.',
@@ -10220,7 +10277,7 @@ const OB_STEPS = [
       <div class="onboarding-hint">Each install clones the plugin repo into <code>dashboard/plugins/</code>. Configure them in Settings after onboarding finishes. Click Next to skip.</div>`,
     onEnter: () => obLoadPluginRegistry(),
   }),
-  // 4: Azure DevOps config form -- shown only when the azure-devops plugin is installed.
+  // 5: Azure DevOps config form -- shown only when the azure-devops plugin is installed.
   // A future Jira/Wrike plugin can ship its own onboarding step via a manifest
   // contribution; this step exists only for the first-party ADO plugin.
   () => ({
@@ -10242,7 +10299,7 @@ const OB_STEPS = [
       <div class="onboarding-field"><label>Display Name (must match your Azure DevOps name)</label><input id="obAdoName" type="text" value="${esc(_obData.displayName)}" oninput="_obData.displayName=this.value">
       <div style="font-size:10px;color:var(--subtext0);margin-top:3px;">This needs to match exactly how your name appears in Azure DevOps for "My Items" to work.</div></div>`,
   }),
-  // 5: Repositories
+  // 6: Repositories
   () => ({
     title: 'Repositories',
     subtitle: 'Add the local repositories you work with. Symphonee uses these for file browsing, diffs, commits, and pull requests.',
@@ -10259,7 +10316,7 @@ const OB_STEPS = [
       </div>`,
     onEnter: () => { obRenderRepos(); renderCloneSourceButtons('obRepoAddBtns','ob','onboarding-btn onboarding-btn-primary'); },
   }),
-  // 6: GitHub PAT + Whisper. GitHub section renders only when the github
+  // 7: GitHub PAT + Whisper. GitHub section renders only when the github
   // plugin is installed -- plugin-absent installs see only Whisper here.
   // Whisper is a core (non-plugin) capability and always shown.
   () => ({
@@ -10290,7 +10347,7 @@ const OB_STEPS = [
         <div style="font-size:10px;color:var(--subtext0);margin-top:3px;">Hold Ctrl+Shift to talk, release to transcribe. Uses OpenAI Whisper ($0.006/min).</div>`;
     })(),
   }),
-  // 7: Overview
+  // 8: Overview
   () => ({
     title: "You're all set!",
     subtitle: "Here's what ships with Symphonee. Install plugins from Settings > Plugins to add integrations like Backlog, PRs, or CMS.",
@@ -10329,7 +10386,7 @@ function _obHasPlugin(id) { return _obInstalledPluginIds.has(id); }
 
 async function startOnboarding() {
   _obStep = 0;
-  _obData = { displayName: '', org: '', project: '', pat: '', team: '', ghPat: '', whisperKey: '', defaultCli: 'claude', repos: {} };
+  _obData = { displayName: '', org: '', project: '', pat: '', team: '', ghPat: '', whisperKey: '', defaultCli: 'claude', repos: {}, theme: (localStorage.getItem(ACTIVE_THEME_KEY) || '').replace('__builtin_', '') || 'industrial-blue' };
   await _obRefreshInstalledPlugins();
   window._loadedPluginsRaw = Array.from(_obInstalledPluginIds).map(id => ({ id }));
   document.getElementById('onboarding').classList.add('visible');
@@ -10593,36 +10650,49 @@ async function obImportSettings() {
   input.onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    let text;
     try {
-      const text = await file.text();
-      const data = JSON.parse(text);
+      text = await file.text();
+      JSON.parse(text);
+    } catch (_) {
+      toast('Invalid settings file', 'error');
+      return;
+    }
+    // Hide the onboarding and show a persistent loading screen right away so
+    // the user sees something is happening while the server downloads and
+    // installs plugins (this call can take several seconds).
+    document.getElementById('onboarding').classList.remove('visible');
+    showLoading('Importing settings and installing plugins...');
+    // Cancel the 8-second auto-hide; we control when to hide this overlay.
+    try { clearTimeout(_loadingTimer); } catch (_) {}
+    try {
       const res = await fetch('/api/config/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify(JSON.parse(text)),
       });
-      const result = await res.json();
-      if (result.ok) {
-        document.getElementById('onboarding').classList.remove('visible');
-        showLoading(result.pluginsInstalled ? 'Importing settings and installing plugins...' : 'Importing settings...');
-        const minWait = new Promise(r => setTimeout(r, 3000));
-        await loadConfig(true);
-        loadVelocity();
-        await minWait;
+      const result = await res.json().catch(() => ({}));
+      if (!result || !result.ok) {
         hideLoading();
-        var msg = 'Settings imported successfully!';
-        if (result.pluginsInstalled && result.pluginsInstalled.length > 0) {
-          msg += ' Installed ' + result.pluginsInstalled.length + ' plugin(s): ' + result.pluginsInstalled.join(', ') + '.';
-          msg += ' Restart the app to activate them.';
-        } else {
-          msg += ' You may need to re-enter your PATs in Settings.';
-        }
-        toast(msg, 'success');
-      } else {
-        toast(`Import failed: ${result.error || 'Unknown error'}`, 'error');
+        toast('Import failed: ' + (result && result.error ? result.error : 'Unknown error'), 'error');
+        return;
       }
+      // Update the loading label so the user knows we are nearly done.
+      try {
+        const plugins = Array.isArray(result.pluginsInstalled) ? result.pluginsInstalled : [];
+        const label = document.getElementById('loadingLabel');
+        if (label) {
+          label.textContent = plugins.length
+            ? 'Installed ' + plugins.length + ' plugin(s). Restarting app...'
+            : 'Settings imported. Restarting app...';
+        }
+      } catch (_) {}
+      // Always restart after a successful import so plugins, themes, and
+      // other settings load cleanly for the user.
+      setTimeout(() => restartApp(), 800);
     } catch (err) {
-      toast('Invalid settings file', 'error');
+      hideLoading();
+      toast('Import failed: ' + (err && err.message ? err.message : 'network error'), 'error');
     }
   };
   input.click();
