@@ -3777,6 +3777,7 @@ requestAnimationFrame(fitTerminalNow);
           document.getElementById('statusDot').className = 'status-dot connected';
           document.getElementById('connectionStatus').textContent = 'Connected';
           syncAiControls();
+          if (msg.isNew) writeSymphoneeBanner(msg.termId);
           if (_shellReadyResolve) {
             const cb = _shellReadyResolve;
             _shellReadyResolve = null;
@@ -7031,7 +7032,8 @@ function launchAiWith(cli) {
     if (shouldYolo && YOLO_FLAGS[cli]) {
       cmd += ' ' + YOLO_FLAGS[cli];
     }
-    sendCommand(cmd, termId);
+    // Wipe the Symphonee banner before the CLI takes over the screen.
+    sendCommand('cls; ' + cmd, termId);
     const st = getTermAi(termId);
     st.cli = cli;
     st.launched = true;
@@ -7127,6 +7129,42 @@ function resumeAiSession() {
 function sendCommand(cmd, termId) {
   const tid = termId || 'main';
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', termId: tid, data: cmd + '\r' }));
+}
+
+// Symphonee ASCII banner. Painted in the active theme's accent color via a
+// PowerShell-driven cls + Console.Write so PSReadLine's prompt-row cache
+// stays in sync (rendering banner straight to xterm desyncs it and typed
+// input ends up redrawn behind the banner).
+const SYMPHONEE_BANNER_LINES = [
+  '  \u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2588\u2557   \u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557  \u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557',
+  ' \u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u255a\u2588\u2588\u2557 \u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2557  \u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d',
+  ' \u255a\u2588\u2588\u2588\u2588\u2588\u2557  \u255a\u2588\u2588\u2588\u2588\u2554\u255d \u2588\u2588\u2554\u2588\u2588\u2588\u2588\u2554\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2554\u2588\u2588\u2557 \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2557  ',
+  '  \u255a\u2550\u2550\u2550\u2588\u2588\u2557  \u255a\u2588\u2588\u2554\u255d  \u2588\u2588\u2557\u255a\u2588\u2588\u2554\u255d\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u255d \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2557\u255a\u2588\u2588\u2557\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u255d  \u2588\u2588\u2554\u2550\u2550\u255d  ',
+  ' \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d   \u2588\u2588\u2557   \u2588\u2588\u2557 \u255a\u2550\u255d \u2588\u2588\u2557\u2588\u2588\u2557     \u2588\u2588\u2557  \u2588\u2588\u2557\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2557 \u255a\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557',
+  ' \u255a\u2550\u2550\u2550\u2550\u2550\u255d    \u255a\u2550\u255d   \u255a\u2550\u255d     \u255a\u2550\u255d\u255a\u2550\u255d     \u255a\u2550\u255d  \u255a\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u255d  \u255a\u2550\u2550\u2550\u255d\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d',
+];
+
+function getAccentRgb() {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  // Accept rgb(r,g,b), rgba(r,g,b,a), #rrggbb, #rgb. Fall back to a neutral cyan.
+  let m = raw.match(/rgba?\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (m) return [+m[1], +m[2], +m[3]];
+  m = raw.match(/^#([0-9a-f]{6})$/i);
+  if (m) return [parseInt(m[1].slice(0,2),16), parseInt(m[1].slice(2,4),16), parseInt(m[1].slice(4,6),16)];
+  m = raw.match(/^#([0-9a-f]{3})$/i);
+  if (m) return [parseInt(m[1][0]+m[1][0],16), parseInt(m[1][1]+m[1][1],16), parseInt(m[1][2]+m[1][2],16)];
+  return [102, 217, 239];
+}
+
+function writeSymphoneeBanner(termId) {
+  const [r, g, b] = getAccentRgb();
+  const colored = SYMPHONEE_BANNER_LINES
+    .map(l => `\x1b[1;38;2;${r};${g};${b}m${l}\x1b[0m`)
+    .join('\r\n');
+  const payload = '\r\n' + colored + '\r\n\r\n';
+  const b64 = btoa(unescape(encodeURIComponent(payload)));
+  const psCmd = `cls; [Console]::Write([System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64}')))`;
+  setTimeout(() => sendCommand(psCmd, termId), 600);
 }
 
 async function restartApp() {
