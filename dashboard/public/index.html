@@ -9499,32 +9499,37 @@ async function factoryResetConfirm() {
 }
 
 async function saveSettings() {
-  const defaultCli = document.getElementById('settingsDefaultCli').value;
-  const payload = {
-    AzureDevOpsOrg: document.getElementById('settingsOrg').value.trim(),
-    AzureDevOpsProject: _settingsActiveProject,
-    AzureDevOpsProjects: _settingsProjects,
-    AzureDevOpsPAT: document.getElementById('settingsPAT').value.trim(),
-    DefaultTeam: document.getElementById('settingsTeam').value.trim(),
-    DefaultUser: document.getElementById('settingsUser').value.trim(),
-    GitHubPAT: document.getElementById('settingsGitHubPAT').value.trim(),
-    WhisperKey: document.getElementById('settingsWispr').value.trim(),
-    OrchestrateMode: document.getElementById('settingsOrchestrateMode').checked,
-    OrchestrateCliList: Array.from(document.querySelectorAll('.orch-cli-cb:checked')).map(function(cb) { return cb.value; }),
-    IncognitoMode: document.getElementById('settingsIncognitoMode').checked,
-    AiApiKeys: {
-      OPENAI_API_KEY: document.getElementById('settingsOpenaiKey').value.trim() || undefined,
-      GEMINI_API_KEY: document.getElementById('settingsGeminiKey').value.trim() || undefined,
-      ANTHROPIC_API_KEY: document.getElementById('settingsAnthropicKey').value.trim() || undefined,
-      XAI_API_KEY: document.getElementById('settingsXaiKey').value.trim() || undefined,
-    },
-    OrchestrateResultDelivery: 'inject',
-    BrowserCredentials: configData.BrowserCredentials || {},
-    DefaultCli: defaultCli,
-    Repos: configData.Repos || {},
-  };
-
+  // Safe readers -- plugin-contributed settings fields can disappear from the
+  // DOM when their owning plugin is uninstalled, and we still want the save +
+  // restart flow to complete in that case (the uninstall already ran
+  // server-side; we just need the relaunch).
+  const _txt = (id) => { const el = document.getElementById(id); return el ? (el.value || '').trim() : ''; };
+  const _chk = (id) => { const el = document.getElementById(id); return !!(el && el.checked); };
   try {
+    const defaultCli = _txt('settingsDefaultCli') || activeCli || 'claude';
+    const payload = {
+      AzureDevOpsOrg: _txt('settingsOrg'),
+      AzureDevOpsProject: _settingsActiveProject,
+      AzureDevOpsProjects: _settingsProjects,
+      AzureDevOpsPAT: _txt('settingsPAT'),
+      DefaultTeam: _txt('settingsTeam'),
+      DefaultUser: _txt('settingsUser'),
+      GitHubPAT: _txt('settingsGitHubPAT'),
+      WhisperKey: _txt('settingsWispr'),
+      OrchestrateMode: _chk('settingsOrchestrateMode'),
+      OrchestrateCliList: Array.from(document.querySelectorAll('.orch-cli-cb:checked')).map(function(cb) { return cb.value; }),
+      IncognitoMode: _chk('settingsIncognitoMode'),
+      AiApiKeys: {
+        OPENAI_API_KEY: _txt('settingsOpenaiKey') || undefined,
+        GEMINI_API_KEY: _txt('settingsGeminiKey') || undefined,
+        ANTHROPIC_API_KEY: _txt('settingsAnthropicKey') || undefined,
+        XAI_API_KEY: _txt('settingsXaiKey') || undefined,
+      },
+      OrchestrateResultDelivery: 'inject',
+      BrowserCredentials: configData.BrowserCredentials || {},
+      DefaultCli: defaultCli,
+      Repos: configData.Repos || {},
+    };
     const res = await fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -9560,7 +9565,8 @@ async function saveSettings() {
       if (defaultCli && defaultCli !== activeCli) {
         switchCli(defaultCli);
       }
-      document.getElementById('sprintSelect').innerHTML = '<option value="">All Iterations</option>';
+      const _sprintSel = document.getElementById('sprintSelect');
+      if (_sprintSel) _sprintSel.innerHTML = '<option value="">All Iterations</option>';
       await loadConfig(true);
       loadVelocity();
       await minWait;
