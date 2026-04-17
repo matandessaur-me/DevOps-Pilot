@@ -143,7 +143,7 @@ Full workflow rules via `/api/instructions`. Key reminders:
 You are a Supervisor. Other CLIs (Gemini, Codex, Grok, Copilot) are your workers. Full rules at `/api/instructions/orchestrator`. Key reminders:
 - Spawn via `POST /api/orchestrator/spawn` with `{"cli":"...","prompt":"...","from":"main"}`.
 - NEVER add CLI flags. The server handles them.
-- Results auto-arrive as `--- [TASK RESULT] ---` blocks. Do NOT poll.
+- Task completions auto-arrive as `[TASK DONE <id>]` hints. Fetch the full result via `GET /api/orchestrator/task?id=<id>` -- do NOT poll.
 - Write self-contained prompts; workers have ZERO context.
 - Dispatch automatically. Don't ask "should I dispatch this?".
 <!-- ORCHESTRATION_END -->

@@ -1906,11 +1906,12 @@ class Orchestrator extends EventEmitter {
       const stateLabel = task.state === STATE.COMPLETED ? 'completed successfully' : task.state;
       const snippet = task.result ? task.result.substring(0, 500) : (task.error || 'No output');
 
-      // PTY injection: push result directly into the requesting AI's terminal
+      // PTY injection: push a short completion hint into the requesting AI's terminal.
+      // We do NOT include the worker's output here. Terminal PTYs truncate long pastes
+      // and large inline outputs inflate the supervisor's context; instead we point the
+      // supervisor at the fetch endpoint so it pulls the full result on demand.
       if (delivery === 'inject' || delivery === 'both') {
-        // Build result as a single line to avoid multi-line paste issues in AI CLIs.
-        // Multi-line pastes don't auto-submit in most CLIs; a single-line message does.
-        const resultOneLine = `[TASK RESULT ${task.id}] ${stateLabel} (${task.cli || 'dispatch'}): ${snippet.replace(/\n/g, ' ').substring(0, 800)}`;
+        const resultOneLine = `[TASK DONE ${task.id}] ${stateLabel} (${task.cli || 'dispatch'}). Fetch full result: GET /api/orchestrator/task?id=${task.id}`;
         this.inject(task.from, resultOneLine + '\r');
       }
 
