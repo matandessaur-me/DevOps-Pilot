@@ -365,6 +365,46 @@ const server = http.createServer(async (req, res) => {
       catch (e) { return json(res, { error: e.message }, 500); }
     }
 
+    // Reveal a specific file in the OS file explorer (highlighted).
+    //   { type: 'note', name }      -> notes/<name>.md
+    //   { type: 'file', repo, path} -> <configured repo path>/<path>
+    if (url.pathname === '/api/ui/reveal' && req.method === 'POST') {
+      const body = await readBody(req);
+      const type = body.type;
+      let target = null;
+      if (type === 'note') {
+        const name = String(body.name || '').replace(/\.\./g, '');
+        if (!name) return json(res, { error: 'name required' }, 400);
+        const candidate = path.join(notesDir, name.endsWith('.md') ? name : name + '.md');
+        if (!path.resolve(candidate).startsWith(path.resolve(notesDir))) return json(res, { error: 'Invalid path' }, 403);
+        target = candidate;
+      } else if (type === 'file') {
+        const repoName = String(body.repo || '').trim();
+        const rel = String(body.path || '').replace(/\.\./g, '');
+        const cfg = getConfig();
+        const repoPath = (cfg.Repos || {})[repoName];
+        if (!repoPath) return json(res, { error: `Repo '${repoName}' not configured` }, 400);
+        const candidate = rel ? path.join(repoPath, rel) : repoPath;
+        if (!path.resolve(candidate).startsWith(path.resolve(repoPath))) return json(res, { error: 'Invalid path' }, 403);
+        target = candidate;
+      } else {
+        return json(res, { error: "type must be 'note' or 'file'" }, 400);
+      }
+      if (!fs.existsSync(target)) return json(res, { error: 'Path does not exist: ' + target }, 404);
+      try {
+        if (process.platform === 'win32') {
+          // /select, highlights the target in an Explorer window.
+          spawnSync('explorer.exe', ['/select,', target], { detached: true, stdio: 'ignore' });
+        } else if (process.platform === 'darwin') {
+          spawnSync('open', ['-R', target], { detached: true, stdio: 'ignore' });
+        } else {
+          const parent = fs.statSync(target).isDirectory() ? target : path.dirname(target);
+          spawnSync('xdg-open', [parent], { detached: true, stdio: 'ignore' });
+        }
+        return json(res, { ok: true, path: target });
+      } catch (e) { return json(res, { error: e.message }, 500); }
+    }
+
     // ── Permissions ────────────────────────────────────────────────────────
     if (url.pathname === '/api/permissions' && req.method === 'GET') {
       return json(res, { settings: permissions.loadSettings(configPath), modes: permissions.MODES, defaults: permissions.MODE_DEFAULTS });

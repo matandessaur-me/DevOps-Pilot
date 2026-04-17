@@ -2208,6 +2208,7 @@
       <div id="sidebarCoreActions">
         <div class="section-title">Actions</div>
         <button class="btn" onclick="refreshAll()"><i data-lucide="refresh-cw"></i> Refresh</button>
+        <button class="btn" onclick="analyzeActiveRepo()" title="Generate a repo map and send it to the AI"><i data-lucide="brain"></i> Analyze Repo</button>
         <button class="btn" onclick="openRepoMapModal()"><i data-lucide="map"></i> Generate Repo Map</button>
         <div id="sidebarPluginActionsCore"></div>
         <div class="divider"></div>
@@ -2511,6 +2512,7 @@
         <div class="files-viewer">
           <div class="files-viewer-toolbar" id="filesViewerToolbar">
             <span id="filesViewerTitle" style="font-size:13px;font-weight:600;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">No file selected</span>
+            <button class="tab-bar-btn" id="filesRevealBtn" onclick="revealCurrentFileInExplorer()" title="Show in File Explorer" style="display:none;"><i data-lucide="folder-open" style="width:13px;height:13px;"></i></button>
             <button class="tab-bar-btn" id="filesToggleEditBtn" onclick="toggleFilesEdit()" style="display:none;">Edit</button>
           </div>
           <div id="monacoContainer" style="flex:1;display:none;position:relative;">
@@ -2658,6 +2660,7 @@
             <span id="noteTitle" style="font-size:13px;font-weight:600;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">No note selected</span>
             <button class="tab-bar-btn" id="noteModeBtn" onclick="toggleNoteMode()" style="font-size:10px;">Preview</button>
             <button class="tab-bar-btn" onclick="sendNoteToAi()" title="Send note content to AI">Send to AI</button>
+            <button class="tab-bar-btn" onclick="revealCurrentNoteInExplorer()" title="Show in File Explorer"><i data-lucide="folder-open" style="width:13px;height:13px;"></i></button>
             <button class="tab-bar-btn" onclick="exportCurrentNote()" title="Download this note as Markdown">Export</button>
             <button class="tab-bar-btn" onclick="saveCurrentNote()" id="noteSaveBtn" style="display:none;">Save</button>
           </div>
@@ -3388,10 +3391,14 @@
 <div class="context-menu" id="noteContextMenu">
   <div class="context-menu-item" onclick="renameNoteFromContext()"><i data-lucide="pencil"></i> Rename</div>
   <div class="context-menu-item" onclick="duplicateNoteFromContext()"><i data-lucide="copy"></i> Duplicate</div>
+  <div class="context-menu-item" onclick="revealNoteFromContext()"><i data-lucide="folder-open"></i> Open in Explorer</div>
   <div class="context-menu-item danger" onclick="deleteNoteFromContext()"><i data-lucide="trash-2"></i> Delete</div>
 </div>
 <div class="context-menu" id="diffFileContextMenu">
   <div class="context-menu-item danger" onclick="discardFileFromContext()"><i data-lucide="undo-2"></i> Discard Changes</div>
+</div>
+<div class="context-menu" id="fileTreeContextMenu">
+  <div class="context-menu-item" onclick="revealFileFromContext()"><i data-lucide="folder-open"></i> Open in Explorer</div>
 </div>
 
 <!-- ═══ Confirm Dialog ══════════════════════════════════════════════════ -->
@@ -4025,7 +4032,8 @@ async function loadFileTree(subPath) {
 
     tree.innerHTML = data.entries.map(e => `
       <div class="file-item ${e.isDir ? 'dir' : ''} ${filesCurrentFile && filesCurrentFile.path === e.path ? 'active' : ''}"
-           onclick="${e.isDir ? `loadFileTree('${esc(e.path)}')` : `viewFile('${esc(e.path)}')`}">
+           onclick="${e.isDir ? `loadFileTree('${esc(e.path)}')` : `viewFile('${esc(e.path)}')`}"
+           oncontextmenu="event.preventDefault();showFileTreeContextMenu(event,'${esc(e.path)}')">
         <i data-lucide="${e.isDir ? 'folder' : fileIcon(e.name)}"></i>
         <span>${esc(e.name)}</span>
       </div>
@@ -4199,6 +4207,7 @@ async function viewFile(filePath, goToLine, highlightQuery) {
     filesCurrentFile = { name: filePath.split('/').pop(), path: filePath, ext, content: '', isMedia: true };
     document.getElementById('filesViewerTitle').textContent = filesCurrentFile.name;
     document.getElementById('filesToggleEditBtn').style.display = 'none';
+    const _revBtn = document.getElementById('filesRevealBtn'); if (_revBtn) _revBtn.style.display = '';
     document.getElementById('monacoContainer').style.display = 'none';
     document.getElementById('monacoSaveBar').style.display = 'none';
     document.getElementById('filesEmpty').style.display = 'none';
@@ -4241,6 +4250,7 @@ function setFilesMode(mode) {
   const emptyEl = document.getElementById('filesEmpty');
   const saveBar = document.getElementById('monacoSaveBar');
   const toggleBtn = document.getElementById('filesToggleEditBtn');
+  const revealBtn = document.getElementById('filesRevealBtn');
 
   monacoEl.style.display = 'none';
   emptyEl.style.display = 'none';
@@ -4249,10 +4259,12 @@ function setFilesMode(mode) {
   if (!filesCurrentFile) {
     emptyEl.style.display = '';
     toggleBtn.style.display = 'none';
+    if (revealBtn) revealBtn.style.display = 'none';
     return;
   }
 
   toggleBtn.style.display = '';
+  if (revealBtn) revealBtn.style.display = '';
   toggleBtn.textContent = mode === 'edit' ? 'View' : 'Edit';
   monacoEl.style.display = '';
 
@@ -6029,7 +6041,56 @@ function showNoteContextMenu(e, name) {
 document.addEventListener('click', () => {
   document.getElementById('noteContextMenu').classList.remove('open');
   document.getElementById('diffFileContextMenu').classList.remove('open');
+  const ftc = document.getElementById('fileTreeContextMenu');
+  if (ftc) ftc.classList.remove('open');
 });
+
+// ── File tree context menu (Open in Explorer) ───────────────────────────
+let contextFileTreePath = null;
+function showFileTreeContextMenu(e, filePath) {
+  contextFileTreePath = filePath;
+  const menu = document.getElementById('fileTreeContextMenu');
+  if (!menu) return;
+  menu.style.left = e.clientX + 'px';
+  menu.style.top = e.clientY + 'px';
+  menu.classList.add('open');
+  try { lucide.createIcons({ nodes: [menu] }); } catch (_) {}
+}
+
+async function revealPath(type, payload) {
+  try {
+    const res = await fetch('/api/ui/reveal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({ type }, payload)),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) { toast(data.error || 'Could not reveal', 'error'); return false; }
+    return true;
+  } catch (_) { toast('Could not reveal', 'error'); return false; }
+}
+
+async function revealFileFromContext() {
+  document.getElementById('fileTreeContextMenu').classList.remove('open');
+  if (!filesCurrentRepo || !contextFileTreePath) return;
+  await revealPath('file', { repo: filesCurrentRepo, path: contextFileTreePath });
+}
+
+async function revealCurrentFileInExplorer() {
+  if (!filesCurrentRepo || !filesCurrentFile) return;
+  await revealPath('file', { repo: filesCurrentRepo, path: filesCurrentFile.path });
+}
+
+async function revealCurrentNoteInExplorer() {
+  if (!currentNote) { toast('Select a note first', 'error'); return; }
+  await revealPath('note', { name: currentNote });
+}
+
+async function revealNoteFromContext() {
+  document.getElementById('noteContextMenu').classList.remove('open');
+  if (!contextNoteName) return;
+  await revealPath('note', { name: contextNoteName });
+}
 
 async function deleteNoteFromContext() {
   document.getElementById('noteContextMenu').classList.remove('open');
@@ -11056,6 +11117,7 @@ function getCmdActions() {
     // Core actions (always-on)
     { label: 'Refresh', icon: 'refresh-cw', action: () => refreshAll(), category: 'Action', hint: 'Ctrl+R' },
     { label: 'Generate Repo Map', icon: 'map', action: () => openRepoMapModal(), category: 'Action', hint: 'Symbol map of the active repo' },
+    { label: 'Analyze Repo', icon: 'brain', action: () => analyzeActiveRepo(), category: 'AI', hint: 'Generate a repo map and send it to the AI' },
     { label: 'Search Notes + Learnings', icon: 'search', action: () => { document.getElementById('cmdPaletteInput').value = 'find '; filterCmdPalette(); }, category: 'Action', hint: 'find <query>' },
     // Git (local ops always work; remote pull/push still listed but fail gracefully without auth)
     { label: 'Switch Branch', icon: 'git-branch', action: () => openGitModal('branches'), category: 'Git' },
@@ -11343,6 +11405,8 @@ async function openRepoMapModal() {
         </div>
         <div style="flex:1;"></div>
         <button onclick="copyRepoMap()" style="font-size:12px;padding:5px 12px;background:var(--surface1);border:1px solid var(--surface2);color:var(--text);border-radius:4px;cursor:pointer;">Copy</button>
+        <button onclick="saveRepoMapAsNote()" style="font-size:12px;padding:5px 12px;background:var(--surface1);border:1px solid var(--surface2);color:var(--text);border-radius:4px;cursor:pointer;" title="Save this repo map as a Symphonee note">Save as Note</button>
+        <button onclick="sendRepoMapToAi()" style="font-size:12px;padding:5px 12px;background:var(--accent);border:1px solid var(--surface2);color:#000;font-weight:600;border-radius:4px;cursor:pointer;" title="Send the map to the AI in the terminal">Send to AI</button>
         <button onclick="closeRepoMapModal()" style="font-size:12px;padding:5px 12px;background:var(--surface1);border:1px solid var(--surface2);border-radius:4px;color:var(--text);cursor:pointer;">Close</button>
       </div>
       <div id="repoMapEditor" style="flex:1;border:1px solid var(--surface2);border-radius:4px;overflow:hidden;display:block;"></div>
@@ -11425,6 +11489,62 @@ async function loadRepoMapInto() {
 async function copyRepoMap() {
   try { await navigator.clipboard.writeText(_repoMapMarkdownText); toast('Copied to clipboard', 'success'); }
   catch (_) { toast('Copy failed', 'error'); }
+}
+
+async function saveRepoMapAsNote() {
+  if (!_repoMapMarkdownText || _repoMapMarkdownText.startsWith('Failed:') || _repoMapMarkdownText.startsWith('Generating')) {
+    toast('No repo map to save yet', 'error'); return;
+  }
+  const repo = document.getElementById('repoMapRepo')?.value || 'repo';
+  const ts = new Date().toISOString().slice(0, 10);
+  const defaultName = `repo-map-${repo}-${ts}`.replace(/[^a-zA-Z0-9._-]/g, '-');
+  const name = await customPrompt('Save Repo Map as Note', defaultName);
+  if (!name) return;
+  try {
+    const createRes = await fetch('/api/notes/create', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const created = await createRes.json();
+    if (created.error && !/exists/i.test(created.error)) { toast(created.error, 'error'); return; }
+    const saveRes = await fetch('/api/notes/save', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: created.name || name, content: _repoMapMarkdownText }),
+    });
+    const saved = await saveRes.json();
+    if (saved.error) { toast(saved.error, 'error'); return; }
+    toast(`Saved as note "${created.name || name}"`, 'success');
+    if (typeof loadNotesList === 'function') loadNotesList();
+  } catch (_) { toast('Failed to save note', 'error'); }
+}
+
+async function sendRepoMapToAi() {
+  if (!_repoMapMarkdownText || _repoMapMarkdownText.startsWith('Failed:') || _repoMapMarkdownText.startsWith('Generating')) {
+    toast('No repo map to send yet', 'error'); return;
+  }
+  const repo = document.getElementById('repoMapRepo')?.value || '';
+  const prompt = `Analyze the repository "${repo}" using the repo map below as ground truth for structure before diving into specific files. When I ask follow-up questions, ground your answers in this map.\n\n---\n${_repoMapMarkdownText}\n---`;
+  closeRepoMapModal();
+  askAi(prompt);
+}
+
+// Sidebar "Analyze Repo" action: fetch the repo map for the active repo,
+// then send it to the AI with an analyze prompt. Bypasses the modal so the
+// flow is one click for the common case.
+async function analyzeActiveRepo() {
+  let repo = '';
+  try { repo = (await fetch('/api/ui/context').then(r => r.json())).activeRepo || ''; } catch (_) {}
+  if (!repo) { toast('No active repo selected', 'error'); return; }
+  toast(`Generating repo map for ${repo}...`, 'info');
+  let md = '';
+  try {
+    const r = await fetch('/api/repo/map?repo=' + encodeURIComponent(repo) + '&budget=4000');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    md = await r.text();
+  } catch (e) { toast('Repo map failed: ' + e.message, 'error'); return; }
+  _repoMapMarkdownText = md;
+  const prompt = `Analyze the repository "${repo}" using the repo map below as ground truth for structure before diving into specific files. When I ask follow-up questions, ground your answers in this map.\n\n---\n${md}\n---`;
+  askAi(prompt);
 }
 
 // Tiny markdown -> HTML renderer (handles the subset our repo maps emit)
