@@ -3784,7 +3784,7 @@ requestAnimationFrame(fitTerminalNow);
           document.getElementById('statusDot').className = 'status-dot connected';
           document.getElementById('connectionStatus').textContent = 'Connected';
           syncAiControls();
-          if (msg.isNew) writeSymphoneeBanner(msg.termId);
+          if (msg.isNew && msg.termId === 'main') writeSymphoneeBanner(msg.termId);
           if (_shellReadyResolve) {
             const cb = _shellReadyResolve;
             _shellReadyResolve = null;
