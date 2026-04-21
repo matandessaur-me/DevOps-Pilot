@@ -733,6 +733,40 @@
     .ob-step-label { font-size: 12px; color: var(--text); }
     .ob-step-hint { font-size: 10px; color: var(--subtext0); margin-top: 1px; }
 
+    /* ── Quick-Ask bubble (bottom-left mini composer) ─────────────────── */
+    .quick-ask {
+      position: fixed; bottom: 18px; left: 18px; z-index: 9400;
+      font: 12px var(--font-ui);
+    }
+    .quick-ask-pill {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 8px 14px; background: var(--surface1);
+      border: 1px solid var(--overlay0); border-radius: 999px;
+      color: var(--text); font: 600 12px var(--font-ui);
+      cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+      transition: all 0.12s;
+    }
+    .quick-ask-pill:hover { background: var(--surface2); border-color: var(--overlay1); transform: translateY(-1px); }
+    .quick-ask-pill i { color: var(--accent); }
+    .quick-ask-panel {
+      display: none;
+      width: 360px; max-width: calc(100vw - 36px);
+      padding: 10px 12px;
+      background: var(--surface0); border: 1px solid var(--surface2);
+      border-radius: 10px; box-shadow: 0 12px 36px rgba(0,0,0,0.5);
+    }
+    .quick-ask.open .quick-ask-pill { display: none; }
+    .quick-ask.open .quick-ask-panel { display: block; animation: richToastIn 0.18s ease; }
+    .quick-ask-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    #quickAskInput {
+      width: 100%; resize: none;
+      background: var(--crust); color: var(--text);
+      border: 1px solid var(--surface2); border-radius: 6px;
+      padding: 8px 10px; font: 13px var(--font-ui); outline: none;
+    }
+    #quickAskInput:focus { border-color: var(--accent); }
+    .quick-ask-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+
     /* ── Floating action buttons (runtime-added by the AI) ──────────────── */
     .fab-layer {
       position: fixed; bottom: 72px; right: 18px; z-index: 9500;
@@ -3658,6 +3692,28 @@
 <div class="toast-container" id="toastContainer"></div>
 <div class="rich-toast-stack" id="richToastStack"></div>
 
+<!-- ═══ Quick-Ask bubble (always-visible mini composer) ═════════════════ -->
+<div class="quick-ask" id="quickAsk">
+  <button class="quick-ask-pill" id="quickAskPill" onclick="toggleQuickAsk()" title="Ask AI (Ctrl+J)">
+    <i data-lucide="sparkles" style="width:14px;height:14px;"></i>
+    <span>Ask AI</span>
+  </button>
+  <div class="quick-ask-panel" id="quickAskPanel">
+    <div class="quick-ask-head">
+      <i data-lucide="sparkles" style="width:13px;height:13px;color:var(--accent);"></i>
+      <span style="font-size:11px;color:var(--subtext0);font-weight:600;letter-spacing:0.3px;text-transform:uppercase;">Quick Ask</span>
+      <div style="flex:1;"></div>
+      <button onclick="toggleQuickAsk()" style="background:transparent;border:none;color:var(--subtext0);cursor:pointer;padding:2px;"><i data-lucide="x" style="width:12px;height:12px;"></i></button>
+    </div>
+    <textarea id="quickAskInput" placeholder="Ask anything. Enter to send, Shift+Enter for newline." rows="3"></textarea>
+    <div class="quick-ask-foot">
+      <span id="quickAskCliLabel" style="font-size:11px;color:var(--subtext0);"></span>
+      <div style="flex:1;"></div>
+      <button onclick="quickAskSend()" class="tab-bar-btn" style="background:var(--accent);color:var(--crust);border-color:var(--accent);">Send</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ Command Palette ═══════════════════════════════════════════════ -->
 <div class="cmd-palette-overlay" id="cmdPalette" onclick="if(event.target===this)closeCmdPalette()">
   <div class="cmd-palette">
@@ -4091,6 +4147,75 @@ requestAnimationFrame(fitTerminalNow);
       reconnectTimer = setTimeout(connect, 2500);
     };
   }
+
+// ── Quick-Ask bubble ────────────────────────────────────────────────────
+// Always-visible bottom-left pill. Ctrl+J also toggles it. Sends to the
+// active CLI via the same orchestrator path as the palette.
+function toggleQuickAsk() {
+  const root = document.getElementById('quickAsk');
+  if (!root) return;
+  const open = root.classList.toggle('open');
+  if (open) {
+    const label = document.getElementById('quickAskCliLabel');
+    if (label) label.textContent = 'Runner: ' + ((CLI_CONFIG[activeCli] && CLI_CONFIG[activeCli].label) || activeCli);
+    setTimeout(() => document.getElementById('quickAskInput')?.focus(), 60);
+  }
+}
+async function quickAskSend() {
+  const ta = document.getElementById('quickAskInput');
+  if (!ta) return;
+  const v = (ta.value || '').trim();
+  if (!v) return;
+  await askAIFromPalette(v);
+  ta.value = '';
+  document.getElementById('quickAsk')?.classList.remove('open');
+}
+document.addEventListener('keydown', (e) => {
+  // Ctrl+J toggles the quick-ask bubble.
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === 'j') {
+    e.preventDefault(); toggleQuickAsk(); return;
+  }
+  // Enter in the quick-ask textarea submits (Shift+Enter = newline).
+  if (e.key === 'Enter' && !e.shiftKey && document.activeElement?.id === 'quickAskInput') {
+    e.preventDefault();
+    quickAskSend();
+  } else if (e.key === 'Escape' && document.activeElement?.id === 'quickAskInput') {
+    e.preventDefault();
+    document.getElementById('quickAsk')?.classList.remove('open');
+  }
+}, true);
+
+// ── Focus / context-awareness state push ────────────────────────────────
+// Thin wrapper that POSTs the latest user focus to the server. The server
+// keeps it so any AI worker can call GET /api/application-state/focus and
+// know what the user is currently looking at without needing to ask.
+let _pushFocusTimer = null;
+let _pendingFocus = {};
+function _pushFocus(patch) {
+  Object.assign(_pendingFocus, patch || {});
+  clearTimeout(_pushFocusTimer);
+  _pushFocusTimer = setTimeout(() => {
+    const body = _pendingFocus;
+    _pendingFocus = {};
+    fetch('/api/application-state/focus', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).catch(() => {});
+  }, 250);
+}
+
+// Capture non-trivial text selections anywhere in the app. Debounced so we
+// don't ship a POST per character drag.
+let _selTimer = null;
+document.addEventListener('selectionchange', () => {
+  clearTimeout(_selTimer);
+  _selTimer = setTimeout(() => {
+    try {
+      const sel = String(window.getSelection ? window.getSelection().toString() : '').trim();
+      if (sel.length >= 3) _pushFocus({ selection: sel.slice(0, 2000) });
+    } catch (_) {}
+  }, 400);
+});
 
 // ── Scheduled / recurring AI jobs ───────────────────────────────────────
 // Thin UI over /api/jobs. A job is a saved prompt + CLI + schedule that the
@@ -6424,6 +6549,7 @@ async function loadNotesList() {
 
 async function openNote(name, opts) {
   try { markOnboarding('note'); } catch (_) {}
+  try { _pushFocus({ currentNote: name }); } catch (_) {}
   if (noteDirty && currentNote) await saveCurrentNote();
   try {
     const res = await fetch(`/api/notes/read?name=${encodeURIComponent(name)}`);
@@ -8270,6 +8396,7 @@ function askAi(prompt) {
 
 // ── Tab Switching ───────────────────────────────────────────────────────
 function switchTab(tab, preserveSearch) {
+  try { _pushFocus({ activeTab: tab }); } catch (_) {}
   document.querySelectorAll('.tab-btn').forEach(el => {
     var isActive = el.dataset.tab === tab;
     el.classList.toggle('active', isActive);
@@ -12348,6 +12475,24 @@ function renderPaletteSuggestions() {
   const input = document.getElementById('cmdPaletteInput');
   if (input && input.value.trim()) return;
 
+  // AI query history: 3 most-recently-asked prompts. Clicking re-sends.
+  const aiHist = _readAiHistory().slice(0, 3);
+  let histBlock = '';
+  if (aiHist.length) {
+    const items = aiHist.map((h, i) =>
+      '<div class="cmd-recent-item" data-hist-idx="' + i + '" title="' + (h.prompt || '').replace(/"/g, '&quot;') + '">' +
+        '<i data-lucide="sparkles" style="width:12px;height:12px;"></i>' +
+        '<span>' + esc((h.prompt || '').slice(0, 80)) + '</span>' +
+        '<span class="cmd-recent-cat">Ask again</span>' +
+      '</div>'
+    ).join('');
+    histBlock =
+      '<div class="cmd-suggest-block">' +
+        '<div class="cmd-suggest-heading">Recent prompts</div>' +
+        '<div class="cmd-recent-list">' + items + '</div>' +
+      '</div>';
+  }
+
   // Recents row: quick re-run of the last 5 palette picks.
   const recents = _getRecentPaletteActions();
   let recentsBlock = '';
@@ -12377,7 +12522,7 @@ function renderPaletteSuggestions() {
       '<div class="cmd-suggest-chips">' + chips + '</div>' +
     '</div>';
 
-  list.insertAdjacentHTML('afterbegin', recentsBlock + suggestBlock);
+  list.insertAdjacentHTML('afterbegin', histBlock + recentsBlock + suggestBlock);
 
   list.querySelectorAll('.cmd-suggest-chip').forEach(el => {
     el.addEventListener('click', () => {
@@ -12385,8 +12530,15 @@ function renderPaletteSuggestions() {
       askAIFromPalette(p);
     });
   });
+  // Two kinds of recent rows coexist: recent palette actions (-recent-idx)
+  // and recent AI prompts (-hist-idx). Differentiate by attribute.
   list.querySelectorAll('.cmd-recent-item').forEach((el) => {
     el.addEventListener('click', () => {
+      if (el.dataset.histIdx != null) {
+        const h = aiHist[parseInt(el.dataset.histIdx, 10)];
+        if (h && h.prompt) askAIFromPalette(h.prompt);
+        return;
+      }
       const i = parseInt(el.dataset.recentIdx, 10);
       const live = recents[i];
       if (live) { closeCmdPalette(); try { live.action(); } catch (e) { console.error(e); } }
@@ -12467,9 +12619,24 @@ function openShortcutHelp() {
 }
 
 // ── Palette AI fallback: dispatch a free-text query to the active CLI ───
+function _recordAiHistory(query) {
+  try {
+    const key = 'symphonee-ai-history-v1';
+    const prev = JSON.parse(localStorage.getItem(key) || '[]');
+    const entry = { prompt: query, at: Date.now(), cli: activeCli };
+    const next = [entry, ...prev.filter(e => e.prompt !== query)].slice(0, 25);
+    localStorage.setItem(key, JSON.stringify(next));
+  } catch (_) {}
+}
+function _readAiHistory() {
+  try { return JSON.parse(localStorage.getItem('symphonee-ai-history-v1') || '[]'); }
+  catch (_) { return []; }
+}
+
 async function askAIFromPalette(query) {
   closeCmdPalette();
   if (!query || !query.trim()) return;
+  _recordAiHistory(query.trim());
   const cli = activeCli || 'claude';
   const cliLabel = (CLI_CONFIG[cli] && CLI_CONFIG[cli].label) || cli;
   try {
@@ -12509,6 +12676,23 @@ function filterCmdPalette() {
   // a pill overlay so the user has visual feedback they're in command mode.
   const cmdMatch = raw.match(/^(\s*\/?(?:find|search))(\s+|$)/i);
   updatePalettePill(cmdMatch ? cmdMatch[1].replace(/^\s+/, '').replace(/^\//, '') : null);
+
+  // History command: "/history" or "/recent" lists the last 25 AI prompts.
+  if (/^\s*\/?(?:history|recent)\s*$/i.test(raw)) {
+    const hist = _readAiHistory();
+    _cmdFiltered = hist.length
+      ? hist.map(h => ({
+          label: h.prompt,
+          icon: 'sparkles',
+          action: () => askAIFromPalette(h.prompt),
+          category: 'History',
+          hint: new Date(h.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+        }))
+      : [{ label: 'No AI history yet', icon: 'clock', action: () => {}, category: 'History' }];
+    _cmdSelectedIdx = 0;
+    renderCmdPalette();
+    return;
+  }
 
   // Search command: "find <query>" or "search <query>" (slash optional)
   // -> hybrid search across notes + learnings

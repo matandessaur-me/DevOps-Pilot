@@ -600,6 +600,8 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/ui/context' && req.method === 'GET')         return json(res, getUiContextWithPath());
     if (url.pathname === '/api/ui/context' && req.method === 'POST')        return handleUiContextUpdate(req, res);
     if (url.pathname === '/api/ui/mutate' && req.method === 'POST')         return handleUiMutate(req, res);
+    if (url.pathname === '/api/application-state/focus' && req.method === 'GET')  return json(res, _getFocusState());
+    if (url.pathname === '/api/application-state/focus' && req.method === 'POST') return handleFocusUpdate(req, res);
 
     // ── Bootstrap: one call returns everything an AI CLI needs to start ─
     // The instructions tell every CLI (Claude, Gemini, Codex, Copilot, Grok)
@@ -2134,6 +2136,40 @@ async function handleUiAction(req, res, action) {
 //   { op: 'reset' }                              // clear all mutations
 //
 // `bodyHtml` is sanitized client-side; we do not eval anything on the server.
+// Focus / context-awareness state. Mirrors agent-native's application-state
+// pattern: the UI tells the server what it is currently looking at so any
+// AI worker can fetch one URL to know the user's "where" without asking.
+let _focusState = {
+  activeTab: null,     // "terminal" | "notes" | "files" | ...
+  activeRepo: null,    // mirrors /api/ui/context.activeRepo
+  currentNote: null,   // selected note name
+  selection: '',       // last non-trivial text selection
+  updatedAt: 0,
+};
+
+function _getFocusState() {
+  // Merge in the authoritative activeRepo from /api/ui/context so workers
+  // never have to fetch both endpoints.
+  const ctx = (typeof getUiContextWithPath === 'function') ? getUiContextWithPath() : {};
+  return {
+    ..._focusState,
+    activeRepo: _focusState.activeRepo || ctx.activeRepo || null,
+    activeRepoPath: ctx.activeRepoPath || null,
+  };
+}
+
+async function handleFocusUpdate(req, res) {
+  const data = await readBody(req);
+  _focusState = {
+    activeTab: data.activeTab ?? _focusState.activeTab,
+    activeRepo: data.activeRepo ?? _focusState.activeRepo,
+    currentNote: data.currentNote ?? _focusState.currentNote,
+    selection: typeof data.selection === 'string' ? data.selection.slice(0, 2000) : _focusState.selection,
+    updatedAt: Date.now(),
+  };
+  json(res, { ok: true });
+}
+
 async function handleUiMutate(req, res) {
   const data = await readBody(req);
   const ops = Array.isArray(data.ops) ? data.ops : (data.op ? [data] : []);
