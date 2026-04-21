@@ -690,6 +690,27 @@
     .orch-cta-title { font-size: 12px; font-weight: 600; color: var(--text); }
     .orch-cta-sub { font-size: 11px; color: var(--subtext0); }
 
+    /* ── Activity stats cards + sparkline ─────────────────────────────── */
+    .stat-card {
+      padding: 12px 14px; background: var(--surface1);
+      border: 1px solid var(--surface2); border-radius: 8px;
+    }
+    .stat-value { font-size: 18px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+    .stat-label { font-size: 10px; color: var(--subtext0); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+    .stat-sparkline {
+      display: flex; align-items: flex-end; gap: 6px;
+      height: 48px; padding: 4px 2px; background: var(--surface1);
+      border: 1px solid var(--surface2); border-radius: 8px;
+    }
+    .stat-bar {
+      flex: 1; background: var(--accent); border-radius: 2px 2px 0 0;
+      opacity: 0.8; transition: opacity 0.12s;
+    }
+    .stat-bar:hover { opacity: 1; }
+    .stat-table { width: 100%; border-collapse: collapse; font: 12px var(--font-ui); }
+    .stat-table td { padding: 4px 6px; border-bottom: 1px solid var(--surface1); color: var(--subtext1); }
+    .stat-table tbody tr:last-child td { border-bottom: none; }
+
     /* ── Scheduled jobs modal rows ────────────────────────────────────── */
     .job-row {
       display: flex; align-items: center; gap: 10px;
@@ -2948,7 +2969,9 @@
         <div class="orch-main">
           <div class="orch-main-toolbar">
             <span style="font-size:11px;font-weight:600;color:var(--overlay1);text-transform:uppercase;letter-spacing:0.5px;">Task Queue</span>
+            <input id="orchTaskSearch" type="text" placeholder="Filter by title, prompt, CLI..." oninput="renderOrchTasks()" onkeydown="if(event.key==='Escape'){this.value='';renderOrchTasks();}" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface1);border-radius:var(--radius);font-size:11px;padding:3px 8px;outline:none;width:220px;margin-left:10px;">
             <div style="flex:1;"></div>
+            <button onclick="openActivityStats()" class="tab-bar-btn" title="This week's activity" style="padding:3px 10px;">Stats</button>
             <select id="orchTaskFilter" onchange="orchRefreshTasks()" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface1);border-radius:var(--radius);font-size:11px;padding:3px 8px;outline:none;">
               <option value="">All</option>
               <option value="running">Running</option>
@@ -4147,6 +4170,84 @@ requestAnimationFrame(fitTerminalNow);
       reconnectTimer = setTimeout(connect, 2500);
     };
   }
+
+// ── Activity stats: weekly roll-up of orchestrator runs ─────────────────
+// Inspired by agent-native's usage store. Symphonee doesn't own the LLM
+// billing, so we aggregate task volume + runtime -- the data we actually
+// have. Gives users a proxy for "how much AI work am I doing this week".
+function openActivityStats() {
+  const tasks = Array.isArray(orchTasks) ? orchTasks : [];
+  const now = Date.now();
+  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+  const recent = tasks.filter(t => (t.startedAt || 0) >= weekAgo);
+
+  const byCli = new Map();
+  const byState = new Map();
+  const byDay = new Array(7).fill(0);
+  let totalMs = 0, withDuration = 0;
+  for (const t of recent) {
+    byCli.set(t.cli || t.type, (byCli.get(t.cli || t.type) || 0) + 1);
+    byState.set(t.state || 'unknown', (byState.get(t.state || 'unknown') || 0) + 1);
+    const d = new Date(t.startedAt || now);
+    const dayIdx = Math.floor((now - d.getTime()) / (24 * 60 * 60 * 1000));
+    if (dayIdx >= 0 && dayIdx < 7) byDay[6 - dayIdx]++;
+    if (t.startedAt && t.completedAt) { totalMs += (t.completedAt - t.startedAt); withDuration++; }
+  }
+  const avgDur = withDuration ? formatOrchDuration(totalMs / withDuration) : '-';
+  const totalMsStr = formatOrchDuration(totalMs || 0);
+
+  const maxDay = Math.max(1, ...byDay);
+  const bars = byDay.map(n => {
+    const h = Math.max(3, Math.round(40 * (n / maxDay)));
+    return '<div class="stat-bar" style="height:' + h + 'px;" title="' + n + ' task' + (n === 1 ? '' : 's') + '"></div>';
+  }).join('');
+
+  const cliRows = [...byCli.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => {
+    const label = (CLI_CONFIG[k] && CLI_CONFIG[k].label) || k;
+    return '<tr><td>' + esc(label) + '</td><td style="text-align:right;">' + v + '</td></tr>';
+  }).join('') || '<tr><td colspan="2" style="color:var(--subtext0);">No runs in the last 7 days</td></tr>';
+
+  const stateRows = [...byState.entries()].map(([k, v]) =>
+    '<tr><td><span class="orch-task-state ' + esc(k) + '">' + esc(k) + '</span></td><td style="text-align:right;">' + v + '</td></tr>'
+  ).join('') || '<tr><td colspan="2" style="color:var(--subtext0);">-</td></tr>';
+
+  let overlay = document.getElementById('statsOverlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
+  overlay.id = 'statsOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3250;display:flex;align-items:center;justify-content:center;font-family:var(--font-ui);';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML =
+    '<div style="background:var(--surface0);border:1px solid var(--surface2);border-radius:10px;width:560px;max-width:92vw;max-height:80vh;overflow-y:auto;box-shadow:0 12px 40px rgba(0,0,0,0.5);padding:18px 22px;">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">' +
+        '<i data-lucide="bar-chart-3" style="width:17px;height:17px;color:var(--accent);"></i>' +
+        '<strong style="font-size:14px;">Activity, last 7 days</strong>' +
+        '<div style="flex:1;"></div>' +
+        '<button onclick="document.getElementById(\'statsOverlay\').remove()" style="background:transparent;border:none;color:var(--subtext0);cursor:pointer;"><i data-lucide="x" style="width:14px;height:14px;"></i></button>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px;">' +
+        '<div class="stat-card"><div class="stat-value">' + recent.length + '</div><div class="stat-label">Tasks</div></div>' +
+        '<div class="stat-card"><div class="stat-value">' + avgDur + '</div><div class="stat-label">Avg duration</div></div>' +
+        '<div class="stat-card"><div class="stat-value">' + totalMsStr + '</div><div class="stat-label">Total runtime</div></div>' +
+      '</div>' +
+      '<div style="margin-bottom:18px;">' +
+        '<div style="font-size:10px;color:var(--overlay1);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Tasks per day</div>' +
+        '<div class="stat-sparkline">' + bars + '</div>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">' +
+        '<div>' +
+          '<div style="font-size:10px;color:var(--overlay1);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">By runner</div>' +
+          '<table class="stat-table"><tbody>' + cliRows + '</tbody></table>' +
+        '</div>' +
+        '<div>' +
+          '<div style="font-size:10px;color:var(--overlay1);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">By state</div>' +
+          '<table class="stat-table"><tbody>' + stateRows + '</tbody></table>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  try { lucide.createIcons({ nodes: [overlay] }); } catch (_) {}
+}
 
 // ── Quick-Ask bubble ────────────────────────────────────────────────────
 // Always-visible bottom-left pill. Ctrl+J also toggles it. Sends to the
@@ -7435,10 +7536,29 @@ function renderOrchTasks() {
   const countEl = document.getElementById('orchTaskCount');
   if (!el) return;
 
-  if (countEl) countEl.textContent = orchTasks.length + ' task' + (orchTasks.length === 1 ? '' : 's');
+  // Client-side filter: free-text matches across prompt / cli / model / state.
+  const q = (document.getElementById('orchTaskSearch')?.value || '').trim().toLowerCase();
+  const tasksAll = orchTasks;
+  const visibleTasks = q
+    ? tasksAll.filter(t => {
+        const parts = [t.prompt, t.cli, t.model, t.state, t.type, t.from].filter(Boolean).join(' ').toLowerCase();
+        return parts.includes(q);
+      })
+    : tasksAll;
 
-  if (!orchTasks.length) {
+  if (countEl) {
+    countEl.textContent = (q
+      ? visibleTasks.length + ' of ' + tasksAll.length
+      : tasksAll.length + ' task' + (tasksAll.length === 1 ? '' : 's'));
+  }
+
+  if (!visibleTasks.length) {
     el.innerHTML = '';
+    if (q) {
+      el.innerHTML = '<div style="padding:24px 12px;text-align:center;color:var(--subtext0);font-size:12px;">No tasks match "' + esc(q) + '"</div>';
+      if (_orchTimerInterval) { clearInterval(_orchTimerInterval); _orchTimerInterval = null; }
+      return;
+    }
     if (emptyEl) { emptyEl.style.display = ''; el.appendChild(emptyEl); }
     if (_orchTimerInterval) { clearInterval(_orchTimerInterval); _orchTimerInterval = null; }
     return;
@@ -7462,7 +7582,7 @@ function renderOrchTasks() {
     if (Object.keys(acc).length) accordionState[id] = acc;
   });
 
-  el.innerHTML = orchTasks.map(t => {
+  el.innerHTML = visibleTasks.map(t => {
     const isRunning = t.state === 'running';
     const isPending = t.state === 'pending';
     const elapsed = t.completedAt
@@ -12250,6 +12370,14 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'i') { e.preventDefault(); openAIFocusPalette(); return; }
     // Ctrl+/ → Keyboard shortcut cheatsheet
     if (e.key === '/') { e.preventDefault(); openShortcutHelp(); return; }
+    // Ctrl+. → Re-run the most recent AI prompt against the active CLI
+    if (e.key === '.') {
+      e.preventDefault();
+      const hist = _readAiHistory();
+      if (hist.length) askAIFromPalette(hist[0].prompt);
+      else toast('No AI history yet', 'info');
+      return;
+    }
     // Ctrl+B → Board (requires workItemProvider)
     if (e.key === 'b' && !inInput && _hasWIProvider) { e.preventDefault(); switchTab('backlog'); }
     // Ctrl+T → Terminal
@@ -12598,6 +12726,8 @@ function openShortcutHelp() {
           '<div style="font-size:10px;color:var(--overlay1);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">Core</div>' +
           row('Ctrl+K', 'Command palette') +
           row('Ctrl+I', 'Ask AI about selection') +
+          row('Ctrl+J', 'Toggle Quick-Ask bubble') +
+          row('Ctrl+.', 'Re-run last AI prompt') +
           row('Ctrl+/', 'This help') +
           row('Ctrl+T', 'Go to Terminal') +
           row('Esc',    'Close modals') +
