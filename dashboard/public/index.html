@@ -739,13 +739,13 @@
     .inapp-browser-bar .tab-bar-btn i { display: inline-flex; }
     .inapp-browser-frame {
       flex: 1; min-width: 0; min-height: 0; overflow: hidden;
-      background: var(--base);
+      background: #fff;
       display: flex; flex-direction: column;
     }
     .inapp-browser-frame webview,
     .inapp-browser-frame iframe {
       flex: 1; width: 100%; max-width: 100%; height: 100%;
-      border: 0; background: var(--base);
+      border: 0; background: #fff;
     }
     .inapp-browser-frame .inapp-empty {
       margin: auto; color: var(--subtext0); font: 12px var(--font-ui);
@@ -13060,7 +13060,7 @@ function _ensureInappBrowser(initialUrl) {
   view = document.createElement(tag);
   view.setAttribute('src', initialUrl || 'https://duckduckgo.com/');
   view.setAttribute('allowpopups', '');
-  view.setAttribute('style', 'flex:1;width:100%;height:100%;border:0;background:var(--base);');
+  view.setAttribute('style', 'flex:1;width:100%;height:100%;border:0;background:#fff;');
   if (tag === 'webview') {
     view.addEventListener('dom-ready', () => {
       applyInappBrowserAppearance();
