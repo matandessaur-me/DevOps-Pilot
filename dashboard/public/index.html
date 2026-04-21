@@ -300,8 +300,16 @@
       display: flex; align-items: center; justify-content: space-between;
       padding: 0 20px;
       background: var(--header-bg); border-bottom: 1px solid var(--surface0); z-index: 20;
+      position: relative;
     }
-    .header-left { display: flex; align-items: center; gap: 8px; }
+    .header > .cmd-trigger {
+      position: absolute; left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
+      margin: 0; z-index: 1;
+    }
+    .header-left { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; flex-shrink: 0; }
+    .header-chip-sep { width: 1px; height: 18px; background: var(--surface2); flex-shrink: 0; margin: 0 2px; }
+    .header-title-sep { width: 1px; height: 18px; background: var(--surface2); flex-shrink: 0; margin: 0 4px; }
     .header-logo { width: 28px; height: 28px; border-radius: 6px; }
     .header-title { font-family: 'BJ Cree', var(--font-ui); font-size: 18px; font-weight: 600; color: var(--text); letter-spacing: 0.2px; }
     .header-sep { color: var(--subtext0); font-size: 13px; }
@@ -420,16 +428,16 @@
       position: relative;
     }
 
-    /* ── Tab bar (Chrome-style) ───────────────────────────────────────────── */
+    /* ── Tab bar ───────────────────────────────────────────────────────────── */
     .tab-bar {
-      display: flex; align-items: flex-end; gap: 0;
-      height: var(--term-bar-h); padding: 0 0 0 4px;
+      display: flex; align-items: center; gap: 0;
+      height: var(--term-bar-h); padding: 0 4px;
       background: var(--tab-bar-bg); border-bottom: 1px solid var(--surface0); flex-shrink: 0;
       min-width: 0; overflow: visible; position: relative; z-index: 10;
     }
     .tab-bar-scroll {
-      display: flex; align-items: flex-end; gap: 4px; flex: 1; min-width: 0;
-      height: 100%; padding-top: 4px;
+      display: flex; align-items: stretch; gap: 2px; flex: 1; min-width: 0;
+      height: 100%;
       overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
     }
     .tab-bar-scroll::-webkit-scrollbar { display: none; }
@@ -439,36 +447,23 @@
     .tab-btn {
       position: relative;
       display: inline-flex; align-items: center; gap: 6px;
-      padding: 0 14px 0 14px; height: calc(100% - 4px);
-      min-width: 120px; max-width: 220px;
-      background: var(--mantle);
-      border: 1px solid var(--surface0); border-bottom: none;
-      border-radius: 10px 10px 0 0;
+      padding: 0 16px; height: 100%;
+      background: transparent; border: none;
       color: var(--subtext0); font: 12px var(--font-ui);
       cursor: grab;
-      transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+      transition: color 0.12s, background 0.12s;
       white-space: nowrap; flex-shrink: 0;
       -webkit-user-drag: element; user-select: none;
-      margin-bottom: -1px;  /* overlap border-bottom so active tab blends with panel */
     }
     .tab-btn:active { cursor: grabbing; }
-    .tab-btn:hover {
-      color: var(--text);
-      background: color-mix(in srgb, var(--surface0) 70%, var(--mantle));
-    }
-    .tab-btn.active {
-      color: var(--text); font-weight: 600;
-      background: var(--base);
-      border-color: var(--surface1);
-      z-index: 2;
-    }
+    .tab-btn:hover { color: var(--text); background: var(--surface0); }
+    .tab-btn.active { color: var(--text); font-weight: 600; }
     .tab-btn.active::after {
-      /* accent underline for the active tab, chrome-style hint */
-      content: ''; position: absolute; left: 8px; right: 8px; bottom: 0; height: 2px;
-      background: var(--accent); border-radius: 2px 2px 0 0;
+      content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+      background: var(--accent); border-radius: 0;
     }
     .tab-btn > span:not(.tab-close):not(.tab-dot) {
-      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+      max-width: 180px; overflow: hidden; text-overflow: ellipsis;
     }
     .tab-btn .tab-close {
       display: inline-flex; align-items: center; justify-content: center;
@@ -480,7 +475,7 @@
     }
     .tab-btn .tab-close:hover { color: var(--text); background: var(--surface2); }
     .tab-btn.closable .tab-close { display: inline-flex; }
-    .tab-bar-middle { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; overflow: hidden; }
+    .tab-bar-middle { position: relative; flex: 1; min-width: 0; height: 100%; display: flex; align-items: stretch; overflow: hidden; }
     .tab-scroll-arrow {
       display: none; align-items: center; justify-content: center;
       position: absolute; top: 0; bottom: 0; width: 24px; z-index: 3;
@@ -742,10 +737,245 @@
       flex: 1; min-height: 0; background: var(--base);
       display: flex; flex-direction: column;
     }
-    .inapp-browser-frame webview { flex: 1; width: 100%; height: 100%; border: 0; background: white; }
+    .inapp-browser-frame webview,
+    .inapp-browser-frame iframe { flex: 1; width: 100%; height: 100%; border: 0; background: var(--base); }
     .inapp-browser-frame .inapp-empty {
       margin: auto; color: var(--subtext0); font: 12px var(--font-ui);
     }
+    .inapp-browser-body { flex: 1; min-height: 0; display: flex; }
+    .inapp-browser-stage {
+      flex: 1; min-width: 0; display: flex;
+    }
+    .inapp-browser-stage .inapp-browser-frame { flex: 1; min-width: 0; }
+    .inapp-browser-zoom-inline {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px; border-radius: 999px;
+      background: var(--surface0);
+      border: 1px solid var(--surface1);
+      flex-shrink: 0;
+    }
+    .inapp-browser-zoom-value {
+      min-width: 52px; text-align: center;
+      font: 600 11px var(--font-mono); color: var(--text);
+      background: transparent; border: none; border-radius: 999px;
+      padding: 0 8px; height: 24px; cursor: pointer;
+      transition: background 0.12s, color 0.12s;
+    }
+    .inapp-browser-zoom-value:hover {
+      background: color-mix(in srgb, var(--surface1) 88%, transparent);
+      color: var(--accent);
+    }
+    .inapp-browser-zoom-inline .tab-bar-btn {
+      width: 24px; min-width: 24px; height: 24px; padding: 0;
+      border-radius: 999px;
+    }
+    .inapp-agent-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px; height: 26px; flex-shrink: 0;
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+      border-radius: 14px; color: var(--accent);
+      font: 600 11px var(--font-ui); cursor: pointer;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .inapp-agent-chip:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: var(--accent); }
+    .inapp-agent-chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .inapp-agent-chip-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent); box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent);
+    }
+    .inapp-agent-chip.active .inapp-agent-chip-dot { background: #fff; }
+    .inapp-agent-chip.running .inapp-agent-chip-dot { animation: agentPulse 1.2s ease-in-out infinite; background: var(--green); }
+    @keyframes agentPulse {
+      0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 60%, transparent); }
+      50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--green) 0%, transparent); }
+    }
+    .inapp-agent-panel {
+      display: none; width: 360px; min-width: 300px; max-width: 50%;
+      flex-direction: column; flex-shrink: 0;
+      border-left: 1px solid var(--surface0);
+      background: var(--mantle);
+    }
+    .inapp-agent-panel.open { display: flex; }
+    .inapp-agent-head {
+      display: flex; flex-direction: column; gap: 6px;
+      padding: 10px 12px; border-bottom: 1px solid var(--surface0);
+      background: var(--base); flex-shrink: 0;
+    }
+    .inapp-agent-head-row {
+      display: flex; align-items: center; gap: 8px; min-width: 0;
+    }
+    .inapp-agent-title {
+      font: 600 13px var(--font-ui); color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      flex: 1; min-width: 0;
+    }
+    .inapp-agent-head .tab-bar-btn { height: 24px; padding: 0 8px; }
+    .inapp-agent-head-close {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; height: 22px; border-radius: 50%;
+      background: transparent; border: none; color: var(--subtext0);
+      font-size: 16px; line-height: 1; cursor: pointer; flex-shrink: 0;
+      transition: background 0.12s, color 0.12s;
+    }
+    .inapp-agent-head-close:hover { background: var(--surface1); color: var(--text); }
+    .inapp-agent-provider {
+      font: 11px var(--font-ui); color: var(--text);
+      background: var(--surface0); border: 1px solid var(--surface1);
+      border-radius: 6px; padding: 3px 8px; cursor: pointer; outline: none;
+      min-width: 0; flex: 1;
+    }
+    .inapp-agent-provider:hover { border-color: var(--accent); }
+    .inapp-agent-provider:disabled { cursor: not-allowed; opacity: 0.7; }
+    .inapp-agent-configure {
+      font: 600 11px var(--font-ui); color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+      border-radius: 6px; padding: 3px 10px; cursor: pointer; outline: none;
+      flex: 1; min-width: 0; text-align: left;
+      display: inline-flex; align-items: center; gap: 6px;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .inapp-agent-configure:hover {
+      background: color-mix(in srgb, var(--accent) 22%, transparent);
+      border-color: var(--accent);
+    }
+    .inapp-agent-state {
+      font: 10px var(--font-mono); color: var(--subtext0);
+      background: var(--surface0); padding: 2px 8px; border-radius: 10px;
+      flex-shrink: 0;
+    }
+    .inapp-agent-state.running { color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
+    .inapp-agent-state.error   { color: var(--red);   background: color-mix(in srgb, var(--red) 14%, transparent); }
+    .inapp-agent-log {
+      flex: 1; min-height: 0; overflow: auto;
+      padding: 10px; display: flex; flex-direction: column; gap: 8px;
+      font: 12px var(--font-ui); color: var(--text);
+    }
+    .inapp-agent-log::-webkit-scrollbar { width: 6px; }
+    .inapp-agent-log::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: 3px; }
+    .inapp-agent-hint { color: var(--subtext0); font-size: 11px; }
+    .inapp-agent-hint ul { margin: 6px 0 0 16px; padding: 0; }
+    .inapp-agent-hint li { margin: 3px 0; }
+    .agent-msg {
+      display: flex; flex-direction: column; gap: 4px;
+      padding: 8px 10px; border-radius: 8px;
+      background: var(--surface0); border: 1px solid var(--surface1);
+      line-height: 1.45; word-wrap: break-word;
+    }
+    .agent-msg.user { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+    .agent-msg.message { background: transparent; border-color: var(--surface0); }
+    .agent-msg.action {
+      background: transparent; border: none; padding: 2px 0; font: 11px var(--font-mono);
+      color: var(--subtext1); flex-direction: row; align-items: center;
+    }
+    .agent-msg.action .agent-action-glyph { color: var(--accent); margin-right: 4px; }
+    .agent-msg.action.fail .agent-action-glyph { color: var(--red); }
+    .agent-msg.thinking {
+      background: transparent; border: none; padding: 0;
+      font: 11px var(--font-ui); color: var(--overlay1);
+    }
+    .agent-msg.error { background: color-mix(in srgb, var(--red) 14%, transparent); border-color: color-mix(in srgb, var(--red) 30%, transparent); color: var(--red); }
+    .agent-msg.done  { background: color-mix(in srgb, var(--green) 12%, transparent); border-color: color-mix(in srgb, var(--green) 30%, transparent); }
+    .agent-msg-body > :first-child { margin-top: 0; }
+    .agent-msg-body > :last-child { margin-bottom: 0; }
+    .agent-msg-body pre { margin: 6px 0; }
+    .agent-msg-body ul,
+    .agent-msg-body ol { margin: 6px 0 6px 18px; padding: 0; }
+    .agent-msg-body li { margin: 4px 0; }
+    .browser-action-report-group {
+      display: flex; flex-direction: column; gap: 8px; margin-top: 10px;
+    }
+    .browser-action-report {
+      display: flex; flex-direction: column; gap: 8px;
+      padding: 10px; border-radius: 8px;
+      background: color-mix(in srgb, var(--surface0) 92%, transparent);
+      border: 1px solid var(--surface1);
+    }
+    .browser-action-report-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    .browser-action-report-title {
+      font: 600 12px var(--font-ui); color: var(--text);
+    }
+    .browser-action-report-list {
+      margin: 0; padding-left: 18px; color: var(--subtext1);
+    }
+    .browser-action-report-list li { margin: 3px 0; }
+    .browser-action-report-empty {
+      font-size: 11px; color: var(--subtext0);
+    }
+    .browser-action-report-actions {
+      display: flex; justify-content: flex-end;
+    }
+    .browser-action-report-expand {
+      padding: 5px 10px; border-radius: 6px; border: 1px solid var(--surface2);
+      background: var(--surface0); color: var(--text); cursor: pointer;
+      font: 600 11px var(--font-ui);
+    }
+    .browser-action-report-expand:hover {
+      border-color: var(--accent); color: var(--accent);
+    }
+    .inapp-agent-selection {
+      display: none; flex-direction: column; gap: 6px;
+      padding: 9px 12px; border-bottom: 1px solid var(--surface0);
+      background: color-mix(in srgb, var(--accent) 8%, var(--base));
+    }
+    .inapp-agent-selection.open { display: flex; }
+    .inapp-agent-selection-row {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .inapp-agent-selection-copy {
+      flex: 1; min-width: 0;
+    }
+    .inapp-agent-selection-label {
+      font: 600 11px var(--font-ui); color: var(--text);
+    }
+    .inapp-agent-selection-target {
+      font: 12px var(--font-mono); color: var(--accent);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .inapp-agent-selection-meta {
+      font: 11px var(--font-ui); color: var(--subtext1); line-height: 1.4;
+    }
+    .tab-bar-btn.inspecting {
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
+      border-color: var(--accent); color: var(--accent);
+    }
+    .browser-agent-detail-modal {
+      width: min(860px, 92vw); max-height: 80vh;
+      display: flex; flex-direction: column;
+    }
+    .browser-agent-detail-summary {
+      font-size: 12px; color: var(--subtext0); margin: -6px 0 12px;
+    }
+    .browser-agent-detail-body {
+      flex: 1; min-height: 0; overflow: auto;
+      background: var(--surface0); border: 1px solid var(--surface1);
+      border-radius: var(--radius); padding: 12px;
+    }
+    .browser-agent-detail-body pre {
+      margin: 0; white-space: pre-wrap; word-break: break-word;
+      font: 11px var(--font-mono); color: var(--text);
+    }
+    .inapp-agent-input {
+      display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--surface0);
+      background: var(--base); flex-shrink: 0;
+    }
+    .inapp-agent-input textarea {
+      flex: 1; min-width: 0; resize: none;
+      padding: 6px 8px; border-radius: var(--radius);
+      background: var(--surface0); border: 1px solid var(--surface1); color: var(--text);
+      font: 12px var(--font-ui); outline: none;
+    }
+    .inapp-agent-input textarea:focus { border-color: var(--accent); }
+    .inapp-agent-send {
+      padding: 0 14px; border: none; border-radius: var(--radius);
+      background: var(--accent); color: #fff; font: 600 11px var(--font-ui);
+      cursor: pointer; transition: filter 0.12s;
+    }
+    .inapp-agent-send:hover { filter: brightness(1.1); }
+    .inapp-agent-send:disabled { opacity: 0.6; cursor: not-allowed; }
     .tab-panel#panel-orchestrator.active { display: flex; flex-direction: column; }
 
     /* ── Orchestrator panel ─────────────────────────────────────────────── */
@@ -976,24 +1206,27 @@
     }
     .ob-all-done strong { color: var(--accent); }
 
-    /* ── Space switcher (header chip, top-left) ──────────────────────── */
-    .space-chip {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 3px 10px; height: 26px;
+    /* ── Sidebar context rows (space / repo / branch) ────────────────── */
+    .sidebar-ctx-section {
+      position: relative; padding: 6px 10px 4px;
+      border-top: 1px solid var(--surface0);
+    }
+    .sidebar-ctx-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 10px; border-radius: var(--radius);
       background: var(--surface1); border: 1px solid var(--surface2);
-      border-radius: var(--radius);
+      width: 100%; text-align: left;
       color: var(--text); font: 600 11px var(--font-ui);
-      cursor: pointer; max-width: 240px;
-      transition: border-color 0.12s, background 0.12s;
+      cursor: pointer; transition: border-color 0.12s, background 0.12s;
+      overflow: hidden; margin-bottom: 4px;
     }
-    .space-chip:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface1)); }
-    .space-chip i { color: var(--accent); flex-shrink: 0; }
-    .space-chip #spaceSwitcherLabel {
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px;
-    }
+    .sidebar-ctx-row:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface1)); }
+    .sidebar-ctx-row i { color: var(--accent); flex-shrink: 0; width: 13px; height: 13px; }
+    .sidebar-ctx-row .ctx-row-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .sidebar-ctx-row .ctx-row-sub { font-size: 10px; font-weight: 400; color: var(--subtext0); flex-shrink: 0; }
     .space-menu {
-      display: none; position: absolute; top: calc(100% + 6px); left: 0; z-index: 9400;
-      min-width: 260px; max-height: 420px; overflow: hidden;
+      display: none; position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 9400;
+      min-width: 340px; max-height: 420px; overflow: hidden;
       background: var(--surface0); border: 1px solid var(--surface2);
       border-radius: 10px; box-shadow: 0 12px 36px rgba(0,0,0,0.5);
       flex-direction: column;
@@ -1007,12 +1240,12 @@
     }
     .space-menu-item {
       display: flex; align-items: center; gap: 8px;
-      padding: 6px 8px; border-radius: 6px; cursor: pointer;
+      padding: 7px 10px; border-radius: 6px; cursor: pointer;
       color: var(--text); font: 12px var(--font-ui);
       transition: background 0.12s;
     }
     .space-menu-item:hover { background: var(--surface1); }
-    .space-menu-item.active { background: color-mix(in srgb, var(--accent) 14%, var(--surface0)); color: var(--accent); }
+    .space-menu-item.active { background: color-mix(in srgb, var(--accent) 14%, var(--surface0)); color: var(--accent); margin-bottom: 5px; }
     .space-menu-item .sm-icon { color: var(--accent); flex-shrink: 0; }
     .space-menu-item .sm-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .space-menu-item .sm-desc { color: var(--subtext0); font-size: 10px; margin-top: 1px; }
@@ -1030,10 +1263,61 @@
       flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
       padding: 6px 10px; background: var(--surface1); border: 1px solid var(--surface2);
       border-radius: var(--radius); color: var(--text); font: 500 11px var(--font-ui);
-      cursor: pointer; transition: border-color 0.12s, background 0.12s;
+      cursor: pointer; transition: border-color 0.12s, background 0.12s; white-space: nowrap;
     }
     .space-menu-footer button:hover { border-color: var(--accent); }
     .space-menu-empty { padding: 10px 12px; color: var(--subtext0); font: 11px var(--font-ui); }
+
+    /* ── Manage space dialog ─────────────────────────────────────────────── */
+    .ms-dialog {
+      background: var(--surface0); border: 1px solid var(--surface2); border-radius: 12px;
+      padding: 20px 24px; width: 500px; max-width: 94vw; max-height: 84vh;
+      display: flex; flex-direction: column; box-shadow: 0 16px 48px rgba(0,0,0,0.55);
+    }
+    .ms-tabs {
+      display: flex; gap: 2px; background: var(--mantle); border-radius: 8px; padding: 3px;
+      margin-bottom: 16px;
+    }
+    .ms-tab {
+      flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 6px 12px; border-radius: 6px; border: none; background: transparent;
+      color: var(--subtext0); font: 500 12px var(--font-ui); cursor: pointer;
+      transition: background 0.14s, color 0.14s;
+    }
+    .ms-tab:hover { color: var(--text); }
+    .ms-tab.active { background: var(--surface1); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,0.25); }
+    .ms-tab-panel { display: none; flex: 1; overflow: auto; min-height: 0; }
+    .ms-tab-panel.active { display: flex; flex-direction: column; }
+    .ms-tab-hint { font-size: 10px; color: var(--subtext0); padding: 8px 2px 2px; flex-shrink: 0; }
+    .ms-list { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+    .ms-row {
+      display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 6px;
+      cursor: pointer; transition: background 0.12s;
+    }
+    .ms-row:hover { background: var(--surface1); }
+    .ms-row-label { flex: 1; font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ms-row-sub { font-size: 10px; color: var(--yellow, #d4a72c); margin-left: auto; flex-shrink: 0; }
+    /* Toggle switch */
+    .ms-toggle {
+      position: relative; width: 32px; height: 18px; flex-shrink: 0;
+    }
+    .ms-toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .ms-toggle-track {
+      position: absolute; inset: 0; border-radius: 9px;
+      background: var(--surface2); border: 1px solid var(--overlay0);
+      transition: background 0.18s, border-color 0.18s; cursor: pointer;
+    }
+    .ms-toggle-track::after {
+      content: ''; position: absolute; top: 2px; left: 2px;
+      width: 12px; height: 12px; border-radius: 50%;
+      background: var(--overlay1); transition: transform 0.18s, background 0.18s;
+    }
+    .ms-toggle input:checked + .ms-toggle-track {
+      background: var(--accent); border-color: var(--accent);
+    }
+    .ms-toggle input:checked + .ms-toggle-track::after {
+      transform: translateX(14px); background: #fff;
+    }
 
     /* ── Floating action buttons (runtime-added by the AI) ──────────────── */
     .fab-layer {
@@ -2191,13 +2475,78 @@
       background: var(--surface0); border-color: var(--accent); color: var(--accent); font-weight: 600;
       cursor: default;
     }
-    .git-branch-item .branch-badge {
+    .git-branch-item .branch-badge,
+    .branch-pick-item .branch-badge {
       font-size: 9px; font-family: var(--font-ui); font-weight: 600; padding: 1px 6px;
       border-radius: 99px; flex-shrink: 0;
     }
-    .git-branch-item .branch-badge.local { background: var(--accent); color: #fff; opacity: 0.7; }
-    .git-branch-item .branch-badge.remote { background: var(--surface1); color: var(--subtext0); }
-    .git-branch-item .branch-badge.current-badge { background: var(--green); color: #fff; }
+    .git-branch-item .branch-badge.local,
+    .branch-pick-item .branch-badge.local { background: var(--accent); color: #fff; opacity: 0.7; }
+    .git-branch-item .branch-badge.remote,
+    .branch-pick-item .branch-badge.remote { background: var(--surface1); color: var(--subtext0); }
+    .git-branch-item .branch-badge.current-badge,
+    .branch-pick-item .branch-badge.current-badge { background: var(--green); color: #fff; }
+
+    .branch-filter-tab {
+      padding: 3px 10px; border-radius: 99px; font: 600 10px var(--font-ui);
+      border: 1px solid var(--surface1); background: transparent; color: var(--subtext0);
+      cursor: pointer; transition: background 0.1s, color 0.1s, border-color 0.1s;
+    }
+    .branch-filter-tab:hover { border-color: var(--accent); color: var(--text); }
+    .branch-filter-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    /* ── Context picker modals (space / repo / branch) ───────────────── */
+    .modal-ctx-pick { width: 380px; max-height: 520px; display: flex; flex-direction: column; padding: 0; }
+    .ctx-pick-search {
+      margin: 10px 8px 0; padding: 8px 12px;
+      background: var(--surface0); border: 1px solid var(--surface1);
+      border-radius: var(--radius); color: var(--text); font: 12px var(--font-mono);
+      outline: none; width: calc(100% - 16px); box-sizing: border-box;
+    }
+    .ctx-pick-search:focus { border-color: var(--accent); }
+    .ctx-pick-list { flex: 1; overflow-y: auto; padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 4px; }
+    .ctx-pick-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px; border-radius: 8px; cursor: pointer;
+      border: 1px solid transparent; transition: background 0.12s, border-color 0.12s;
+      text-align: left; width: 100%; background: none;
+      color: var(--text); font-family: var(--font-ui); font-size: 13px;
+    }
+    .ctx-pick-item:hover { background: var(--surface1); }
+    .ctx-pick-item.active {
+      background: color-mix(in srgb, var(--accent) 12%, var(--surface0));
+      border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+    }
+    .ctx-pick-item i { flex-shrink: 0; color: var(--accent); width: 15px; height: 15px; }
+    .ctx-pick-item .cpi-name { font: 600 13px var(--font-ui); color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ctx-pick-item .cpi-sub { font: 11px var(--font-ui); color: var(--subtext0); flex-shrink: 0; }
+    .ctx-pick-item.active .cpi-name { color: var(--accent); }
+    .ctx-pick-footer {
+      border-top: 1px solid var(--surface1); padding: 10px 14px;
+      display: flex; gap: 8px; background: var(--crust); border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    }
+    .ctx-pick-footer button {
+      flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 7px 12px; background: var(--surface1); border: 1px solid var(--surface2);
+      border-radius: var(--radius); color: var(--text); font: 11px var(--font-ui);
+      cursor: pointer; transition: border-color 0.12s, background 0.12s;
+    }
+    .ctx-pick-footer button:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface1)); color: var(--accent); }
+    /* Branch items as prominent buttons */
+    .branch-pick-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 11px 14px; border-radius: 8px; cursor: pointer;
+      border: 1px solid var(--surface1); background: var(--surface0);
+      transition: border-color 0.12s, background 0.12s;
+      text-align: left; width: 100%;
+      color: var(--text); font-family: var(--font-ui);
+    }
+    .branch-pick-item:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface0)); }
+    .branch-pick-item.current { border-color: var(--green); background: color-mix(in srgb, var(--green) 10%, var(--surface0)); cursor: default; }
+    .branch-pick-item i { flex-shrink: 0; width: 14px; height: 14px; color: var(--subtext0); }
+    .branch-pick-item.current i { color: var(--green); }
+    .branch-pick-item .bp-name { font: 600 12px var(--font-mono); color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; }
+    .branch-pick-item.current .bp-name { color: var(--green); }
     .git-branch-search {
       padding: 7px 10px; background: var(--surface0); border: 1px solid var(--surface1);
       border-radius: var(--radius); color: var(--text); font: 12px var(--font-mono);
@@ -2818,33 +3167,9 @@
 
 <!-- ═══ Header ═══════════════════════════════════════════════════════════ -->
 <header class="header">
-  <div class="header-left" style="position:relative;">
+  <div class="header-left">
     <img src="/logo.svg" class="header-logo" alt="">
     <span class="header-title">Symphonee</span>
-    <div id="spaceSwitcherSlot" style="display:inline-flex;align-items:center;margin-left:10px;position:relative;">
-      <button id="spaceSwitcherChip" class="space-chip" onclick="toggleSpaceSwitcher(event)" title="Switch space / repo">
-        <i data-lucide="layers" style="width:13px;height:13px;"></i>
-        <span id="spaceSwitcherLabel">No space</span>
-        <i data-lucide="chevron-down" style="width:11px;height:11px;opacity:0.7;"></i>
-      </button>
-      <div id="spaceSwitcherMenu" class="space-menu"></div>
-    </div>
-    <button id="branchChip" class="space-chip" onclick="openGitModal('branches')" title="Current branch (click to manage)" style="display:none;margin-left:6px;">
-      <i data-lucide="git-branch" style="width:13px;height:13px;"></i>
-      <span id="branchChipLabel">branch</span>
-    </button>
-    <div id="permModeSlot" style="display:inline-flex;align-items:center;min-width:110px;margin-left:12px;">
-      <div id="permModeChip" title="Permission mode (click to change)" onclick="openPermModeMenu(event)" style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;height:26px;box-sizing:border-box;border-radius:var(--radius);background:var(--surface1);border:1px solid var(--surface2);color:var(--text);font-size:11px;font-weight:600;font-family:var(--font-ui);cursor:pointer;user-select:none;">
-        <i data-lucide="shield-check" style="width:13px;height:13px;"></i>
-        <span id="permModeLabel">EDIT</span>
-      </div>
-    </div>
-    <div id="permModeMenu" style="display:none;position:absolute;top:32px;left:calc(var(--header-logo-width, 140px) + 12px);z-index:2000;background:var(--surface1);border:1px solid var(--surface2);border-radius:var(--radius);padding:4px;min-width:220px;font-family:var(--font-ui);font-size:11px;box-shadow:0 4px 12px rgba(0,0,0,0.3);">
-      <div class="perm-opt" data-mode="review" onclick="setPermMode('review')" style="padding:6px 10px;cursor:pointer;border-radius:4px;"><strong>Review</strong><div style="color:var(--subtext0);font-weight:400;font-size:10px;">Read-only. Blocks all writes.</div></div>
-      <div class="perm-opt" data-mode="edit" onclick="setPermMode('edit')" style="padding:6px 10px;cursor:pointer;border-radius:4px;"><strong>Edit</strong><div style="color:var(--subtext0);font-weight:400;font-size:10px;">Writes allowed, destructive asks.</div></div>
-      <div class="perm-opt" data-mode="trusted" onclick="setPermMode('trusted')" style="padding:6px 10px;cursor:pointer;border-radius:4px;"><strong>Trusted</strong><div style="color:var(--subtext0);font-weight:400;font-size:10px;">Auto-approve in worktrees.</div></div>
-      <div class="perm-opt" data-mode="bypass" onclick="setPermMode('bypass')" style="padding:6px 10px;cursor:pointer;border-radius:4px;color:var(--accent);"><strong>Bypass</strong><div style="color:var(--subtext0);font-weight:400;font-size:10px;">Allow everything. Use with care.</div></div>
-    </div>
   </div>
   <div class="cmd-trigger" onclick="openCmdPalette()" title="Command Palette (Ctrl+K)">
     <i data-lucide="search" style="width:12px;height:12px;color:var(--subtext0);flex-shrink:0;"></i>
@@ -2860,8 +3185,18 @@
       <i data-lucide="shield" style="width:13px;height:13px;"></i>
       <span>INCOGNITO</span>
     </div>
-    <div class="status-dot" id="statusDot"></div>
-    <span id="connectionStatus">Connecting...</span>
+    <div id="permModeSlot" style="display:inline-flex;align-items:center;flex-shrink:0;position:relative;">
+      <div id="permModeChip" title="Permission mode (click to change)" onclick="openPermModeMenu(event)" style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;height:26px;box-sizing:border-box;border-radius:var(--radius);background:var(--surface1);border:1px solid var(--surface2);color:var(--text);font-size:11px;font-weight:600;font-family:var(--font-ui);cursor:pointer;user-select:none;">
+        <i data-lucide="shield-check" style="width:13px;height:13px;"></i>
+        <span id="permModeLabel">EDIT</span>
+      </div>
+      <div id="permModeMenu" style="display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:2000;background:var(--surface1);border:1px solid var(--surface2);border-radius:var(--radius);padding:4px;min-width:220px;font-family:var(--font-ui);font-size:11px;box-shadow:0 4px 12px rgba(0,0,0,0.3);">
+        <div class="perm-opt" data-mode="review" onclick="setPermMode('review')" style="padding:6px 10px;cursor:pointer;border-radius:4px;"><strong>Review</strong><div style="color:var(--subtext0);font-weight:400;font-size:10px;">Read-only. Blocks all writes.</div></div>
+        <div class="perm-opt" data-mode="edit" onclick="setPermMode('edit')" style="padding:6px 10px;cursor:pointer;border-radius:4px;"><strong>Edit</strong><div style="color:var(--subtext0);font-weight:400;font-size:10px;">Writes allowed, destructive asks.</div></div>
+        <div class="perm-opt" data-mode="trusted" onclick="setPermMode('trusted')" style="padding:6px 10px;cursor:pointer;border-radius:4px;"><strong>Trusted</strong><div style="color:var(--subtext0);font-weight:400;font-size:10px;">Auto-approve in worktrees.</div></div>
+        <div class="perm-opt" data-mode="bypass" onclick="setPermMode('bypass')" style="padding:6px 10px;cursor:pointer;border-radius:4px;color:var(--accent);"><strong>Bypass</strong><div style="color:var(--subtext0);font-weight:400;font-size:10px;">Allow everything. Use with care.</div></div>
+      </div>
+    </div>
     <div class="notif-bell" id="notifBell" onclick="toggleNotifPanel(event)" title="Notifications">
       <i data-lucide="bell"></i>
       <span class="notif-badge" id="notifBadge">0</span>
@@ -2872,6 +3207,8 @@
       <button class="win-close" onclick="fetch('/api/window/close',{method:'POST'})" title="Close"><i data-lucide="x" style="width:16px;height:16px;"></i></button>
     </div>
   </div>
+  <!-- status elements kept for JS compatibility but not rendered -->
+  <div style="display:none;"><div class="status-dot" id="statusDot"></div><span id="connectionStatus"></span></div>
 </header>
 
 <!-- ═══ Main ═════════════════════════════════════════════════════════════ -->
@@ -2928,6 +3265,23 @@
       <div id="sidebarPluginSections"></div>
     </div>
     <div class="sidebar-bottom-hints">
+      <div class="sidebar-ctx-section">
+        <button id="spaceSwitcherChip" class="sidebar-ctx-row" onclick="openSpaceModal()" title="Switch space">
+          <i id="spaceChipIcon" data-lucide="layers" style="width:13px;height:13px;"></i>
+          <span id="spaceSwitcherLabel" class="ctx-row-label">Select space</span>
+          <i data-lucide="chevron-right" style="width:11px;height:11px;opacity:0.4;flex-shrink:0;"></i>
+        </button>
+        <button id="repoChip" class="sidebar-ctx-row" onclick="openRepoModal()" title="Switch repo" style="display:none;">
+          <i data-lucide="folder-git-2" style="width:13px;height:13px;"></i>
+          <span id="repoChipLabel" class="ctx-row-label">No repo</span>
+          <i data-lucide="chevron-right" style="width:11px;height:11px;opacity:0.4;flex-shrink:0;"></i>
+        </button>
+        <button id="branchChip" class="sidebar-ctx-row" onclick="openBranchModal()" title="Current branch" style="display:none;">
+          <i data-lucide="git-branch" style="width:13px;height:13px;"></i>
+          <span id="branchChipLabel" class="ctx-row-label">...</span>
+          <i data-lucide="chevron-right" style="width:11px;height:11px;opacity:0.4;flex-shrink:0;"></i>
+        </button>
+      </div>
       <div class="voice-hint" id="switchScreenHint" onclick="switchScreen()" style="cursor:pointer;">
         <i data-lucide="monitor"></i>
         <span>Switch Screen</span>
@@ -2955,6 +3309,7 @@
         <div class="tab-bar-scroll" id="tabBarScroll">
           <button class="tab-btn active" data-tab="terminal" onclick="switchTab('terminal')">Terminal</button>
           <button class="tab-btn" data-tab="orchestrator" id="orchestratorTabBtn" onclick="switchTab('orchestrator')" style="display:none;">Orchestrator <span style="font-size:9px;opacity:0.6;font-weight:400;margin-left:2px;">[BETA]</span></button>
+          <button class="tab-btn" data-tab="browser" id="browserTabBtn" onclick="switchTab('browser')">Browser</button>
           <button class="tab-btn" data-tab="backlog" id="backlogTabBtn" onclick="switchTab('backlog')" style="display:none;">Backlog</button>
           <button class="tab-btn" data-tab="workitem" id="workitemTabBtn" onclick="switchTab('workitem')" style="display:none;">Work Item</button>
           <button class="tab-btn closable" data-tab="recipe-editor" id="recipeEditorTabBtn" onclick="switchTab('recipe-editor')" style="display:none;"><span>Recipe Editor</span><span class="tab-close" onclick="event.stopPropagation();closeRecipeEditor();" title="Close">&times;</span></button>
@@ -2963,7 +3318,6 @@
           <button class="tab-btn" data-tab="files" onclick="switchTab('files')">Files</button>
           <button class="tab-btn" data-tab="diffview" id="diffviewTabBtn" onclick="switchTab('diffview')" style="display:none;">Diff</button>
           <button class="tab-btn" data-tab="notes" onclick="switchTab('notes')">Notes</button>
-          <button class="tab-btn closable" data-tab="browser" id="browserTabBtn" onclick="switchTab('browser')"><span>Browser</span><span class="tab-close" onclick="event.stopPropagation();closeBrowserTab();" title="Close">&times;</span></button>
         </div>
         <button class="tab-scroll-arrow right" id="tabScrollRight" onclick="scrollTabs(200)"><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
       </div>
@@ -3385,9 +3739,52 @@
           <button class="tab-bar-btn" onclick="inappBrowserReload()" title="Reload"><i data-lucide="rotate-cw" style="width:13px;height:13px;"></i></button>
           <input id="inappBrowserUrl" type="text" placeholder="Enter a URL or search" onkeydown="if(event.key==='Enter')inappBrowserGo()" />
           <button class="tab-bar-btn" onclick="inappBrowserGo()"><i data-lucide="arrow-right-circle" style="width:13px;height:13px;"></i> Go</button>
-          <button class="tab-bar-btn" onclick="inappBrowserOpenExternal()" title="Open in system browser"><i data-lucide="external-link" style="width:13px;height:13px;"></i></button>
+          <div class="inapp-browser-zoom-inline" aria-label="Browser zoom controls">
+            <button class="tab-bar-btn" type="button" onclick="inappBrowserZoomOut()" title="Zoom out"><i data-lucide="minus" style="width:13px;height:13px;"></i></button>
+            <button class="inapp-browser-zoom-value" type="button" id="inappBrowserZoomValue" onclick="inappBrowserZoomReset()" title="Reset zoom">100%</button>
+            <button class="tab-bar-btn" type="button" onclick="inappBrowserZoomIn()" title="Zoom in"><i data-lucide="plus" style="width:13px;height:13px;"></i></button>
+          </div>
+          <button class="tab-bar-btn" onclick="inappBrowserOpenExternal()" title="Open external"><i data-lucide="external-link" style="width:13px;height:13px;"></i> Open external</button>
+          <button class="tab-bar-btn" id="inappInspectBtn" type="button" onclick="toggleInappInspectMode()" title="Inspect element"><i data-lucide="crosshair" style="width:13px;height:13px;"></i> Inspect</button>
+          <button class="inapp-agent-chip" id="inappAgentChip" onclick="toggleBrowserAgentPanel()" title="Ask AI to drive this browser">
+            <span class="inapp-agent-chip-dot"></span>
+            <span>Ask AI</span>
+          </button>
         </div>
-        <div class="inapp-browser-frame" id="inappBrowserFrame"></div>
+        <div class="inapp-browser-body">
+          <div class="inapp-browser-stage">
+            <div class="inapp-browser-frame" id="inappBrowserFrame"></div>
+          </div>
+          <div class="inapp-agent-panel" id="inappAgentPanel">
+            <div class="inapp-agent-head">
+              <div class="inapp-agent-head-row">
+                <span class="inapp-agent-title">AI Browser Agent</span>
+                <button class="inapp-agent-head-close" onclick="toggleBrowserAgentPanel()" title="Close">&times;</button>
+              </div>
+              <div class="inapp-agent-head-row">
+                <select class="inapp-agent-provider" id="inappAgentProvider" title="Model" onchange="_onBrowserAgentProviderChange()"></select>
+                <span class="inapp-agent-state" id="inappAgentState">idle</span>
+                <button class="tab-bar-btn" id="inappAgentStopBtn" onclick="stopBrowserAgent()" style="display:none;">Stop</button>
+                <button class="tab-bar-btn" onclick="resetBrowserAgent()" title="Clear chat history">Reset</button>
+              </div>
+            </div>
+            <div class="inapp-agent-selection" id="inappAgentSelection">
+              <div class="inapp-agent-selection-row">
+                <div class="inapp-agent-selection-copy">
+                  <div class="inapp-agent-selection-label">Selected element</div>
+                  <div class="inapp-agent-selection-target" id="inappAgentSelectionTarget">Nothing selected</div>
+                </div>
+                <button class="tab-bar-btn" type="button" id="inappAgentSelectionAsk" onclick="askAboutBrowserSelection()" disabled>Ask About</button>
+              </div>
+              <div class="inapp-agent-selection-meta" id="inappAgentSelectionMeta"></div>
+            </div>
+            <div class="inapp-agent-log" id="inappAgentLog"></div>
+            <form class="inapp-agent-input" onsubmit="event.preventDefault();sendBrowserAgent();">
+              <textarea id="inappAgentInput" rows="1" placeholder="Ask AI to do something in this browser..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendBrowserAgent();}"></textarea>
+              <button type="submit" class="inapp-agent-send" id="inappAgentSend">Send</button>
+            </form>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -3473,8 +3870,8 @@
       <div style="font-size:11px;color:var(--subtext1);margin-top:12px;">Disable in Settings to reconnect.</div>
     </div>
     <div class="intel-tabs">
-      <button class="intel-tab active" data-itab="activity" id="intelTab-activity" onclick="switchIntelTab('activity')">Activity</button>
-      <button class="intel-tab" data-itab="team" id="intelTab-team" onclick="switchIntelTab('team')">Team</button>
+      <button class="intel-tab active" data-itab="activity" id="intelTab-activity" onclick="switchIntelTab('activity')" style="display:none;">Activity</button>
+      <button class="intel-tab" data-itab="team" id="intelTab-team" onclick="switchIntelTab('team')" style="display:none;">Team</button>
       <button class="intel-tab" data-itab="gitlog" id="intelTab-gitlog" onclick="switchIntelTab('gitlog')">Git Log</button>
       <button class="intel-tab" data-itab="recipes" id="intelTab-recipes" onclick="switchIntelTab('recipes'); refreshRecipesPanel();">Recipes</button>
       <div class="tab-open-wrap" id="intelReopenWrap" style="display:none;flex-shrink:0;">
@@ -3710,7 +4107,7 @@
           </div>
           <div class="settings-section">
             <div class="settings-section-title">Browser Automation</div>
-            <div class="settings-section-desc">AI-controlled browser sessions for account creation and authentication. Requires <code>playwright-core</code> to be installed. Uses the system Edge browser.</div>
+            <div class="settings-section-desc">AI-controlled browser sessions for account creation and authentication. Requires <code>playwright-core</code> to be installed. Embedded pages now use their own site-defined colors without a Symphonee dark-mode override.</div>
             <div id="settingsBrowserCreds">
               <div style="font-size:11px;color:var(--subtext0);margin-bottom:6px;">Saved credentials (AI-owned accounts):</div>
               <div id="browserCredList" style="margin-bottom:8px;"></div>
@@ -4005,6 +4402,48 @@
   </div>
 </div>
 
+<!-- ═══ Space Picker Modal ══════════════════════════════════════════════ -->
+<div class="modal-overlay" id="spaceModal" onclick="if(event.target===this)closeModal('spaceModal')">
+  <div class="modal modal-ctx-pick">
+    <div class="modal-title" style="padding:16px 16px 0;">Select Space</div>
+    <div class="ctx-pick-list" id="spacePickList"></div>
+    <div class="ctx-pick-footer">
+      <button onclick="closeModal('spaceModal');openAddSpaceDialog();">
+        <i data-lucide="layers" style="width:13px;height:13px;"></i> Add space
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Repo Picker Modal ════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="repoModal" onclick="if(event.target===this)closeModal('repoModal')">
+  <div class="modal modal-ctx-pick">
+    <div class="modal-title" style="padding:16px 16px 0;" id="repoModalTitle">Select Repo</div>
+    <div class="ctx-pick-list" id="repoPickList"></div>
+    <div class="ctx-pick-footer">
+      <button onclick="closeModal('repoModal');openSettings('repos');">
+        <i data-lucide="plus" style="width:13px;height:13px;"></i> Add repo
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Branch Picker Modal ══════════════════════════════════════════════ -->
+<div class="modal-overlay" id="branchModal" onclick="if(event.target===this)closeModal('branchModal')">
+  <div class="modal modal-ctx-pick">
+    <div class="modal-title" style="padding:16px 16px 0;">
+      Branches <span id="branchModalRepo" style="font-size:11px;font-weight:400;color:var(--subtext0);background:var(--surface0);padding:2px 8px;border-radius:99px;font-family:var(--font-mono);margin-left:6px;"></span>
+    </div>
+    <div style="display:flex;gap:4px;padding:10px 8px 0;">
+      <button class="branch-filter-tab active" id="branchFilterAll"    onclick="setBranchFilter('all')"   >All</button>
+      <button class="branch-filter-tab"         id="branchFilterLocal"  onclick="setBranchFilter('local')" >Local</button>
+      <button class="branch-filter-tab"         id="branchFilterRemote" onclick="setBranchFilter('remote')">Remote</button>
+    </div>
+    <input type="text" class="ctx-pick-search" id="branchPickSearch" placeholder="Filter branches..." oninput="filterBranchPicker()">
+    <div class="ctx-pick-list" id="branchPickList" style="gap:4px;"></div>
+  </div>
+</div>
+
 <!-- ═══ Git Modal ═════════════════════════════════════════════════════════ -->
 <div class="modal-overlay" id="gitModal">
   <div class="modal modal-git">
@@ -4162,6 +4601,22 @@
     <div class="modal-actions">
       <button class="modal-btn" onclick="closePrompt(false)">Cancel</button>
       <button class="modal-btn modal-btn-primary" onclick="closePrompt(true)">OK</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="browserAgentDetailModal" onclick="if(event.target===this)closeBrowserAgentDetailModal()">
+  <div class="modal browser-agent-detail-modal">
+    <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;">
+      <span id="browserAgentDetailTitle">Browser Action Details</span>
+      <button class="pr-comment-modal-close" onclick="closeBrowserAgentDetailModal()" title="Close">&times;</button>
+    </div>
+    <div class="browser-agent-detail-summary" id="browserAgentDetailSummary"></div>
+    <div class="browser-agent-detail-body">
+      <pre id="browserAgentDetailPre"></pre>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-btn" onclick="closeBrowserAgentDetailModal()">Close</button>
     </div>
   </div>
 </div>
@@ -4650,6 +5105,9 @@ requestAnimationFrame(fitTerminalNow);
           break;
         case 'app-state-set':
           if (typeof _onAppStateSet === 'function') _onAppStateSet(msg.key, msg.value);
+          break;
+        case 'browser-agent-step':
+          if (typeof handleBrowserAgentStep === 'function') handleBrowserAgentStep(msg);
           break;
       }
     };
@@ -5351,6 +5809,8 @@ function applyUiMutation(op) {
         btn.dataset.userTab = '1';
         btn.onclick = () => switchTab(safeId);
         btn.innerHTML = esc(op.label) + ' <span style="opacity:0.5;font-size:13px;margin-left:6px;cursor:pointer;" onclick="event.stopPropagation();removeUserTab(\'' + safeId + '\')" title="Remove">x</span>';
+        const _maxOrder = Math.max(0, ...[...bar.querySelectorAll('.tab-btn')].map(t => parseFloat(t.style.order) || 0));
+        btn.style.order = String(_maxOrder + 1);
         bar.appendChild(btn);
       }
       const center = document.querySelector('.center');
@@ -5552,28 +6012,28 @@ function handleGitChanged(repoName, branch) {
 // ── Header branch chip ────────────────────────────────────────────────────
 function _setBranchChip(branchName) {
   const chip = document.getElementById('branchChip');
+  const sep  = document.getElementById('branchChipSep');
   const label = document.getElementById('branchChipLabel');
   if (!chip || !label) return;
-  if (!activeRepo || !branchName) {
-    chip.style.display = 'none';
-    label.textContent = '';
-    return;
-  }
-  label.textContent = branchName;
-  chip.style.display = '';
-  chip.title = 'Branch: ' + branchName + ' (click to manage)';
+  // Show the chip whenever a repo is active; branch name may still be loading.
+  const show = !!activeRepo;
+  chip.style.display = show ? '' : 'none';
+  if (sep) sep.style.display = show ? '' : 'none';
+  label.textContent = branchName || (activeRepo ? '...' : '');
+  chip.title = branchName ? 'Branch: ' + branchName + ' (click to switch)' : 'Switch branch';
 }
 async function refreshBranchChip() {
   const chip = document.getElementById('branchChip');
   if (!chip) return;
   if (!activeRepo) { _setBranchChip(''); return; }
+  _setBranchChip(''); // show chip immediately with "..." label
   try {
     const r = await fetch('/api/git/branches?repo=' + encodeURIComponent(activeRepo));
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
     _setBranchChip(data && data.current ? data.current : '');
   } catch (_) {
-    _setBranchChip('');
+    _setBranchChip(''); // keep chip visible, label stays as "..."
   }
 }
 document.addEventListener('DOMContentLoaded', () => { setTimeout(refreshBranchChip, 300); });
@@ -6454,6 +6914,216 @@ function aiGit(action) {
   };
 
   askAi(prompts[action]);
+}
+
+// ── Context picker modals ─────────────────────────────────────────────────
+
+function closeModal(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.remove('open');
+}
+
+// Space picker
+async function openSpaceModal() {
+  const modal = document.getElementById('spaceModal');
+  const list  = document.getElementById('spacePickList');
+  if (!modal || !list) return;
+  modal.classList.add('open');
+  list.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--subtext0);">Loading...</div>';
+  let spaces = {}, repos = {};
+  try {
+    [repos, spaces] = await Promise.all([
+      fetch('/api/repos').then(r => r.json()).catch(() => ({})),
+      fetch('/api/spaces').then(r => r.json()).catch(() => ({})),
+    ]);
+  } catch (_) {}
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  let html = '';
+  // "All" option
+  const allActive = (!activeSpace && !activeRepo) ? ' active' : '';
+  html += `<button class="ctx-pick-item${allActive}" onclick="selectSpace('');closeModal('spaceModal');">
+    <i data-lucide="circle-slash" style="width:15px;height:15px;"></i>
+    <span class="cpi-name">All (no filter)</span>
+  </button>`;
+  for (const [name, sv] of Object.entries(spaces)) {
+    const icon = (sv && sv.icon) || 'layers';
+    const count = (sv && Array.isArray(sv.repos)) ? sv.repos.filter(r => repos[r]).length : 0;
+    const active = (name === activeSpace) ? ' active' : '';
+    html += `<button class="ctx-pick-item${active}" onclick="selectSpace(${JSON.stringify(name)});closeModal('spaceModal');">
+      <i data-lucide="${esc(icon)}" style="width:15px;height:15px;"></i>
+      <span class="cpi-name">${esc(name)}</span>
+      ${count ? `<span class="cpi-sub">${count} repo${count !== 1 ? 's' : ''}</span>` : ''}
+    </button>`;
+  }
+  if (!Object.keys(spaces).length) {
+    html += '<div style="padding:12px 14px;font-size:11px;color:var(--subtext0);">No spaces yet. Create one below.</div>';
+  }
+  list.innerHTML = html;
+  try { lucide.createIcons({ nodes: [list] }); } catch (_) {}
+}
+
+// Repo picker (filtered to current space)
+async function openRepoModal() {
+  const modal = document.getElementById('repoModal');
+  const list  = document.getElementById('repoPickList');
+  const title = document.getElementById('repoModalTitle');
+  if (!modal || !list) return;
+  modal.classList.add('open');
+  list.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--subtext0);">Loading...</div>';
+  if (title) title.textContent = activeSpace ? `Repos in "${activeSpace}"` : 'Select Repo';
+  let repos = {}, spaces = {};
+  try {
+    [repos, spaces] = await Promise.all([
+      fetch('/api/repos').then(r => r.json()).catch(() => ({})),
+      fetch('/api/spaces').then(r => r.json()).catch(() => ({})),
+    ]);
+  } catch (_) {}
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  // Filter repos to current space if one is selected
+  let repoNames = Object.keys(repos);
+  if (activeSpace && spaces[activeSpace] && Array.isArray(spaces[activeSpace].repos)) {
+    repoNames = spaces[activeSpace].repos.filter(r => repos[r]);
+  }
+  let html = '';
+  for (const name of repoNames) {
+    const active = (name === activeRepo) ? ' active' : '';
+    html += `<button class="ctx-pick-item${active}" onclick="selectRepo(${JSON.stringify(name)});closeModal('repoModal');">
+      <i data-lucide="folder-git-2" style="width:15px;height:15px;"></i>
+      <span class="cpi-name">${esc(name)}</span>
+    </button>`;
+  }
+  if (!repoNames.length) {
+    html = `<div style="padding:12px 14px;font-size:11px;color:var(--subtext0);">${activeSpace ? 'No repos in this space.' : 'No repos added yet.'}</div>`;
+  }
+  list.innerHTML = html;
+  try { lucide.createIcons({ nodes: [list] }); } catch (_) {}
+}
+
+// Branch picker
+let _branchPickData = { local: [], remoteOnly: [], current: '' };
+let _branchFilter = 'all';
+
+function setBranchFilter(f) {
+  _branchFilter = f;
+  ['all','local','remote'].forEach(k => {
+    const el = document.getElementById('branchFilter' + k.charAt(0).toUpperCase() + k.slice(1));
+    if (el) el.classList.toggle('active', k === f);
+  });
+  filterBranchPicker();
+}
+
+async function openBranchModal() {
+  const repo = activeRepo || filesCurrentRepo;
+  if (!repo) { toast('Select a repo first', 'info'); return; }
+  const modal  = document.getElementById('branchModal');
+  const repoEl = document.getElementById('branchModalRepo');
+  const list   = document.getElementById('branchPickList');
+  const search = document.getElementById('branchPickSearch');
+  if (!modal || !list) return;
+  if (repoEl) repoEl.textContent = repo;
+  if (search) search.value = '';
+  _branchFilter = 'all';
+  ['All','Local','Remote'].forEach(k => {
+    const el = document.getElementById('branchFilter' + k);
+    if (el) el.classList.toggle('active', k === 'All');
+  });
+  modal.classList.add('open');
+  list.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--subtext0);">Loading branches...</div>';
+  try {
+    const r = await fetch('/api/git/branches?repo=' + encodeURIComponent(repo));
+    const data = await r.json();
+    // API returns either { local, remoteOnly, current } or legacy { branches, current }
+    _branchPickData = {
+      local: data.local || data.branches || [],
+      remoteOnly: data.remoteOnly || [],
+      current: data.current || ''
+    };
+    renderBranchPicker('');
+  } catch (e) {
+    list.innerHTML = `<div style="padding:12px;font-size:11px;color:var(--red);">${e.message}</div>`;
+  }
+}
+
+function renderBranchPicker(filter) {
+  const list = document.getElementById('branchPickList');
+  if (!list) return;
+  const f = (filter || '').toLowerCase();
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  let html = '';
+
+  // ensure current branch is always in the local list
+  const allLocals = _branchPickData.local.slice();
+  if (_branchPickData.current && !allLocals.includes(_branchPickData.current)) {
+    allLocals.unshift(_branchPickData.current);
+  }
+
+  if (_branchFilter !== 'remote') {
+    const locals = allLocals.filter(b => !f || b.toLowerCase().includes(f));
+    for (const b of locals) {
+      const isCurrent = b === _branchPickData.current;
+      const icon = isCurrent ? 'check' : 'git-branch';
+      const onclick = isCurrent ? '' : `onclick="doGitCheckoutFromModal(${JSON.stringify(b)});"`;
+      html += `<button class="branch-pick-item${isCurrent ? ' current' : ''}" ${onclick}>
+        <i data-lucide="${icon}" style="width:14px;height:14px;"></i>
+        <span class="bp-name">${esc(b)}</span>
+        <span class="branch-badge ${isCurrent ? 'current-badge' : 'local'}">${isCurrent ? 'current' : 'local'}</span>
+      </button>`;
+    }
+  }
+
+  if (_branchFilter !== 'local') {
+    const remotes = (_branchPickData.remoteOnly || []).filter(b => !f || b.toLowerCase().includes(f));
+    for (const b of remotes) {
+      html += `<button class="branch-pick-item" onclick="doGitCheckoutFromModal(${JSON.stringify(b)});">
+        <i data-lucide="cloud" style="width:14px;height:14px;"></i>
+        <span class="bp-name">${esc(b)}</span>
+        <span class="branch-badge remote">remote</span>
+      </button>`;
+    }
+  }
+
+  if (!html) html = '<div style="padding:12px;font-size:11px;color:var(--subtext0);">No branches match.</div>';
+  list.innerHTML = html;
+  try { lucide.createIcons({ nodes: [list] }); } catch (_) {}
+}
+
+async function doGitCheckoutFromModal(branch) {
+  closeModal('branchModal');
+  const repo = activeRepo || filesCurrentRepo;
+  if (!repo || !branch) return;
+  toast('Switching to ' + branch + '...', 'info');
+  try {
+    const res = await fetch('/api/git/checkout', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, branch })
+    });
+    const data = await res.json();
+    if (data.error) { toast(data.error, 'error'); return; }
+    let msg = 'Switched to ' + data.branch;
+    if (data.pullMessage && data.pullMessage !== 'Already up to date.') msg += ' — pulled latest';
+    toast(msg, 'success');
+    // update all branch displays
+    _gitBranches.current = data.branch;
+    refreshBranchChip(repo);
+    const cur = document.getElementById('gitCurrentBranch');
+    const pull = document.getElementById('gitPullBranch');
+    const push = document.getElementById('gitPushBranch');
+    if (cur) cur.textContent = data.branch;
+    if (pull) pull.textContent = data.branch;
+    if (push) push.textContent = data.branch;
+    const sidebarBranch = document.getElementById('repoSidebarBranch');
+    if (sidebarBranch) sidebarBranch.textContent = data.branch;
+    const searchEl = document.getElementById('gitBranchSearch');
+    renderGitBranches(searchEl ? searchEl.value : '');
+    if (typeof loadFileTree === 'function') loadFileTree(repo);
+  } catch (e) {
+    toast('Checkout failed: ' + e.message, 'error');
+  }
+}
+
+function filterBranchPicker() {
+  const el = document.getElementById('branchPickSearch');
+  renderBranchPicker(el ? el.value : '');
 }
 
 // ── Git Modal ────────────────────────────────────────────────────────────
@@ -9476,6 +10146,7 @@ async function loadConfig(autoSelectSprint) {
   try {
     const res = await fetch('/api/config');
     configData = await res.json();
+    try { applyInappBrowserAppearance(); } catch (_) {}
     document.getElementById('projectLabel').textContent = 'Settings';
     // Plugin presence drives shell visibility. Config keys are owned by plugins
     // now and the loader filters /api/plugins by activationConditions, so a plugin
@@ -9494,7 +10165,8 @@ async function loadConfig(autoSelectSprint) {
       _gitActionsEl.style.display = _hasActiveRepo ? '' : 'none';
     }
     // Git modal: hide Pull/Push when no PAT (local ops like Branches/Commit/Compare still work)
-    const gitAuthOk = hasGh && !isIncognito;
+    const hasPat = !!(configData.GitHubPAT && configData.GitHubPAT.trim());
+    const gitAuthOk = (hasGh || hasPat) && !isIncognito;
     const gitPullBtn = document.getElementById('gitNavPull');
     const gitPushBtn = document.getElementById('gitNavPush');
     const gitNoPatHint = document.getElementById('gitNavNoPatHint');
@@ -11147,31 +11819,56 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── Drag-to-reorder pinned tabs ─────────────────────────────────────────
-// Persists the order of .tab-btn elements inside #tabBarScroll. Order is
-// saved per-session to localStorage and re-applied on load.
-const TAB_ORDER_KEY = 'symphonee-tab-order';
-function _restoreTabOrder() {
+// Tabs use CSS `order` (assigned by CORE_PINNED_CENTER and plugin contributions),
+// so drag-reorder must persist an order override per tab rather than mutating
+// DOM order, or applyPluginPinnedTabs will re-impose defaults on every repaint.
+const TAB_ORDER_KEY = 'symphonee-tab-order-v2';
+function getSavedTabOrderOverrides() {
   try {
-    const order = JSON.parse(localStorage.getItem(TAB_ORDER_KEY) || '[]');
-    if (!Array.isArray(order) || !order.length) return;
-    const scroll = document.getElementById('tabBarScroll');
-    if (!scroll) return;
-    const byTab = new Map();
-    scroll.querySelectorAll('.tab-btn').forEach(el => {
-      if (el.dataset && el.dataset.tab) byTab.set(el.dataset.tab, el);
-    });
-    for (const t of order) {
-      const el = byTab.get(t);
-      if (el) scroll.appendChild(el);
+    const raw = localStorage.getItem(TAB_ORDER_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+  } catch (_) { return {}; }
+}
+function _restoreTabOrder() {
+  const scroll = document.getElementById('tabBarScroll');
+  if (!scroll) return;
+  const saved = getSavedTabOrderOverrides();
+  const keys = Object.keys(saved);
+  if (!keys.length) return;
+  scroll.querySelectorAll('.tab-btn').forEach(el => {
+    const key = el.dataset && el.dataset.tab;
+    if (key && Object.prototype.hasOwnProperty.call(saved, key)) {
+      el.style.order = String(saved[key]);
     }
-  } catch (_) {}
+  });
 }
 function _saveTabOrder() {
   const scroll = document.getElementById('tabBarScroll');
   if (!scroll) return;
-  const order = [...scroll.querySelectorAll('.tab-btn')]
-    .map(el => el.dataset && el.dataset.tab).filter(Boolean);
-  try { localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(order)); } catch (_) {}
+  // Compute a visual order array (by current `order` then DOM position), then
+  // re-assign fresh order values so the overrides beat CORE_PINNED_CENTER and
+  // plugin defaults (which top out in the low thousands).
+  const BASE = 10000;
+  const tabs = [...scroll.querySelectorAll('.tab-btn')]
+    .filter(el => el.dataset && el.dataset.tab);
+  tabs.sort((a, b) => {
+    const ao = parseFloat(a.style.order) || 0;
+    const bo = parseFloat(b.style.order) || 0;
+    if (ao !== bo) return ao - bo;
+    const parent = a.parentNode;
+    if (!parent) return 0;
+    return Array.prototype.indexOf.call(parent.children, a) -
+           Array.prototype.indexOf.call(parent.children, b);
+  });
+  const saved = {};
+  tabs.forEach((el, idx) => {
+    const pos = BASE + idx;
+    el.style.order = String(pos);
+    saved[el.dataset.tab] = pos;
+  });
+  try { localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(saved)); } catch (_) {}
 }
 function _clearTabDropHints() {
   document.querySelectorAll('.tab-btn.drop-before, .tab-btn.drop-after')
@@ -11222,7 +11919,22 @@ function _initTabDrag() {
       const before = (e.clientX - rect.left) < rect.width / 2;
       _clearTabDropHints();
       el.classList.add(before ? 'drop-before' : 'drop-after');
-      scroll.insertBefore(dragging, before ? el : el.nextSibling);
+      // Live-preview the new position by rewriting CSS `order` on every tab so
+      // the flex layout immediately reflects where `dragging` would land. DOM
+      // insertBefore alone can't override the `order` values we set earlier.
+      const tabs = [...scroll.querySelectorAll('.tab-btn')]
+        .filter(x => x.dataset && x.dataset.tab && x !== dragging);
+      tabs.sort((a, b) => {
+        const ao = parseFloat(a.style.order) || 0;
+        const bo = parseFloat(b.style.order) || 0;
+        if (ao !== bo) return ao - bo;
+        return Array.prototype.indexOf.call(a.parentNode.children, a) -
+               Array.prototype.indexOf.call(b.parentNode.children, b);
+      });
+      const insertIdx = tabs.indexOf(el) + (before ? 0 : 1);
+      tabs.splice(insertIdx, 0, dragging);
+      const BASE = 10000;
+      tabs.forEach((t, i) => { t.style.order = String(BASE + i); });
     });
     el.addEventListener('dragleave', () => {
       el.classList.remove('drop-before', 'drop-after');
@@ -11248,6 +11960,290 @@ document.addEventListener('DOMContentLoaded', () => {
 function _getInappWebview() {
   return document.querySelector('#inappBrowserFrame webview, #inappBrowserFrame iframe');
 }
+let _inappBrowserZoomFactor = 1;
+function _clampInappBrowserZoomFactor(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(3, Math.max(0.25, Math.round(n * 100) / 100));
+}
+function _formatInappBrowserZoom(factor) {
+  return Math.round(_clampInappBrowserZoomFactor(factor) * 100) + '%';
+}
+function _syncInappBrowserZoomUi() {
+  const label = document.getElementById('inappBrowserZoomValue');
+  if (label) label.textContent = _formatInappBrowserZoom(_inappBrowserZoomFactor);
+}
+function _applyInappBrowserZoom(view) {
+  if (!view) return;
+  const factor = _clampInappBrowserZoomFactor(_inappBrowserZoomFactor);
+  const tag = (view.tagName || '').toLowerCase();
+  if (tag === 'webview') {
+    try { view.setZoomFactor(factor); } catch (_) {}
+  } else {
+    view.style.transformOrigin = 'top left';
+    if (Math.abs(factor - 1) < 0.001) {
+      view.style.removeProperty('transform');
+      view.style.removeProperty('width');
+      view.style.removeProperty('height');
+    } else {
+      view.style.transform = `scale(${factor})`;
+      view.style.width = `${100 / factor}%`;
+      view.style.height = `${100 / factor}%`;
+    }
+  }
+  _syncInappBrowserZoomUi();
+}
+function inappBrowserSetZoomFactor(nextFactor) {
+  _inappBrowserZoomFactor = _clampInappBrowserZoomFactor(nextFactor);
+  _applyInappBrowserZoom(_getInappWebview());
+}
+function inappBrowserZoomIn() {
+  inappBrowserSetZoomFactor(_inappBrowserZoomFactor + 0.1);
+}
+function inappBrowserZoomOut() {
+  inappBrowserSetZoomFactor(_inappBrowserZoomFactor - 0.1);
+}
+function inappBrowserZoomReset() {
+  inappBrowserSetZoomFactor(1);
+}
+function applyInappBrowserAppearance() {
+  const view = _getInappWebview();
+  if (!view) return;
+  view.style.removeProperty('color-scheme');
+  if (view.tagName.toLowerCase() !== 'webview') return;
+  try {
+    view.executeJavaScript(`(function(){
+      try {
+        var key = '__symphoneeForceLightScheme';
+        if (window[key]) return true;
+        var originalMatchMedia = typeof window.matchMedia === 'function' ? window.matchMedia.bind(window) : null;
+        if (originalMatchMedia) {
+          window.matchMedia = function(query) {
+            var q = String(query || '').toLowerCase();
+            var result = originalMatchMedia(query);
+            if (q.indexOf('prefers-color-scheme') === -1) return result;
+            return new Proxy(result, {
+              get: function(target, prop) {
+                if (prop === 'matches') {
+                  if (q.indexOf('light') !== -1) return true;
+                  if (q.indexOf('dark') !== -1) return false;
+                }
+                var value = target[prop];
+                return typeof value === 'function' ? value.bind(target) : value;
+              }
+            });
+          };
+        }
+        if (document.documentElement && document.documentElement.style) {
+          document.documentElement.style.setProperty('color-scheme', 'light', 'important');
+        }
+        window[key] = true;
+        return true;
+      } catch (_) {
+        return false;
+      }
+    })();`, true).catch(() => {});
+  } catch (_) {}
+}
+function _shortenBrowserText(text, maxLen) {
+  const s = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+  return s.length <= maxLen ? s : (s.slice(0, Math.max(0, maxLen - 3)) + '...');
+}
+function _clearBrowserSelection() {
+  _browserInspectState.selected = null;
+  _renderBrowserSelection();
+}
+function _renderBrowserSelection() {
+  const panel = document.getElementById('inappAgentSelection');
+  const target = document.getElementById('inappAgentSelectionTarget');
+  const meta = document.getElementById('inappAgentSelectionMeta');
+  const askBtn = document.getElementById('inappAgentSelectionAsk');
+  if (!panel || !target || !meta || !askBtn) return;
+  const sel = _browserInspectState.selected;
+  if (!sel) {
+    panel.classList.remove('open');
+    target.textContent = 'Nothing selected';
+    meta.textContent = '';
+    askBtn.disabled = true;
+    return;
+  }
+  const primary = sel.selector || sel.tagName || 'selected element';
+  const bits = [];
+  if (sel.text) bits.push('Text: ' + _shortenBrowserText(sel.text, 140));
+  if (sel.attributes) {
+    const attrs = Object.entries(sel.attributes)
+      .filter(([, value]) => value)
+      .slice(0, 4)
+      .map(([key, value]) => key + '=' + value);
+    if (attrs.length) bits.push(attrs.join(' | '));
+  }
+  panel.classList.add('open');
+  target.textContent = primary;
+  meta.textContent = bits.join(' | ');
+  askBtn.disabled = false;
+}
+function _syncInappInspectButton() {
+  const btn = document.getElementById('inappInspectBtn');
+  if (!btn) return;
+  btn.classList.toggle('inspecting', !!_browserInspectState.enabled);
+}
+function _buildInappInspectScript(enabled) {
+  return `(function(){
+    var KEY = '__symphoneeInspectBridge';
+    var PREFIX = '__SYMPHONEE_INSPECT__';
+    function cleanupExisting() {
+      if (!window[KEY]) return;
+      try { window[KEY].cleanup && window[KEY].cleanup(); } catch (_) {}
+      window[KEY] = null;
+    }
+    function buildSelector(el) {
+      if (!el || !el.tagName) return '';
+      var parts = [];
+      var node = el;
+      var depth = 0;
+      while (node && node.nodeType === 1 && depth < 5) {
+        var part = node.tagName.toLowerCase();
+        if (node.id) {
+          part += '#' + node.id;
+          parts.unshift(part);
+          break;
+        }
+        var cls = (node.className && typeof node.className === 'string') ? node.className.trim().split(/\\s+/).filter(Boolean).slice(0, 2) : [];
+        if (cls.length) part += '.' + cls.join('.');
+        var sib = node;
+        var index = 1;
+        while ((sib = sib.previousElementSibling)) index++;
+        part += ':nth-child(' + index + ')';
+        parts.unshift(part);
+        node = node.parentElement;
+        depth++;
+      }
+      return parts.join(' > ');
+    }
+    function describe(el) {
+      var rect = el.getBoundingClientRect();
+      var attrs = {};
+      ['id', 'name', 'type', 'role', 'aria-label', 'placeholder', 'href', 'value'].forEach(function(key) {
+        try {
+          var value = el.getAttribute && el.getAttribute(key);
+          if (value) attrs[key] = value;
+        } catch (_) {}
+      });
+      return {
+        tagName: (el.tagName || '').toLowerCase(),
+        selector: buildSelector(el),
+        text: ((el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim()).slice(0, 280),
+        attributes: attrs,
+        rect: {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height)
+        },
+        url: location.href
+      };
+    }
+    cleanupExisting();
+    if (!${enabled ? 'true' : 'false'}) return 'disabled';
+    var overlay = document.createElement('div');
+    overlay.id = '__symphoneeInspectOverlay';
+    overlay.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;border:2px solid #078efa;background:rgba(7,142,250,0.14);pointer-events:none;z-index:2147483647;box-sizing:border-box;display:none;';
+    document.documentElement.appendChild(overlay);
+    function highlight(el) {
+      if (!el || !el.getBoundingClientRect) return;
+      var rect = el.getBoundingClientRect();
+      overlay.style.display = 'block';
+      overlay.style.left = rect.left + 'px';
+      overlay.style.top = rect.top + 'px';
+      overlay.style.width = rect.width + 'px';
+      overlay.style.height = rect.height + 'px';
+    }
+    function onMove(ev) {
+      if (!ev.target || ev.target === overlay || ev.target === document.documentElement || ev.target === document.body) return;
+      highlight(ev.target);
+    }
+    function onClick(ev) {
+      if (!ev.target || ev.target === overlay) return;
+      highlight(ev.target);
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+      console.info(PREFIX + JSON.stringify(describe(ev.target)));
+      return false;
+    }
+    document.addEventListener('mousemove', onMove, true);
+    document.addEventListener('click', onClick, true);
+    window[KEY] = {
+      cleanup: function() {
+        document.removeEventListener('mousemove', onMove, true);
+        document.removeEventListener('click', onClick, true);
+        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      }
+    };
+    return 'enabled';
+  })();`;
+}
+function _applyInappInspectMode(view) {
+  const targetView = view || _getInappWebview();
+  if (!targetView || targetView.tagName.toLowerCase() !== 'webview') return;
+  try {
+    targetView.executeJavaScript(_buildInappInspectScript(_browserInspectState.enabled), true).catch(() => {});
+  } catch (_) {}
+}
+function _ensureBrowserAgentPanelOpen() {
+  const panel = document.getElementById('inappAgentPanel');
+  const chip = document.getElementById('inappAgentChip');
+  if (!panel || panel.classList.contains('open')) return;
+  panel.classList.add('open');
+  _browserAgentState.open = true;
+  if (chip) chip.classList.add('active');
+  _loadBrowserAgentStatus();
+}
+function _handleInappBrowserConsoleMessage(message) {
+  const prefix = '__SYMPHONEE_INSPECT__';
+  const text = String(message || '');
+  if (!text.startsWith(prefix)) return;
+  try {
+    _browserInspectState.selected = JSON.parse(text.slice(prefix.length));
+    _renderBrowserSelection();
+    _ensureBrowserAgentPanelOpen();
+  } catch (_) {}
+}
+function toggleInappInspectMode(forceState) {
+  const nextState = typeof forceState === 'boolean' ? forceState : !_browserInspectState.enabled;
+  _browserInspectState.enabled = !!nextState;
+  if (!_browserInspectState.enabled) _clearBrowserSelection();
+  _syncInappInspectButton();
+  const view = _ensureInappBrowser();
+  if (view) _applyInappInspectMode(view);
+  toast(
+    _browserInspectState.enabled
+      ? 'Inspect mode is on. Click an element in the page to select it.'
+      : 'Inspect mode is off.',
+    'info',
+    { duration: 2600 }
+  );
+}
+async function askAboutBrowserSelection() {
+  if (!_browserInspectState.selected) {
+    toast('Select an element first.', 'info');
+    return;
+  }
+  const question = await customPrompt('Ask about the selected element', 'What should I know about this element?');
+  if (!question) return;
+  const task = [
+    'Use the current browser page and analyze the selected element.',
+    '',
+    'Selected element:',
+    '```json',
+    JSON.stringify(_browserInspectState.selected, null, 2),
+    '```',
+    '',
+    'Question: ' + question,
+  ].join('\n');
+  await _sendBrowserAgentTask(task, 'Ask about selection: ' + question);
+}
 function _ensureInappBrowser(initialUrl) {
   const frame = document.getElementById('inappBrowserFrame');
   if (!frame) return null;
@@ -11257,20 +12253,29 @@ function _ensureInappBrowser(initialUrl) {
   // Electron exposes webview as an HTML tag; createElement('webview') works.
   const tag = supportsWebview ? 'webview' : 'iframe';
   view = document.createElement(tag);
-  view.setAttribute('src', initialUrl || 'https://www.google.com');
+  view.setAttribute('src', initialUrl || 'https://duckduckgo.com/');
   view.setAttribute('allowpopups', '');
-  view.setAttribute('style', 'flex:1;width:100%;height:100%;border:0;background:white;');
+  view.setAttribute('style', 'flex:1;width:100%;height:100%;border:0;background:var(--base);');
   if (tag === 'webview') {
-    view.addEventListener('did-navigate', (e) => _syncInappUrl(e.url));
-    view.addEventListener('did-navigate-in-page', (e) => _syncInappUrl(e.url));
+    view.addEventListener('dom-ready', () => {
+      applyInappBrowserAppearance();
+      if (_browserInspectState.enabled) _applyInappInspectMode(view);
+      _applyInappBrowserZoom(view);
+    });
+    view.addEventListener('did-navigate', (e) => { _syncInappUrl(e.url); _clearBrowserSelection(); });
+    view.addEventListener('did-navigate-in-page', (e) => { _syncInappUrl(e.url); _clearBrowserSelection(); });
     view.addEventListener('page-title-updated', () => {/* could update tab title */});
+    view.addEventListener('console-message', (e) => _handleInappBrowserConsoleMessage(e && e.message));
   } else {
     view.addEventListener('load', () => {
       try { _syncInappUrl(view.contentWindow.location.href); } catch (_) {}
+      _applyInappBrowserZoom(view);
     });
   }
   frame.innerHTML = '';
   frame.appendChild(view);
+  applyInappBrowserAppearance();
+  _applyInappBrowserZoom(view);
   return view;
 }
 function _syncInappUrl(url) {
@@ -11279,10 +12284,10 @@ function _syncInappUrl(url) {
 }
 function _normalizeInappUrl(raw) {
   const s = String(raw || '').trim();
-  if (!s) return 'https://www.google.com';
+  if (!s) return 'https://duckduckgo.com/';
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) return s;
   if (/^[\w-]+(\.[\w-]+)+(\/|$)/.test(s)) return 'https://' + s;
-  return 'https://www.google.com/search?q=' + encodeURIComponent(s);
+  return 'https://duckduckgo.com/?q=' + encodeURIComponent(s);
 }
 function inappBrowserGo() {
   const input = document.getElementById('inappBrowserUrl');
@@ -11295,6 +12300,7 @@ function inappBrowserGo() {
   } else {
     view.src = url;
   }
+  applyInappBrowserAppearance();
   input.value = url;
 }
 function inappBrowserBack() {
@@ -11314,7 +12320,7 @@ function inappBrowserReload() {
 }
 function inappBrowserOpenExternal() {
   const input = document.getElementById('inappBrowserUrl');
-  const url = input && input.value ? input.value : 'https://www.google.com';
+  const url = input && input.value ? input.value : 'https://duckduckgo.com/';
   try { window.open(url, '_blank'); } catch (_) {}
 }
 // Open the browser tab (used by command palette / playwright automation).
@@ -11336,6 +12342,272 @@ function closeBrowserTab() {
   btn.style.display = 'none';
   if (wasActive) switchTab('terminal');
 }
+// ── Browser Agent chat panel ──────────────────────────────────────────────
+// Talks to /api/browser/agent/* and listens for WS `browser-agent-step`
+// frames so the user sees the agent's actions stream in real time.
+const _browserAgentState = { threadId: 'default', running: false, open: false, provider: null, providers: [] };
+const _browserInspectState = { enabled: false, selected: null };
+
+async function _loadBrowserAgentStatus() {
+  try {
+    const r = await fetch('/api/browser/agent/status?threadId=' + encodeURIComponent(_browserAgentState.threadId));
+    const data = await r.json();
+    _browserAgentState.providers = data.providers || [];
+    _browserAgentState.provider = data.defaultProvider || null;
+    _populateBrowserAgentProviderSelect();
+  } catch (_) {}
+}
+
+function _populateBrowserAgentProviderSelect() {
+  const sel = document.getElementById('inappAgentProvider');
+  if (!sel) return;
+  const opts = _browserAgentState.providers;
+  const configBtn = document.getElementById('inappAgentConfigureBtn');
+  if (!opts.length) {
+    sel.style.display = 'none';
+    if (!configBtn) {
+      const row = sel.parentNode;
+      const btn = document.createElement('button');
+      btn.id = 'inappAgentConfigureBtn';
+      btn.className = 'inapp-agent-configure';
+      btn.title = 'Open AI settings to add an API key';
+      btn.innerHTML = '<i data-lucide="key" style="width:12px;height:12px;"></i> Configure API Keys';
+      btn.onclick = function() { openSettings('ai'); toggleBrowserAgentPanel(); };
+      row.insertBefore(btn, sel);
+      if (typeof lucide !== 'undefined') lucide.createIcons({ el: btn });
+    }
+    return;
+  }
+  if (configBtn) configBtn.remove();
+  sel.style.removeProperty('display');
+  sel.disabled = false;
+  sel.innerHTML = opts.map(p => `<option value="${p.key}"${p.key === _browserAgentState.provider ? ' selected' : ''}>${p.label}</option>`).join('');
+}
+
+function _onBrowserAgentProviderChange() {
+  const sel = document.getElementById('inappAgentProvider');
+  if (sel && sel.value) _browserAgentState.provider = sel.value;
+}
+
+function toggleBrowserAgentPanel() {
+  const panel = document.getElementById('inappAgentPanel');
+  const chip = document.getElementById('inappAgentChip');
+  if (!panel) return;
+  _browserAgentState.open = !panel.classList.contains('open');
+  panel.classList.toggle('open', _browserAgentState.open);
+  if (chip) chip.classList.toggle('active', _browserAgentState.open);
+  if (_browserAgentState.open) {
+    _loadBrowserAgentStatus();
+    setTimeout(() => { const i = document.getElementById('inappAgentInput'); if (i) i.focus(); }, 50);
+  }
+}
+
+function _setBrowserAgentRunning(running) {
+  _browserAgentState.running = !!running;
+  const chip = document.getElementById('inappAgentChip');
+  const state = document.getElementById('inappAgentState');
+  const stopBtn = document.getElementById('inappAgentStopBtn');
+  const send = document.getElementById('inappAgentSend');
+  if (chip) chip.classList.toggle('running', running);
+  if (state) { state.textContent = running ? 'running' : 'idle'; state.className = 'inapp-agent-state' + (running ? ' running' : ''); }
+  if (stopBtn) stopBtn.style.display = running ? 'inline-block' : 'none';
+  if (send) send.disabled = running;
+}
+
+function _appendBrowserActionReports(row, reports) {
+  if (!row || !Array.isArray(reports) || !reports.length) return;
+  const body = row.querySelector('.agent-msg-body');
+  if (!body) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'browser-action-report-group';
+  reports.slice(-4).forEach((report) => {
+    const card = document.createElement('div');
+    card.className = 'browser-action-report';
+    const head = document.createElement('div');
+    head.className = 'browser-action-report-head';
+    const title = document.createElement('div');
+    title.className = 'browser-action-report-title';
+    title.textContent = report && report.title ? report.title : 'Browser action';
+    head.appendChild(title);
+    card.appendChild(head);
+    const lines = Array.isArray(report && report.summaryLines) ? report.summaryLines.filter(Boolean) : [];
+    if (lines.length) {
+      const list = document.createElement('ul');
+      list.className = 'browser-action-report-list';
+      lines.forEach((line) => {
+        const li = document.createElement('li');
+        li.textContent = line;
+        list.appendChild(li);
+      });
+      card.appendChild(list);
+    } else {
+      const empty = document.createElement('div');
+      empty.className = 'browser-action-report-empty';
+      empty.textContent = 'Relevant browser activity was captured for this action.';
+      card.appendChild(empty);
+    }
+    const actions = document.createElement('div');
+    actions.className = 'browser-action-report-actions';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'browser-action-report-expand';
+    btn.textContent = 'Expand';
+    btn.onclick = function() { openBrowserAgentDetailModal(report); };
+    actions.appendChild(btn);
+    card.appendChild(actions);
+    wrap.appendChild(card);
+  });
+  body.appendChild(wrap);
+}
+
+function openBrowserAgentDetailModal(report) {
+  const modal = document.getElementById('browserAgentDetailModal');
+  const title = document.getElementById('browserAgentDetailTitle');
+  const summary = document.getElementById('browserAgentDetailSummary');
+  const pre = document.getElementById('browserAgentDetailPre');
+  if (!modal || !title || !summary || !pre) return;
+  title.textContent = (report && report.title) || 'Browser Action Details';
+  summary.textContent = Array.isArray(report && report.summaryLines) ? report.summaryLines.join(' ') : '';
+  pre.textContent = JSON.stringify((report && report.detail) || report || {}, null, 2);
+  modal.classList.add('open');
+}
+
+function closeBrowserAgentDetailModal() {
+  const modal = document.getElementById('browserAgentDetailModal');
+  if (modal) modal.classList.remove('open');
+}
+
+function _appendAgentLog(kind, text, extra) {
+  const log = document.getElementById('inappAgentLog');
+  if (!log) return null;
+  const row = document.createElement('div');
+  row.className = 'agent-msg ' + kind;
+  if (kind === 'action') {
+    const glyph = document.createElement('span');
+    glyph.className = 'agent-action-glyph';
+    glyph.textContent = '›';
+    row.appendChild(glyph);
+    row.appendChild(document.createTextNode(text || ''));
+    if (extra && extra.fail) row.classList.add('fail');
+  } else {
+    const body = document.createElement('div');
+    body.className = 'agent-msg-body';
+    body.innerHTML = renderMarkdown(text || '');
+    row.appendChild(body);
+  }
+  // First time: drop the hint.
+  const hint = log.querySelector('.inapp-agent-hint');
+  if (hint) hint.remove();
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
+  return row;
+}
+
+function handleBrowserAgentStep(msg) {
+  if (!msg || msg.threadId !== _browserAgentState.threadId) return;
+  switch (msg.kind) {
+    case 'provider': {
+      const state = document.getElementById('inappAgentState');
+      if (state) { state.textContent = msg.label || msg.provider || 'running'; }
+      break;
+    }
+    case 'user':
+      // Echoed back; we already rendered locally when sending.
+      break;
+    case 'thinking':
+      // Replace the previous thinking row if present.
+      _browserAgentState._thinkingRow && _browserAgentState._thinkingRow.remove();
+      _browserAgentState._thinkingRow = _appendAgentLog('thinking', 'Thinking (step ' + (msg.iter || '?') + ')...');
+      break;
+    case 'message':
+      _browserAgentState._thinkingRow && (_browserAgentState._thinkingRow.remove(), _browserAgentState._thinkingRow = null);
+      _appendAgentLog('message', msg.text || '');
+      break;
+    case 'action':
+      _browserAgentState._thinkingRow && (_browserAgentState._thinkingRow.remove(), _browserAgentState._thinkingRow = null);
+      _appendAgentLog('action', msg.summary || msg.tool || 'action');
+      break;
+    case 'observation':
+      if (msg.ok === false) _appendAgentLog('action', (msg.tool || 'tool') + ' failed: ' + (msg.error || ''), { fail: true });
+      break;
+    case 'done':
+      _browserAgentState._thinkingRow && (_browserAgentState._thinkingRow.remove(), _browserAgentState._thinkingRow = null);
+      {
+        const row = _appendAgentLog('done', msg.summary || 'Done.');
+        if (row && Array.isArray(msg.reports) && msg.reports.length) _appendBrowserActionReports(row, msg.reports);
+      }
+      _setBrowserAgentRunning(false);
+      break;
+    case 'stopped':
+      _appendAgentLog('message', 'Stopped by user.');
+      _setBrowserAgentRunning(false);
+      break;
+    case 'error':
+      _appendAgentLog('error', msg.message || 'Error');
+      _setBrowserAgentRunning(false);
+      break;
+  }
+}
+
+async function _sendBrowserAgentTask(task, displayText) {
+  if (!task) return;
+  if (_browserAgentState.running) return;
+  _appendAgentLog('user', displayText || task);
+  _setBrowserAgentRunning(true);
+  try {
+    const res = await fetch('/api/browser/agent/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task, threadId: _browserAgentState.threadId, provider: _browserAgentState.provider || undefined }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      _appendAgentLog('error', data.error || ('HTTP ' + res.status));
+      _setBrowserAgentRunning(false);
+    } else if (data.label) {
+      const state = document.getElementById('inappAgentState');
+      if (state) state.title = data.label + ' (' + (data.model || '') + ')';
+    }
+  } catch (e) {
+      _appendAgentLog('error', e.message || String(e));
+      _setBrowserAgentRunning(false);
+    }
+}
+
+async function sendBrowserAgent() {
+  const input = document.getElementById('inappAgentInput');
+  if (!input) return;
+  const task = (input.value || '').trim();
+  if (!task) return;
+  input.value = '';
+  await _sendBrowserAgentTask(task);
+}
+
+async function stopBrowserAgent() {
+  try {
+    await fetch('/api/browser/agent/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ threadId: _browserAgentState.threadId }),
+    });
+  } catch (_) {}
+}
+
+async function resetBrowserAgent() {
+  try {
+    await fetch('/api/browser/agent/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ threadId: _browserAgentState.threadId }),
+    });
+  } catch (_) {}
+  const log = document.getElementById('inappAgentLog');
+  if (log) {
+    log.innerHTML = '<div class="inapp-agent-hint">Chat cleared. What should I do next?</div>';
+  }
+  _setBrowserAgentRunning(false);
+}
+
 // Lazy-create the webview on first tab activation so we do not pay the cost
 // at app boot.
 (function wireInappBrowserOnActivate() {
@@ -11388,19 +12660,191 @@ function closeSpaceEditor(ok) {
   _spaceEditorOriginalName = null;
 }
 async function openAddSpaceDialog() {
-  const result = await openSpaceEditor();
-  if (!result) return;
-  const { name, description, icon } = result;
-  const res = await fetch('/api/spaces', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, description, icon }),
-  });
-  if (!res.ok) { toast('Failed to create space', 'error'); return; }
-  toast('Space created: ' + name, 'success');
-  try { loadRepoList(); } catch (_) {}
-  try { _refreshSpaceSwitcher(); } catch (_) {}
-  try { renderSettingsSpaces(); } catch (_) {}
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  let step = 1;
+  const state = { name: '', description: '', icon: 'layers', repos: [], plugins: [] };
+
+  const [allRepos, allSpaces, allPlugins] = await Promise.all([
+    fetch('/api/repos').then(r => r.json()).catch(() => ({})),
+    fetch('/api/spaces').then(r => r.json()).catch(() => ({})),
+    fetch('/api/plugins').then(r => r.json()).catch(() => []),
+  ]);
+  const takenRepos = new Set(Object.values(allSpaces).flatMap(s => s.repos || []));
+  const freeRepos = Object.keys(allRepos).filter(r => !takenRepos.has(r));
+  const pluginList = Array.isArray(allPlugins) ? allPlugins : [];
+
+  let overlay = document.getElementById('_asoOverlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
+  overlay.id = '_asoOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:4000;display:flex;align-items:center;justify-content:center;font-family:var(--font-ui);';
+  document.body.appendChild(overlay);
+
+  const ASO_ICONS = [
+    {n:'layers',l:'General'},{n:'briefcase',l:'Work'},{n:'folder',l:'Folder'},
+    {n:'user',l:'Personal'},{n:'users',l:'Team'},{n:'code-2',l:'Code'},
+    {n:'terminal',l:'Terminal'},{n:'globe',l:'Web'},{n:'smartphone',l:'Mobile'},
+    {n:'database',l:'Data'},{n:'server',l:'Infra'},{n:'cloud',l:'Cloud'},
+    {n:'shield',l:'Security'},{n:'rocket',l:'Startup'},{n:'star',l:'Favorites'},
+    {n:'building-2',l:'Company'},{n:'palette',l:'Design'},{n:'book-open',l:'Docs'},
+    {n:'cpu',l:'AI / ML'},{n:'zap',l:'Fast'},{n:'package',l:'Packages'},
+    {n:'git-branch',l:'Git'},{n:'layout-dashboard',l:'Dashboard'},{n:'music',l:'Creative'},
+    {n:'flask-conical',l:'Experiment'},
+  ];
+
+  function renderStep() {
+    const STEP_LABELS = ['Identity','Repos','Plugins'];
+    const stepDotsHtml = STEP_LABELS.map((lbl, i) => {
+      const n = i + 1, active = n === step, done = n < step;
+      const bg = (done || active) ? 'var(--accent)' : 'var(--surface2)';
+      const fg = (done || active) ? 'var(--crust)' : 'var(--subtext0)';
+      const inner = done ? '<i data-lucide="check" style="width:10px;height:10px;"></i>' : n;
+      const line = n < 3 ? `<div style="width:20px;height:1px;background:${n < step ? 'var(--accent)' : 'var(--surface2)'};margin:0 6px;"></div>` : '';
+      return `<div style="display:flex;align-items:center;">
+        <div style="display:flex;align-items:center;gap:5px;">
+          <div style="width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;background:${bg};color:${fg};">${inner}</div>
+          <span style="font-size:11px;font-weight:${active?'700':'500'};color:${active?'var(--text)':'var(--subtext0)'};">${lbl}</span>
+        </div>${line}
+      </div>`;
+    }).join('');
+
+    let bodyHtml = '';
+    if (step === 1) {
+      const iconGridHtml = ASO_ICONS.map(ico => {
+        const sel = ico.n === state.icon;
+        return `<button type="button" data-pick-icon="${esc(ico.n)}" title="${esc(ico.l)}" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+          width:52px;height:52px;border-radius:8px;border:1px solid ${sel ? 'var(--accent)' : 'var(--surface2)'};
+          background:${sel ? 'color-mix(in srgb,var(--accent) 15%,var(--surface1))' : 'var(--surface1)'};
+          cursor:pointer;padding:0;transition:border-color 0.12s,background 0.12s;">
+          <i data-lucide="${esc(ico.n)}" style="width:15px;height:15px;color:${sel ? 'var(--accent)' : 'var(--subtext1)'};"></i>
+          <span style="font-size:9px;color:${sel ? 'var(--accent)' : 'var(--subtext0)'};font-family:var(--font-ui);line-height:1.1;text-align:center;padding:0 2px;">${esc(ico.l)}</span>
+        </button>`;
+      }).join('');
+      bodyHtml = `
+        <div style="margin-bottom:14px;">
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--subtext1);margin-bottom:5px;">Name <span style="color:var(--red);">*</span></label>
+          <input id="_asoName" type="text" value="${esc(state.name)}" placeholder="e.g. Personal, Work, Bath Fitter"
+            style="width:100%;box-sizing:border-box;padding:8px 10px;background:var(--surface1);border:1px solid var(--surface2);border-radius:var(--radius);color:var(--text);font:13px var(--font-ui);outline:none;transition:border-color 0.12s;"
+            onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--surface2)'"
+            oninput="document.getElementById('_asoNameErr').style.display='none'">
+          <div id="_asoNameErr" style="display:none;color:var(--red);font-size:10px;margin-top:3px;">Name is required.</div>
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--subtext1);margin-bottom:5px;">Description <span style="color:var(--subtext0);font-weight:400;">(optional)</span></label>
+          <input id="_asoDesc" type="text" value="${esc(state.description)}" placeholder="Short description"
+            style="width:100%;box-sizing:border-box;padding:8px 10px;background:var(--surface1);border:1px solid var(--surface2);border-radius:var(--radius);color:var(--text);font:13px var(--font-ui);outline:none;transition:border-color 0.12s;"
+            onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--surface2)'">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--subtext1);margin-bottom:8px;">Icon</label>
+          <div style="display:grid;grid-template-columns:repeat(5,52px);gap:6px;">${iconGridHtml}</div>
+        </div>`;
+    } else if (step === 2) {
+      const items = freeRepos.length
+        ? freeRepos.map(r => {
+            const chk = state.repos.includes(r);
+            return `<label style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:6px;cursor:pointer;">
+              <input type="checkbox" data-asr="${esc(r)}" ${chk?'checked':''} style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer;flex-shrink:0;">
+              <i data-lucide="folder-git-2" style="width:13px;height:13px;color:var(--accent);flex-shrink:0;"></i>
+              <span style="font:12px var(--font-ui);color:var(--text);">${esc(r)}</span>
+            </label>`;
+          }).join('')
+        : '<div style="padding:12px 10px;color:var(--subtext0);font-size:11px;">All repos are already assigned to a space. Add more repos in Settings.</div>';
+      bodyHtml = `
+        <p style="font-size:11px;color:var(--subtext0);margin:0 0 10px;line-height:1.5;">Select which repos belong to this space. A repo can only belong to one space at a time.</p>
+        <div style="max-height:240px;overflow-y:auto;border:1px solid var(--surface1);border-radius:var(--radius);padding:4px;">${items}</div>`;
+    } else if (step === 3) {
+      const items = pluginList.length
+        ? pluginList.map(p => {
+            const chk = state.plugins.includes(p.id);
+            return `<label style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:6px;cursor:pointer;">
+              <input type="checkbox" data-asp="${esc(p.id)}" ${chk?'checked':''} style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer;flex-shrink:0;">
+              <i data-lucide="${esc(p.icon||'puzzle')}" style="width:13px;height:13px;color:var(--accent);flex-shrink:0;"></i>
+              <span style="font:12px var(--font-ui);color:var(--text);">${esc(p.name||p.id)}</span>
+            </label>`;
+          }).join('')
+        : '<div style="padding:12px 10px;color:var(--subtext0);font-size:11px;">No plugins installed. Install plugins from Settings &rsaquo; Plugins.</div>';
+      bodyHtml = `
+        <p style="font-size:11px;color:var(--subtext0);margin:0 0 10px;line-height:1.5;">Choose which plugins are surfaced while this space is active. Leave all unchecked to show every plugin.</p>
+        <div style="max-height:240px;overflow-y:auto;border:1px solid var(--surface1);border-radius:var(--radius);padding:4px;">${items}</div>`;
+    }
+
+    const backBtn = step > 1
+      ? `<button onclick="window._asoBack()" style="display:inline-flex;align-items:center;gap:5px;padding:0 12px;height:30px;background:var(--surface1);border:1px solid var(--surface2);border-radius:var(--radius-lg);color:var(--text);font:600 12px var(--font-ui);cursor:pointer;">
+          <i data-lucide="arrow-left" style="width:12px;height:12px;"></i> Back
+        </button>` : '';
+    const isLast = step === 3;
+    const nextLabel = isLast ? 'Create Space' : 'Next';
+    const nextArrow = isLast ? '' : ' <i data-lucide="arrow-right" style="width:12px;height:12px;"></i>';
+
+    overlay.innerHTML = `
+      <div style="background:var(--surface0);border:1px solid var(--surface2);border-radius:var(--radius-lg);padding:24px;width:390px;max-width:calc(100vw - 40px);box-shadow:0 16px 48px rgba(0,0,0,0.5);">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px;">
+          <i data-lucide="layers" style="width:16px;height:16px;color:var(--accent);"></i>
+          <strong style="font-size:14px;color:var(--text);font-family:var(--font-ui);">New Space</strong>
+          <div style="flex:1;"></div>
+          <button onclick="window._asoDismiss()" style="background:transparent;border:none;color:var(--subtext0);cursor:pointer;padding:2px;display:flex;align-items:center;">
+            <i data-lucide="x" style="width:14px;height:14px;"></i>
+          </button>
+        </div>
+        <div style="display:flex;align-items:center;margin-bottom:20px;">${stepDotsHtml}</div>
+        <div>${bodyHtml}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:20px;">
+          <button onclick="window._asoDismiss()" style="display:inline-flex;align-items:center;padding:0 12px;height:30px;background:transparent;border:1px solid transparent;border-radius:var(--radius-lg);color:var(--subtext0);font:500 12px var(--font-ui);cursor:pointer;">Cancel</button>
+          <div style="flex:1;"></div>
+          ${backBtn}
+          <button onclick="window._asoNext()" style="display:inline-flex;align-items:center;gap:5px;padding:0 14px;height:30px;background:var(--accent);border:1px solid var(--accent);border-radius:var(--radius-lg);color:var(--crust);font:600 12px var(--font-ui);cursor:pointer;">${nextLabel}${nextArrow}</button>
+        </div>
+      </div>`;
+
+    try { lucide.createIcons({ nodes: [overlay] }); } catch (_) {}
+
+    overlay.querySelectorAll('[data-pick-icon]').forEach(btn => {
+      btn.addEventListener('click', () => { state.icon = btn.dataset.pickIcon; renderStep(); });
+    });
+    if (step === 1) {
+      setTimeout(() => { const el = document.getElementById('_asoName'); if (el) el.focus(); }, 30);
+    }
+  }
+
+  window._asoNext = function() {
+    if (step === 1) {
+      state.name = (document.getElementById('_asoName')?.value || '').trim();
+      state.description = (document.getElementById('_asoDesc')?.value || '').trim();
+      if (!state.name) { const e = document.getElementById('_asoNameErr'); if (e) e.style.display = ''; return; }
+      step = 2; renderStep();
+    } else if (step === 2) {
+      state.repos = [...overlay.querySelectorAll('[data-asr]:checked')].map(el => el.dataset.asr);
+      step = 3; renderStep();
+    } else if (step === 3) {
+      state.plugins = [...overlay.querySelectorAll('[data-asp]:checked')].map(el => el.dataset.asp);
+      _asoCreate();
+    }
+  };
+  window._asoBack = function() {
+    if (step === 2) { state.repos = [...overlay.querySelectorAll('[data-asr]:checked')].map(el => el.dataset.asr); step = 1; }
+    else if (step === 3) { state.plugins = [...overlay.querySelectorAll('[data-asp]:checked')].map(el => el.dataset.asp); step = 2; }
+    renderStep();
+  };
+  window._asoDismiss = function() {
+    overlay.remove();
+    ['_asoNext','_asoBack','_asoDismiss'].forEach(k => delete window[k]);
+  };
+  async function _asoCreate() {
+    const res = await fetch('/api/spaces', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: state.name, description: state.description, icon: state.icon, repos: state.repos, plugins: state.plugins }),
+    });
+    if (!res.ok) { toast('Failed to create space', 'error'); return; }
+    toast('Space "' + state.name + '" created', 'success');
+    overlay.remove();
+    ['_asoNext','_asoBack','_asoDismiss'].forEach(k => delete window[k]);
+    try { loadRepoList(); } catch (_) {}
+    try { _refreshSpaceSwitcher(); } catch (_) {}
+    try { renderSettingsSpaces(); } catch (_) {}
+  }
+
+  renderStep();
 }
 async function openEditSpaceDialog(name) {
   const spaces = await fetch('/api/spaces').then(r => r.json()).catch(() => ({}));
@@ -11486,9 +12930,11 @@ async function renderSettingsSpaces() {
 
 // ── Space / repo switcher (header chip) ─────────────────────────────────
 async function _refreshSpaceSwitcher() {
-  const label = document.getElementById('spaceSwitcherLabel');
-  const chip = document.getElementById('spaceSwitcherChip');
-  if (!label || !chip) return;
+  const spaceLabel = document.getElementById('spaceSwitcherLabel');
+  const spaceChip  = document.getElementById('spaceSwitcherChip');
+  const repoChip   = document.getElementById('repoChip');
+  const repoLabel  = document.getElementById('repoChipLabel');
+  if (!spaceLabel || !spaceChip) return;
   let spaces = {}, repos = {};
   try {
     [repos, spaces] = await Promise.all([
@@ -11496,22 +12942,20 @@ async function _refreshSpaceSwitcher() {
       fetch('/api/spaces').then(r => r.json()).catch(() => ({})),
     ]);
   } catch (_) {}
-  // Label format: "Space / Repo", "Space", "Repo", or "No space"
-  let labelText;
-  if (activeSpace && activeRepo) labelText = activeSpace + ' / ' + activeRepo;
-  else if (activeSpace) labelText = activeSpace;
-  else if (activeRepo) labelText = activeRepo;
-  else labelText = 'No space';
-  label.textContent = labelText;
-  // Icon priority: active space's custom icon -> repo icon -> layers
+  // Space row: show active space name or fallback
+  spaceLabel.textContent = activeSpace || 'Select space';
+  // Space icon: custom space icon or default layers
   let iconName = 'layers';
   if (activeSpace && spaces[activeSpace] && spaces[activeSpace].icon) iconName = spaces[activeSpace].icon;
-  else if (activeRepo) iconName = 'folder-git-2';
-  const iconEl = chip.querySelector('i[data-lucide]');
+  const iconEl = document.getElementById('spaceChipIcon');
   if (iconEl) {
     iconEl.setAttribute('data-lucide', iconName);
-    try { lucide.createIcons({ nodes: [chip] }); } catch (_) {}
+    try { lucide.createIcons({ nodes: [spaceChip] }); } catch (_) {}
   }
+  // Repo row: show when a space is selected (to allow repo picking) or when a repo is active
+  const showRepo = !!(activeSpace || activeRepo);
+  if (repoChip) repoChip.style.display = showRepo ? '' : 'none';
+  if (repoLabel) repoLabel.textContent = activeRepo || 'Select repo';
   const menu = document.getElementById('spaceSwitcherMenu');
   if (menu && menu.classList.contains('open')) _renderSpaceSwitcherMenu(spaces, repos);
 }
@@ -11546,45 +12990,49 @@ function _renderSpaceSwitcherMenu(spaces, repos) {
   const inSomeSpace = new Set(Object.values(spaceRepos).flat());
   for (const r of repoNames) if (!inSomeSpace.has(r)) unassigned.push(r);
 
-  // Render a single repo row, nested slightly under its space parent.
-  const repoRow = (name, nested) => {
-    const active = (name === activeRepo) ? ' active' : '';
-    const pad = nested ? 'padding-left:24px;' : '';
-    return '<div class="space-menu-item' + active + '" data-select-repo="' + esc(name) + '" data-repo-name="' + esc(name) + '" style="' + pad + '" title="Right-click to move to another space">' +
+  // Render a single repo row (with a "REPO" type badge).
+  const repoRow = (rName, nested) => {
+    const active = (rName === activeRepo) ? ' active' : '';
+    const pad = nested ? 'padding-left:26px;margin-left:10px;' : '';
+    return '<div class="space-menu-item' + active + '" data-select-repo="' + esc(rName) + '" data-repo-name="' + esc(rName) + '" style="' + pad + '" title="Right-click to move to another space">' +
       '<i class="sm-icon" data-lucide="folder-git-2" style="width:13px;height:13px;"></i>' +
-      '<div class="sm-label"><div>' + esc(name) + '</div></div>' +
+      '<div class="sm-label">' + esc(rName) + '</div>' +
+      '<span style="font-size:9px;font-weight:600;color:var(--overlay1);letter-spacing:0.4px;flex-shrink:0;margin-left:6px;">REPO</span>' +
     '</div>';
   };
 
-  // Render a space row (and its children, when expanded).
-  const spaceBlock = (name) => {
-    const s = spaces[name] || {};
-    const active = (name === activeSpace) ? ' active' : '';
-    const icon = s.icon || 'layers';
-    const desc = s.description || '';
-    const kids = spaceRepos[name] || [];
-    const head = '<div class="space-menu-item' + active + '" data-select-space="' + esc(name) + '">' +
+  // Render a space row (and its children indented beneath it).
+  const spaceBlock = (sName) => {
+    const sv = spaces[sName] || {};
+    const active = (sName === activeSpace) ? ' active' : '';
+    const icon = sv.icon || 'layers';
+    const desc = sv.description || '';
+    const kids = spaceRepos[sName] || [];
+    const head = '<div class="space-menu-item' + active + '" data-select-space="' + esc(sName) + '">' +
       '<i class="sm-icon" data-lucide="' + esc(icon) + '" style="width:13px;height:13px;"></i>' +
-      '<div class="sm-label"><div>' + esc(name) + (kids.length ? ' <span style="color:var(--subtext0);font-weight:400;">· ' + kids.length + '</span>' : '') + '</div>' +
-      (desc ? '<div class="sm-desc">' + esc(desc) + '</div>' : '') +
-      '</div>' +
-      '<button class="sm-del" data-del-space="' + esc(name) + '" title="Delete space"><i data-lucide="x" style="width:11px;height:11px;"></i></button>' +
+      '<div class="sm-label">' + esc(sName) + (kids.length ? '<span style="color:var(--subtext0);font-weight:400;"> · ' + kids.length + '</span>' : '') + '</div>' +
+      (desc ? '<span style="font-size:9px;color:var(--subtext0);">' + esc(desc) + '</span>' : '') +
+      '<span style="font-size:9px;font-weight:600;color:var(--accent);letter-spacing:0.4px;flex-shrink:0;opacity:0.7;margin-left:6px;">SPACE</span>' +
+      '<button class="sm-del" data-del-space="' + esc(sName) + '" title="Delete space"><i data-lucide="x" style="width:11px;height:11px;"></i></button>' +
     '</div>';
     return head + kids.map(r => repoRow(r, true)).join('');
   };
 
   const noneItem = '<div class="space-menu-item' + ((!activeSpace && !activeRepo) ? ' active' : '') + '" data-select-space="">' +
     '<i class="sm-icon" data-lucide="circle-slash" style="width:13px;height:13px;"></i>' +
-    '<div class="sm-label">No space</div></div>';
+    '<div class="sm-label">All (no filter)</div></div>';
 
   const spacesBlockHtml = spaceNames.length
     ? '<div class="space-menu-section">Spaces</div>' + spaceNames.map(spaceBlock).join('')
     : '';
-  const unassignedHtml = unassigned.length
-    ? '<div class="space-menu-section">Unassigned repos</div>' + unassigned.map(r => repoRow(r, false)).join('')
-    : '';
 
-  const body = '<div class="space-menu-body">' + noneItem + spacesBlockHtml + unassignedHtml +
+  // When no space is active, show ALL repos (including those in spaces).
+  // When inside a space, hide the repos section to reduce noise (they're shown nested).
+  const allReposHtml = !activeSpace && repoNames.length
+    ? '<div class="space-menu-section">Repos</div>' + repoNames.map(r => repoRow(r, false)).join('')
+    : (unassigned.length && !activeSpace ? '<div class="space-menu-section">Repos</div>' + unassigned.map(r => repoRow(r, false)).join('') : '');
+
+  const body = '<div class="space-menu-body">' + noneItem + spacesBlockHtml + allReposHtml +
     (!spaceNames.length && !repoNames.length
       ? '<div class="space-menu-empty">No spaces or repos yet. Create one below.</div>' : '') +
   '</div>';
@@ -11917,6 +13365,37 @@ async function openManageSpaceDialog(name) {
   const repoNames = Object.keys(repos);
   const pluginList = Array.isArray(plugins) ? plugins : [];
 
+  const toggle = (dataAttr, val, checked) =>
+    '<label class="ms-toggle"><input type="checkbox" ' + dataAttr + '="' + esc(val) + '"' + (checked ? ' checked' : '') + '><span class="ms-toggle-track"></span></label>';
+
+  const reposHtml = repoNames.length
+    ? repoNames.map(r => {
+        const on = (s.repos || []).includes(r);
+        let owner = null;
+        for (const [n, other] of Object.entries(spaces)) {
+          if (n === name) continue;
+          if (other && Array.isArray(other.repos) && other.repos.includes(r)) { owner = n; break; }
+        }
+        return '<div class="ms-row">' +
+          toggle('data-ms-repo', r, on) +
+          '<i data-lucide="folder-git-2" style="width:13px;height:13px;color:var(--subtext0);flex-shrink:0;"></i>' +
+          '<span class="ms-row-label">' + esc(r) + '</span>' +
+          (owner ? '<span class="ms-row-sub">in ' + esc(owner) + '</span>' : '') +
+        '</div>';
+      }).join('')
+    : '<div style="color:var(--subtext0);font-size:11px;padding:10px 2px;">No repos configured.</div>';
+
+  const pluginsHtml = pluginList.length
+    ? pluginList.map(p => {
+        const on = (s.plugins || []).includes(p.id);
+        return '<div class="ms-row">' +
+          toggle('data-ms-plugin', p.id, on) +
+          '<i data-lucide="' + esc(p.icon || 'puzzle') + '" style="width:13px;height:13px;color:var(--subtext0);flex-shrink:0;"></i>' +
+          '<span class="ms-row-label">' + esc(p.name || p.id) + '</span>' +
+        '</div>';
+      }).join('')
+    : '<div style="color:var(--subtext0);font-size:11px;padding:10px 2px;">No plugins installed.</div>';
+
   let overlay = document.getElementById('manageSpaceOverlay');
   if (overlay) overlay.remove();
   overlay = document.createElement('div');
@@ -11924,68 +13403,55 @@ async function openManageSpaceDialog(name) {
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:4000;display:flex;align-items:center;justify-content:center;font-family:var(--font-ui);';
   overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
 
-  const reposHtml = repoNames.length
-    ? repoNames.map(r => {
-        const checked = (s.repos || []).includes(r) ? 'checked' : '';
-        // Show the current owner of the repo (if any, and if it's not this space).
-        // Makes it clear when checking a box will move the repo OUT of another
-        // space (single-membership rule enforced server-side).
-        let owner = null;
-        for (const [n, other] of Object.entries(spaces)) {
-          if (n === name) continue;
-          if (other && Array.isArray(other.repos) && other.repos.includes(r)) { owner = n; break; }
-        }
-        const ownerHint = owner
-          ? '<span style="margin-left:auto;font-size:10px;color:var(--yellow,#d4a72c);">currently in ' + esc(owner) + '</span>'
-          : '';
-        return '<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;font-size:12px;cursor:pointer;border-radius:4px;" onmouseover="this.style.background=\'var(--surface1)\'" onmouseout="this.style.background=\'\'">' +
-          '<input type="checkbox" data-ms-repo="' + esc(r) + '" ' + checked + '>' +
-          '<i data-lucide="folder-git-2" style="width:12px;height:12px;color:var(--subtext0);"></i>' +
-          '<span>' + esc(r) + '</span>' +
-          ownerHint +
-        '</label>';
-      }).join('')
-    : '<div style="color:var(--subtext0);font-size:11px;padding:6px;">No repos configured.</div>';
-
-  const pluginsHtml = pluginList.length
-    ? pluginList.map(p => {
-        const checked = (s.plugins || []).includes(p.id) ? 'checked' : '';
-        return '<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;font-size:12px;cursor:pointer;border-radius:4px;" onmouseover="this.style.background=\'var(--surface1)\'" onmouseout="this.style.background=\'\'">' +
-          '<input type="checkbox" data-ms-plugin="' + esc(p.id) + '" ' + checked + '>' +
-          '<i data-lucide="' + esc(p.icon || 'puzzle') + '" style="width:12px;height:12px;color:var(--subtext0);"></i>' +
-          '<span>' + esc(p.name || p.id) + '</span>' +
-        '</label>';
-      }).join('')
-    : '<div style="color:var(--subtext0);font-size:11px;padding:6px;">No plugins installed.</div>';
-
   overlay.innerHTML =
-    '<div style="background:var(--surface0);border:1px solid var(--surface2);border-radius:10px;padding:18px 22px;width:560px;max-width:92vw;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,0.5);">' +
-      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">' +
+    '<div class="ms-dialog">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-shrink:0;">' +
         '<i data-lucide="' + esc(s.icon || 'layers') + '" style="width:18px;height:18px;color:var(--accent);"></i>' +
-        '<strong style="font-size:14px;">Manage space: ' + esc(name) + '</strong>' +
+        '<strong style="font-size:14px;">' + esc(name) + '</strong>' +
         '<div style="flex:1;"></div>' +
-        '<button onclick="document.getElementById(\'manageSpaceOverlay\').remove()" style="background:transparent;border:none;color:var(--subtext0);cursor:pointer;"><i data-lucide="x" style="width:14px;height:14px;"></i></button>' +
+        '<button onclick="document.getElementById(\'manageSpaceOverlay\').remove()" style="background:transparent;border:none;color:var(--subtext0);cursor:pointer;padding:4px;border-radius:4px;" onmouseover="this.style.color=\'var(--text)\'" onmouseout="this.style.color=\'var(--subtext0)\'"><i data-lucide="x" style="width:14px;height:14px;"></i></button>' +
       '</div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;overflow:auto;">' +
-        '<div>' +
-          '<div style="font-size:10px;color:var(--overlay1);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Repos in this space</div>' +
-          '<div id="msRepoList" style="max-height:240px;overflow:auto;">' + reposHtml + '</div>' +
-          '<div style="font-size:10px;color:var(--subtext0);margin-top:4px;">A repo can only belong to one space at a time.</div>' +
-        '</div>' +
-        '<div>' +
-          '<div style="font-size:10px;color:var(--overlay1);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Plugins surfaced here</div>' +
-          '<div id="msPluginList" style="max-height:240px;overflow:auto;">' + pluginsHtml + '</div>' +
-          '<div style="font-size:10px;color:var(--subtext0);margin-top:4px;">Leave all unchecked to show every plugin while this space is active.</div>' +
-        '</div>' +
+      '<div class="ms-tabs">' +
+        '<button class="ms-tab active" data-ms-tab="repos" onclick="_msSwitchTab(this,\'repos\')">' +
+          '<i data-lucide="folder-git-2" style="width:12px;height:12px;"></i>Repos' +
+        '</button>' +
+        '<button class="ms-tab" data-ms-tab="plugins" onclick="_msSwitchTab(this,\'plugins\')">' +
+          '<i data-lucide="puzzle" style="width:12px;height:12px;"></i>Plugins' +
+        '</button>' +
       '</div>' +
-      '<div style="display:flex;gap:8px;margin-top:16px;">' +
+      '<div class="ms-tab-panel active" id="msTabRepos">' +
+        '<div class="ms-list">' + reposHtml + '</div>' +
+        '<div class="ms-tab-hint">A repo can only belong to one space at a time.</div>' +
+      '</div>' +
+      '<div class="ms-tab-panel" id="msTabPlugins">' +
+        '<div class="ms-list">' + pluginsHtml + '</div>' +
+        '<div class="ms-tab-hint">Leave all off to surface every installed plugin while this space is active.</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin-top:16px;flex-shrink:0;">' +
         '<div style="flex:1;"></div>' +
-        '<button class="sy-btn" onclick="document.getElementById(\'manageSpaceOverlay\').remove()" style="background:var(--surface1);">Cancel</button>' +
+        '<button class="sy-btn sy-btn-secondary" onclick="document.getElementById(\'manageSpaceOverlay\').remove()">Cancel</button>' +
         '<button class="sy-btn sy-btn-primary" onclick="_saveManageSpace(\'' + esc(name) + '\')">Save</button>' +
       '</div>' +
     '</div>';
+
   document.body.appendChild(overlay);
   try { lucide.createIcons({ nodes: [overlay] }); } catch (_) {}
+
+  // Wire toggle rows: clicking the row fires the hidden checkbox
+  overlay.querySelectorAll('.ms-row').forEach(row => {
+    row.addEventListener('click', e => {
+      if (e.target.closest('.ms-toggle')) return;
+      const cb = row.querySelector('input[type="checkbox"]');
+      if (cb) cb.checked = !cb.checked;
+    });
+  });
+}
+
+function _msSwitchTab(btn, tab) {
+  const overlay = document.getElementById('manageSpaceOverlay');
+  if (!overlay) return;
+  overlay.querySelectorAll('.ms-tab').forEach(t => t.classList.toggle('active', t.dataset.msTab === tab));
+  overlay.querySelectorAll('.ms-tab-panel').forEach(p => p.classList.toggle('active', p.id === (tab === 'repos' ? 'msTabRepos' : 'msTabPlugins')));
 }
 
 async function _saveManageSpace(name) {
@@ -12061,6 +13527,8 @@ async function applyPluginSpaceFilter() {
   if (active && active.classList.contains('plugin-space-hidden')) {
     try { switchTab('terminal'); } catch (_) {}
   }
+  // Re-evaluate section title visibility now that buttons may have been hidden.
+  try { reconcilePluginShellSurfaces(typeof configData !== 'undefined' && configData.IncognitoMode === true); } catch (_) {}
 }
 
 // Switch the active space. If the new space has a single repo, auto-select
@@ -13941,6 +15409,14 @@ function renderHtmlBody(html) {
     .replace(/<details>/gi, '<details open>');
 }
 
+function wrapStandaloneListItems(html) {
+  if (!html || html.indexOf('<li') === -1) return html || '';
+  return html.replace(/((?:<(?:li)\b[^>]*data-list-kind="(ul|ol)"[^>]*>[\s\S]*?<\/li>\s*)+)/g, (_, block, kind) => {
+    const cleaned = block.replace(/\sdata-list-kind="(?:ul|ol)"/g, '');
+    return `<${kind}>${cleaned}</${kind}>`;
+  });
+}
+
 function renderMarkdown(text) {
   if (!text) return '';
   // Extract code blocks FIRST — before ANY other processing, to prevent content inside
@@ -13988,8 +15464,8 @@ function renderMarkdown(text) {
     return `<div class="md-table-wrap"><table>${thead}${tbody}</table></div>`;
   });
   // Lists
-  text = text.replace(/^\d+\. (.+)$/gm, '<li style="margin-left:16px;margin-bottom:2px;">$1</li>');
-  text = text.replace(/^[-*] (.+)$/gm, '<li style="margin-left:16px;margin-bottom:2px;">$1</li>');
+  text = text.replace(/^\d+\. (.+)$/gm, '<li data-list-kind="ol" style="margin-left:16px;margin-bottom:2px;">$1</li>');
+  text = text.replace(/^[-*] (.+)$/gm, '<li data-list-kind="ul" style="margin-left:16px;margin-bottom:2px;">$1</li>');
   // Convert markdown images to <img> (works for both HTML and markdown paths)
   // Nested: [![alt](img)](link)
   text = text.replace(/\[!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)/g, '<a href="$3" target="_blank"><img src="$2" alt="$1"></a>');
@@ -14037,7 +15513,7 @@ function renderMarkdown(text) {
     earlyCodeBlocks.forEach((block, i) => {
       html = html.replace(new RegExp(`(<br>)*%%EARLYCODE_${i}%%(<br>)*`, 'g'), block);
     });
-    return html;
+    return wrapStandaloneListItems(html);
   }
   // Plain markdown — extract code blocks BEFORE escaping to preserve backticks
   const codeBlocks = [];
@@ -14089,12 +15565,12 @@ function renderMarkdown(text) {
   // Strikethrough
   html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
   // Task lists
-  html = html.replace(/^[-*] \[x\] (.+)$/gm, '<li style="margin-left:16px;margin-bottom:2px;list-style:none;"><input type="checkbox" checked disabled style="margin-right:6px;">$1</li>');
-  html = html.replace(/^[-*] \[ \] (.+)$/gm, '<li style="margin-left:16px;margin-bottom:2px;list-style:none;"><input type="checkbox" disabled style="margin-right:6px;">$1</li>');
+  html = html.replace(/^[-*] \[x\] (.+)$/gm, '<li data-list-kind="ul" style="margin-left:16px;margin-bottom:2px;list-style:none;"><input type="checkbox" checked disabled style="margin-right:6px;">$1</li>');
+  html = html.replace(/^[-*] \[ \] (.+)$/gm, '<li data-list-kind="ul" style="margin-left:16px;margin-bottom:2px;list-style:none;"><input type="checkbox" disabled style="margin-right:6px;">$1</li>');
   // Ordered lists
-  html = html.replace(/^\d+\. (.+)$/gm, '<li style="margin-left:16px;margin-bottom:2px;">$1</li>');
+  html = html.replace(/^\d+\. (.+)$/gm, '<li data-list-kind="ol" style="margin-left:16px;margin-bottom:2px;">$1</li>');
   // Unordered lists
-  html = html.replace(/^[-*] (.+)$/gm, '<li style="margin-left:16px;margin-bottom:2px;">$1</li>');
+  html = html.replace(/^[-*] (.+)$/gm, '<li data-list-kind="ul" style="margin-left:16px;margin-bottom:2px;">$1</li>');
   // Blockquotes
   html = html.replace(/^&gt; (.+)$/gm, '<div style="border-left:3px solid var(--surface1);padding-left:10px;color:var(--subtext0);margin:4px 0;">$1</div>');
   // Line breaks — BEFORE restoring code blocks so \n inside <pre> is preserved
@@ -14117,7 +15593,7 @@ function renderMarkdown(text) {
   html = html.replace(/(<\/th>)<br>/g, '$1');
   html = html.replace(/<br>(<table>)/g, '$1');
   html = html.replace(/(<hr[^>]*>)<br>/g, '$1');
-  return html;
+  return wrapStandaloneListItems(html);
 }
 
 function formatDate(d) {
@@ -15874,10 +17350,15 @@ function checkTabBarOverflow() {
 // behavior injected on demand as iframes.
 var _intelFallbackToRecipes = false;
 
+function _hasVisibleChildren(el) {
+  if (!el) return false;
+  return Array.from(el.children).some(function (c) { return getComputedStyle(c).display !== 'none'; });
+}
+
 function reconcilePluginShellSurfaces(isIncognito, opts) {
   var pluginDriven = document.getElementById('sidebarPluginDriven');
-  var hasLeft = document.getElementById('sidebarPluginActions')?.children.length > 0;
-  var hasAi = document.getElementById('sidebarPluginAiActions')?.children.length > 0;
+  var hasLeft = _hasVisibleChildren(document.getElementById('sidebarPluginActions'));
+  var hasAi = _hasVisibleChildren(document.getElementById('sidebarPluginAiActions'));
   if (pluginDriven) pluginDriven.style.display = ((hasLeft || hasAi) && !isIncognito) ? '' : 'none';
 
   var aiTitle = document.getElementById('sidebarPluginAiTitle');
@@ -15890,12 +17371,22 @@ function reconcilePluginShellSurfaces(isIncognito, opts) {
 
   // Azure DevOps board picker (sidebar) is shown iff the ADO plugin contributes
   // a workItemProvider. Core does not hardcode the plugin id here.
+  var hasProvider = !!(typeof _loadedPlugins !== 'undefined' && _loadedPlugins && _loadedPlugins.some(function(p){
+    return p.contributions && p.contributions.workItemProvider;
+  }));
   var adoFixed = document.getElementById('sidebarAdoFixed');
-  if (adoFixed) {
-    var hasProvider = !!(typeof _loadedPlugins !== 'undefined' && _loadedPlugins && _loadedPlugins.some(function(p){
-      return p.contributions && p.contributions.workItemProvider;
-    }));
-    adoFixed.style.display = (hasProvider && !isIncognito) ? '' : 'none';
+  if (adoFixed) adoFixed.style.display = (hasProvider && !isIncognito) ? '' : 'none';
+
+  // Activity and Team intel tabs are ADO-specific — hide when ADO plugin is absent.
+  var activityTab = document.getElementById('intelTab-activity');
+  var teamTab = document.getElementById('intelTab-team');
+  var showAdoTabs = hasProvider && !isIncognito;
+  if (activityTab) activityTab.style.display = showAdoTabs ? '' : 'none';
+  if (teamTab) teamTab.style.display = showAdoTabs ? '' : 'none';
+  // If Activity was the active intel tab and is now hidden, fall back to Git Log.
+  if (!showAdoTabs && activityTab && activityTab.classList.contains('active')) {
+    var gitLogTab = document.getElementById('intelTab-gitlog');
+    if (gitLogTab && typeof switchIntelTab === 'function') switchIntelTab('gitlog');
   }
 
   applyPluginPinnedTabs(isIncognito, opts);
@@ -15911,6 +17402,7 @@ function reconcilePluginShellSurfaces(isIncognito, opts) {
 var CORE_PINNED_CENTER = {
   terminal: 0,
   orchestrator: 1,
+  browser: 2,
   files: 900,
   diffview: 901,
   notes: 902,
@@ -15952,10 +17444,18 @@ function _collectPinnedTabs(kind) {
 function applyPluginPinnedTabs(isIncognito, opts) {
   opts = opts || {};
 
+  // User-saved drag-reorder overrides win over declared defaults.
+  var _savedOrder = (typeof getSavedTabOrderOverrides === 'function') ? getSavedTabOrderOverrides() : {};
+
   // Give core tabs their declared order so they don't fight plugin positions.
   Object.keys(CORE_PINNED_CENTER).forEach(function(dataTab) {
     var el = document.querySelector('.tab-bar-scroll .tab-btn[data-tab="' + dataTab + '"]');
-    if (el) el.style.order = String(CORE_PINNED_CENTER[dataTab]);
+    if (!el) return;
+    if (Object.prototype.hasOwnProperty.call(_savedOrder, dataTab)) {
+      el.style.order = String(_savedOrder[dataTab]);
+    } else {
+      el.style.order = String(CORE_PINNED_CENTER[dataTab]);
+    }
   });
   Object.keys(CORE_PINNED_RIGHT).forEach(function(dataTab) {
     var el = document.querySelector('.intel-tabs .intel-tab[data-itab="' + dataTab + '"]');
@@ -15984,7 +17484,12 @@ function applyPluginPinnedTabs(isIncognito, opts) {
     if (tab.claims && tab.claims.tabBtnId) {
       var el = document.getElementById(tab.claims.tabBtnId);
       if (!el) return;
-      el.style.order = String(entry.position);
+      var _claimKey = el.dataset && el.dataset.tab;
+      if (_claimKey && Object.prototype.hasOwnProperty.call(_savedOrder, _claimKey)) {
+        el.style.order = String(_savedOrder[_claimKey]);
+      } else {
+        el.style.order = String(entry.position);
+      }
       if (tab.popup) {
         // Popup tabs always start hidden; plugin code reveals them on demand
         // (e.g. viewWorkItem). Closing happens via the panel's own close
@@ -16106,14 +17611,17 @@ function injectPinnedCenterTab(plugin, tab, position, isIncognito) {
   if (isIncognito && !plugin.incognitoSafe) return;
   var scrollContainer = document.querySelector('.tab-bar-scroll');
   var tabId = 'plugin-' + plugin.id + '-' + tab.id;
+  var _overrides = (typeof getSavedTabOrderOverrides === 'function') ? getSavedTabOrderOverrides() : {};
+  var _effectiveOrder = Object.prototype.hasOwnProperty.call(_overrides, tabId)
+    ? _overrides[tabId] : position;
   var existing = scrollContainer.querySelector('.tab-btn[data-tab="' + tabId + '"]');
-  if (existing) { existing.style.order = String(position); return; }
+  if (existing) { existing.style.order = String(_effectiveOrder); return; }
 
   var btn = document.createElement('button');
   btn.className = 'tab-btn';
   btn.dataset.tab = tabId;
   btn.dataset.pluginId = plugin.id;
-  btn.style.order = String(position);
+  btn.style.order = String(_effectiveOrder);
   if (plugin.tint) btn.dataset.tint = plugin.tint;
   var dot = document.createElement('span');
   dot.className = 'tab-dot';

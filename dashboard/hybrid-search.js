@@ -57,21 +57,36 @@ class HybridSearchEngine {
     this.docFreq.clear();
     let totalLen = 0;
 
-    // Index notes
+    // Index notes -- walk the root and every namespace subdir (notes/<ns>/*.md).
     if (this.notesDir && fs.existsSync(this.notesDir)) {
-      let entries = [];
-      try { entries = fs.readdirSync(this.notesDir); } catch (_) {}
-      for (const f of entries) {
-        if (!f.endsWith('.md')) continue;
-        const p = path.join(this.notesDir, f);
+      const addFile = (p, ns) => {
+        const f = path.basename(p);
         let raw = '';
-        try { raw = fs.readFileSync(p, 'utf8'); } catch (_) { continue; }
-        const id = 'note:' + f.replace(/\.md$/i, '');
-        const title = f.replace(/\.md$/i, '').replace(/-/g, ' ');
+        try { raw = fs.readFileSync(p, 'utf8'); } catch (_) { return; }
+        const base = f.replace(/\.md$/i, '');
+        // Prefix the id with ns so same-named notes in different spaces don't
+        // collide in the inverted index.
+        const id = 'note:' + (ns ? ns + '/' : '') + base;
+        const title = base.replace(/-/g, ' ');
         const tokens = tokenize(title + ' ' + raw);
-        this.docs.set(id, { id, kind: 'note', title, body: raw, path: p, tokens, ts: 0 });
+        this.docs.set(id, { id, kind: 'note', ns: ns || '', title, body: raw, path: p, tokens, ts: 0 });
         totalLen += tokens.length;
-      }
+      };
+      try {
+        for (const entry of fs.readdirSync(this.notesDir, { withFileTypes: true })) {
+          const full = path.join(this.notesDir, entry.name);
+          if (entry.isFile() && entry.name.endsWith('.md')) {
+            addFile(full, '');
+          } else if (entry.isDirectory()) {
+            const ns = entry.name;
+            try {
+              for (const f of fs.readdirSync(full)) {
+                if (f.endsWith('.md')) addFile(path.join(full, f), ns);
+              }
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
     }
 
     // Index learnings
@@ -119,7 +134,7 @@ class HybridSearchEngine {
   }
 
   // Standard BM25 scoring (k1=1.5, b=0.75)
-  search(query, { kinds, limit = 20 } = {}) {
+  search(query, { kinds, ns, limit = 20 } = {}) {
     const qTokens = tokenize(query);
     if (!qTokens.length) return [];
     const scores = new Map();
@@ -136,6 +151,9 @@ class HybridSearchEngine {
         const doc = this.docs.get(docId);
         if (!doc) continue;
         if (kinds && !kinds.includes(doc.kind)) continue;
+        // Optional namespace filter (applies only to note docs; other kinds
+        // like learnings have no ns and are unaffected).
+        if (ns && doc.kind === 'note' && (doc.ns || '') !== ns) continue;
         const tf = doc.tokens.filter(x => x === t).length;
         const dl = doc.tokens.length || 1;
         const norm = (1 - b) + b * (dl / this.avgDocLength);
@@ -165,6 +183,7 @@ class HybridSearchEngine {
         }
         return {
           id: d.id, kind: d.kind, title: d.title,
+          ns: d.ns || '',
           score: Math.round(score * 100) / 100,
           matches: bodyMatches + titleMatches + otherMatches,
           bodyMatches, titleMatches, otherMatches,

@@ -56,12 +56,265 @@ function decrypt(data) {
   return decrypted;
 }
 
+const BROWSER_DOM_HELPERS = `
+function normalizeText(value) {
+  return String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+}
+function cleanText(value, maxLen) {
+  var text = String(value || '').replace(/\\s+/g, ' ').trim();
+  if (!maxLen || text.length <= maxLen) return text;
+  return text.slice(0, maxLen) + '...';
+}
+function safeCssEscape(value) {
+  if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') return CSS.escape(value);
+  return String(value || '').replace(/[^a-zA-Z0-9_-]/g, function(ch) {
+    return '\\\\' + ch;
+  });
+}
+function isVisible(el) {
+  if (!el) return false;
+  var win = el.ownerDocument && el.ownerDocument.defaultView ? el.ownerDocument.defaultView : window;
+  var style = win.getComputedStyle(el);
+  if (!style || style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+  var rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+function getFrameElements(doc) {
+  return Array.from(doc.querySelectorAll('iframe, frame'));
+}
+function getDocumentByFramePath(framePath) {
+  var doc = document;
+  for (var i = 0; i < (framePath || []).length; i++) {
+    var idx = framePath[i];
+    var frames = getFrameElements(doc);
+    var frameEl = frames[idx];
+    if (!frameEl) return null;
+    try {
+      doc = frameEl.contentDocument;
+    } catch (_) {
+      return null;
+    }
+    if (!doc) return null;
+  }
+  return doc;
+}
+function getFrameMeta(doc, framePath) {
+  if (!framePath || !framePath.length) return { framePath: [], frameName: null, frameSrc: location.href, accessible: true };
+  var parentDoc = document;
+  var frameEl = null;
+  for (var i = 0; i < framePath.length; i++) {
+    var frames = getFrameElements(parentDoc);
+    frameEl = frames[framePath[i]];
+    if (!frameEl) break;
+    try { parentDoc = frameEl.contentDocument; } catch (_) { break; }
+  }
+  return {
+    framePath: framePath.slice(),
+    frameName: frameEl ? (frameEl.name || frameEl.id || null) : null,
+    frameSrc: frameEl ? (frameEl.getAttribute('src') || null) : null,
+    accessible: !!(frameEl && frameEl.contentDocument)
+  };
+}
+function walkDocuments(maxDepth) {
+  maxDepth = Math.max(0, Math.min(maxDepth || 4, 8));
+  var out = [];
+  function visit(doc, framePath, depth) {
+    out.push({ doc: doc, framePath: framePath.slice(), accessible: true });
+    if (depth >= maxDepth) return;
+    getFrameElements(doc).forEach(function(frameEl, idx) {
+      var nextPath = framePath.concat(idx);
+      try {
+        if (frameEl.contentDocument) visit(frameEl.contentDocument, nextPath, depth + 1);
+        else out.push({ framePath: nextPath, accessible: false, frameName: frameEl.name || frameEl.id || null, frameSrc: frameEl.getAttribute('src') || null });
+      } catch (_) {
+        out.push({ framePath: nextPath, accessible: false, frameName: frameEl.name || frameEl.id || null, frameSrc: frameEl.getAttribute('src') || null });
+      }
+    });
+  }
+  visit(document, [], 0);
+  return out;
+}
+function labelsFor(el) {
+  var doc = el && el.ownerDocument ? el.ownerDocument : document;
+  var labels = [];
+  try {
+    if (el.labels && el.labels.length) {
+      labels = labels.concat(Array.from(el.labels).map(function(label) { return cleanText(label.innerText || label.textContent || '', 160); }));
+    }
+  } catch (_) {}
+  if (el.id) {
+    try {
+      labels = labels.concat(Array.from(doc.querySelectorAll('label[for="' + safeCssEscape(el.id) + '"]')).map(function(label) {
+        return cleanText(label.innerText || label.textContent || '', 160);
+      }));
+    } catch (_) {}
+  }
+  return Array.from(new Set(labels.filter(Boolean)));
+}
+function selectorHint(el) {
+  if (!el || !el.tagName) return null;
+  var tag = el.tagName.toLowerCase();
+  if (el.id) return '#' + el.id;
+  if (el.name) return tag + '[name="' + el.name + '"]';
+  var type = el.getAttribute && el.getAttribute('type');
+  if (type) return tag + '[type="' + type + '"]';
+  return tag;
+}
+function cssPath(el) {
+  if (!el || !el.tagName) return null;
+  if (el.id) return '#' + safeCssEscape(el.id);
+  var parts = [];
+  var cur = el;
+  while (cur && cur.nodeType === 1 && cur.tagName.toLowerCase() !== 'html') {
+    var tag = cur.tagName.toLowerCase();
+    if (cur.id) {
+      parts.unshift('#' + safeCssEscape(cur.id));
+      break;
+    }
+    var part = tag;
+    var parent = cur.parentElement;
+    if (parent) {
+      var siblings = Array.from(parent.children).filter(function(node) { return node.tagName === cur.tagName; });
+      if (siblings.length > 1) part += ':nth-of-type(' + (siblings.indexOf(cur) + 1) + ')';
+    }
+    parts.unshift(part);
+    cur = parent;
+  }
+  return parts.join(' > ');
+}
+function makeHandle(framePath, element) {
+  return JSON.stringify({ framePath: framePath || [], cssPath: cssPath(element) });
+}
+function parseHandle(handle) {
+  if (!handle) return null;
+  if (typeof handle === 'object') return handle;
+  try { return JSON.parse(String(handle)); } catch (_) { return null; }
+}
+function getElementByHandle(handle) {
+  var parsed = parseHandle(handle);
+  if (!parsed || !parsed.cssPath) return null;
+  var doc = getDocumentByFramePath(parsed.framePath || []);
+  if (!doc) return null;
+  try { return doc.querySelector(parsed.cssPath); } catch (_) { return null; }
+}
+function candidateTexts(el) {
+  var texts = [];
+  texts.push(cleanText(el.innerText || el.textContent || '', 200));
+  texts.push(cleanText(el.value || '', 200));
+  texts.push(cleanText(el.getAttribute && el.getAttribute('aria-label'), 200));
+  texts.push(cleanText(el.getAttribute && el.getAttribute('placeholder'), 200));
+  texts.push(cleanText(el.getAttribute && el.getAttribute('title'), 200));
+  texts.push(cleanText(el.getAttribute && el.getAttribute('alt'), 200));
+  texts.push(cleanText(el.getAttribute && el.getAttribute('name'), 200));
+  texts.push(cleanText(el.id || '', 200));
+  labelsFor(el).forEach(function(label) { texts.push(label); });
+  return Array.from(new Set(texts.filter(Boolean)));
+}
+function scoreText(target, candidate, exact) {
+  if (!candidate) return 0;
+  if (candidate === target) return 500;
+  if (exact) return 0;
+  if (candidate.startsWith(target)) return 350;
+  if (candidate.indexOf(target) >= 0) return 300;
+  if (target.indexOf(candidate) >= 0) return 120;
+  return 0;
+}
+function clickElement(el, framePath) {
+  el.scrollIntoView({ block: 'center', inline: 'center' });
+  try { el.focus({ preventScroll: true }); } catch (_) {}
+  try { el.click(); } catch (_) {}
+  return {
+    clickedText: cleanText(el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || '', 200),
+    selectorHint: selectorHint(el),
+    handle: makeHandle(framePath || [], el)
+  };
+}
+function assignElementValue(el, value, framePath) {
+  var nextValue = String(value == null ? '' : value);
+  el.scrollIntoView({ block: 'center', inline: 'center' });
+  try { el.focus({ preventScroll: true }); } catch (_) {}
+  if (el.tagName === 'SELECT') {
+    var wanted = normalizeText(nextValue);
+    var option = Array.from(el.options || []).find(function(opt) {
+      return normalizeText(opt.text) === wanted || normalizeText(opt.value) === wanted;
+    }) || Array.from(el.options || []).find(function(opt) {
+      return normalizeText(opt.text).indexOf(wanted) >= 0 || normalizeText(opt.value).indexOf(wanted) >= 0;
+    });
+    el.value = option ? option.value : nextValue;
+  } else {
+    var proto = Object.getPrototypeOf(el);
+    var desc = proto && Object.getOwnPropertyDescriptor(proto, 'value');
+    if (desc && typeof desc.set === 'function') desc.set.call(el, nextValue);
+    else el.value = nextValue;
+  }
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  return {
+    filledLabel: labelsFor(el)[0] || cleanText(el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.name || el.id || '', 160),
+    selectorHint: selectorHint(el),
+    handle: makeHandle(framePath || [], el)
+  };
+}
+function describeField(el, framePath) {
+  var meta = getFrameMeta(el.ownerDocument, framePath || []);
+  return {
+    tag: el.tagName.toLowerCase(),
+    type: el.type || null,
+    name: el.name || null,
+    id: el.id || null,
+    role: el.getAttribute && el.getAttribute('role') || null,
+    placeholder: cleanText(el.getAttribute && el.getAttribute('placeholder'), 120),
+    ariaLabel: cleanText(el.getAttribute && el.getAttribute('aria-label'), 120),
+    labels: labelsFor(el),
+    valueText: (el.tagName === 'SELECT')
+      ? cleanText(((el.selectedOptions && el.selectedOptions[0]) ? el.selectedOptions[0].text : ''), 120)
+      : cleanText((el.type === 'password' ? '' : (el.value || '')), 120),
+    visible: isVisible(el),
+    disabled: !!el.disabled,
+    selectorHint: selectorHint(el),
+    cssPath: cssPath(el),
+    handle: makeHandle(framePath || [], el),
+    framePath: meta.framePath,
+    frameName: meta.frameName,
+    frameSrc: meta.frameSrc
+  };
+}
+function describeInteractive(el, framePath) {
+  var desc = describeField(el, framePath || []);
+  desc.text = cleanText(el.innerText || el.textContent || el.value || '', 160);
+  desc.href = cleanText(el.getAttribute && el.getAttribute('href'), 240);
+  return desc;
+}
+function describeForm(form, framePath) {
+  var meta = getFrameMeta(form.ownerDocument, framePath || []);
+  var fieldSelector = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), textarea, select';
+  return {
+    id: form.id || null,
+    name: form.name || null,
+    method: form.method || 'get',
+    action: form.action || form.ownerDocument.location.href,
+    cssPath: cssPath(form),
+    handle: makeHandle(framePath || [], form),
+    framePath: meta.framePath,
+    frameName: meta.frameName,
+    frameSrc: meta.frameSrc,
+    fields: Array.from(form.querySelectorAll(fieldSelector)).slice(0, 40).map(function(el) { return describeField(el, framePath || []); }),
+    submitControls: Array.from(form.querySelectorAll('button, input[type="submit"], input[type="button"]')).slice(0, 10).map(function(el) { return describeInteractive(el, framePath || []); })
+  };
+}
+`;
+
 // ── Playwright driver (fallback when not in Electron) ──────────────────────
 function makePlaywrightDriver() {
   let browser = null;
   let context = null;
   let page = null;
   let launchedVia = null;
+  let networkEvents = [];
+  let consoleEvents = [];
+  let requestSeq = 0;
+  let responseBodies = new Map();
+  let requestIds = new WeakMap();
 
   function _ensurePlaywright() {
     if (!chromium) {
@@ -71,6 +324,23 @@ function makePlaywrightDriver() {
 
   function _ensurePage() {
     if (!page) throw new Error('No browser page. Call /api/browser/launch first.');
+  }
+
+  function _pushNetworkEvent(event) {
+    networkEvents.push(event);
+    if (networkEvents.length > 200) networkEvents.splice(0, networkEvents.length - 200);
+  }
+
+  function _pushConsoleEvent(event) {
+    consoleEvents.push(event);
+    if (consoleEvents.length > 200) consoleEvents.splice(0, consoleEvents.length - 200);
+  }
+
+  function _getRequestId(request) {
+    if (requestIds.has(request)) return requestIds.get(request);
+    const id = 'pw_' + (++requestSeq);
+    requestIds.set(request, id);
+    return id;
   }
 
   function _resolveBrowserCandidates() {
@@ -121,7 +391,10 @@ function makePlaywrightDriver() {
     async launch({ headless = false } = {}) {
       _ensurePlaywright();
       if (browser) await this.close();
-      const launchOpts = { headless };
+      const launchOpts = {
+        headless,
+        args: ['--disable-blink-features=AutomationControlled', '--no-sandbox'],
+      };
       const candidates = _resolveBrowserCandidates();
       let lastErr = null;
       for (const c of candidates) {
@@ -145,12 +418,104 @@ function makePlaywrightDriver() {
       }
       context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        viewport: { width: 1280, height: 800 },
+        locale: 'en-US',
+        timezoneId: 'America/New_York',
       });
       page = await context.newPage();
+      // Remove automation fingerprints that trigger CAPTCHA.
+      await page.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+        window.chrome = { runtime: {} };
+      });
+      networkEvents = [];
+      consoleEvents = [];
+      responseBodies = new Map();
+      requestIds = new WeakMap();
+      requestSeq = 0;
+      page.on('request', (request) => {
+        const requestId = _getRequestId(request);
+        _pushNetworkEvent({
+          kind: 'request',
+          requestId,
+          method: request.method(),
+          url: request.url(),
+          resourceType: request.resourceType(),
+          startedAt: Date.now(),
+        });
+      });
+      page.on('response', async (response) => {
+        const request = response.request();
+        const requestId = _getRequestId(request);
+        let preview = null;
+        try {
+          const ctype = String(response.headers()['content-type'] || '');
+          if (/json|text|javascript|xml|html|x-www-form-urlencoded/i.test(ctype)) {
+            const bodyText = await response.text();
+            preview = bodyText.slice(0, 20000);
+            responseBodies.set(requestId, {
+              requestId,
+              url: response.url(),
+              status: response.status(),
+              contentType: ctype || null,
+              body: preview,
+              truncated: bodyText.length > 20000,
+            });
+          }
+        } catch (_) {}
+        _pushNetworkEvent({
+          kind: 'response',
+          requestId,
+          method: request.method(),
+          url: response.url(),
+          status: response.status(),
+          statusText: response.statusText(),
+          resourceType: request.resourceType(),
+          hasBodyPreview: !!preview,
+          receivedAt: Date.now(),
+        });
+      });
+      page.on('requestfailed', (request) => {
+        const requestId = _getRequestId(request);
+        const failure = request.failure();
+        _pushNetworkEvent({
+          kind: 'failed',
+          requestId,
+          method: request.method(),
+          url: request.url(),
+          resourceType: request.resourceType(),
+          errorText: failure && failure.errorText ? failure.errorText : 'Request failed',
+          failedAt: Date.now(),
+        });
+      });
+      page.on('console', (msg) => {
+        _pushConsoleEvent({
+          kind: 'console',
+          type: msg.type(),
+          text: msg.text(),
+          url: page.url(),
+          at: Date.now(),
+        });
+      });
+      page.on('pageerror', (err) => {
+        _pushConsoleEvent({
+          kind: 'exception',
+          type: 'pageerror',
+          text: err && err.message ? err.message : String(err),
+          url: page ? page.url() : '',
+          at: Date.now(),
+        });
+      });
       return { launchedVia };
     },
     async navigate(url) {
       _ensurePage();
+      networkEvents = [];
+      consoleEvents = [];
+      responseBodies = new Map();
+      requestIds = new WeakMap();
+      requestSeq = 0;
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       return { url: page.url(), title: await page.title() };
     },
@@ -163,8 +528,91 @@ function makePlaywrightDriver() {
       await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
       return { url: page.url() };
     },
+    async clickText(text, { exact = false } = {}) {
+      _ensurePage();
+      const result = await page.evaluate(({ targetText, exactOnly, helpers }) => {
+        eval(helpers);
+        var wanted = normalizeText(targetText);
+        if (!wanted) throw new Error('clickText requires non-empty text');
+        var selectors = 'button, a[href], input[type="button"], input[type="submit"], input[type="reset"], summary, [role="button"], [role="link"], [aria-label]';
+        var ranked = walkDocuments(4).filter(function(entry) { return entry.accessible; }).flatMap(function(entry) {
+          return Array.from(entry.doc.querySelectorAll(selectors))
+          .filter(isVisible)
+          .map(function(el) {
+            var best = { score: 0, text: '' };
+            candidateTexts(el).forEach(function(candidate) {
+              var normalized = normalizeText(candidate);
+              var score = scoreText(wanted, normalized, exactOnly);
+              if (score > best.score) best = { score: score, text: candidate };
+            });
+            return { el: el, framePath: entry.framePath, score: best.score, text: best.text };
+          });
+        })
+          .filter(function(item) { return item.score > 0; })
+          .sort(function(a, b) { return b.score - a.score; });
+        if (!ranked.length) throw new Error('No clickable element matched text "' + targetText + '"');
+        var chosen = ranked[0];
+        var clickResult = clickElement(chosen.el, chosen.framePath);
+        clickResult.matchedText = chosen.text || clickResult.clickedText || '';
+        clickResult.score = chosen.score;
+        return clickResult;
+      }, { targetText: String(text || ''), exactOnly: !!exact, helpers: BROWSER_DOM_HELPERS });
+      await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+      return { url: page.url(), ...(result || {}) };
+    },
+    async clickHandle(handle) {
+      _ensurePage();
+      const result = await page.evaluate(({ handleValue, helpers }) => {
+        eval(helpers);
+        var el = getElementByHandle(handleValue);
+        if (!el) throw new Error('No element found for handle');
+        var parsed = parseHandle(handleValue) || {};
+        return clickElement(el, parsed.framePath || []);
+      }, { handleValue: handle, helpers: BROWSER_DOM_HELPERS });
+      await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+      return { url: page.url(), ...(result || {}) };
+    },
     async type(selector, text) {
       _ensurePage(); await page.type(selector, text);
+    },
+    async fillByLabel(label, value, { exact = false } = {}) {
+      _ensurePage();
+      return await page.evaluate(({ labelText, nextValue, exactOnly, helpers }) => {
+        eval(helpers);
+        var wanted = normalizeText(labelText);
+        var selector = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), textarea, select';
+        var ranked = walkDocuments(4).filter(function(entry) { return entry.accessible; }).flatMap(function(entry) {
+          return Array.from(entry.doc.querySelectorAll(selector))
+          .filter(function(el) { return !el.disabled; })
+          .map(function(el) {
+            var best = { score: 0, text: '' };
+            candidateTexts(el).forEach(function(candidate) {
+              var normalized = normalizeText(candidate);
+              var score = scoreText(wanted, normalized, exactOnly);
+              if (score > best.score) best = { score: score, text: candidate };
+            });
+            return { el: el, framePath: entry.framePath, score: best.score, text: best.text };
+          });
+        })
+          .filter(function(item) { return item.score > 0; })
+          .sort(function(a, b) { return b.score - a.score; });
+        if (!ranked.length) throw new Error('No field matched label "' + labelText + '"');
+        var chosen = ranked[0];
+        var fillResult = assignElementValue(chosen.el, nextValue, chosen.framePath);
+        fillResult.matchedLabel = chosen.text || fillResult.filledLabel || '';
+        fillResult.score = chosen.score;
+        return fillResult;
+      }, { labelText: String(label || ''), nextValue: String(value == null ? '' : value), exactOnly: !!exact, helpers: BROWSER_DOM_HELPERS });
+    },
+    async fillHandle(handle, value) {
+      _ensurePage();
+      return await page.evaluate(({ handleValue, nextValue, helpers }) => {
+        eval(helpers);
+        var el = getElementByHandle(handleValue);
+        if (!el) throw new Error('No field found for handle');
+        var parsed = parseHandle(handleValue) || {};
+        return assignElementValue(el, nextValue, parsed.framePath || []);
+      }, { handleValue: handle, nextValue: String(value == null ? '' : value), helpers: BROWSER_DOM_HELPERS });
     },
     async pressKey(key) {
       _ensurePage(); await page.keyboard.press(key);
@@ -188,20 +636,84 @@ function makePlaywrightDriver() {
       }, selector || null);
       return { url: page.url(), title: await page.title(), content };
     },
+    async getPageSource() {
+      _ensurePage();
+      return { url: page.url(), title: await page.title(), html: await page.content() };
+    },
+    async inspectDom({ limit = 120 } = {}) {
+      _ensurePage();
+      return await page.evaluate(({ maxItems, helpers }) => {
+        eval(helpers);
+        var fieldSelector = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), textarea, select';
+        var docs = walkDocuments(4);
+        var fields = [];
+        var forms = [];
+        var interactives = [];
+        var frames = [];
+        docs.forEach(function(entry) {
+          if (!entry.accessible) {
+            frames.push({ framePath: entry.framePath, frameName: entry.frameName || null, frameSrc: entry.frameSrc || null, accessible: false });
+            return;
+          }
+          frames.push({ framePath: entry.framePath, frameName: getFrameMeta(entry.doc, entry.framePath).frameName, frameSrc: getFrameMeta(entry.doc, entry.framePath).frameSrc, accessible: true });
+          fields = fields.concat(Array.from(entry.doc.querySelectorAll(fieldSelector)).slice(0, maxItems).map(function(el) { return describeField(el, entry.framePath); }));
+          forms = forms.concat(Array.from(entry.doc.forms || []).slice(0, 20).map(function(form) { return describeForm(form, entry.framePath); }));
+          interactives = interactives.concat(Array.from(entry.doc.querySelectorAll('button, a[href], input, textarea, select, summary, [role="button"], [role="link"]'))
+            .filter(isVisible)
+            .slice(0, maxItems)
+            .map(function(el) { return describeInteractive(el, entry.framePath); }));
+        });
+        return { url: location.href, title: document.title, frames: frames, forms: forms.slice(0, maxItems), fields: fields.slice(0, maxItems), interactives: interactives.slice(0, maxItems) };
+      }, { maxItems: Math.max(10, Math.min(Number(limit) || 120, 400)), helpers: BROWSER_DOM_HELPERS });
+    },
+    async getForms({ limit = 50 } = {}) {
+      _ensurePage();
+      return await page.evaluate(({ maxItems, helpers }) => {
+        eval(helpers);
+        var docs = walkDocuments(4);
+        var forms = [];
+        docs.forEach(function(entry) {
+          if (!entry.accessible) return;
+          forms = forms.concat(Array.from(entry.doc.forms || []).slice(0, maxItems).map(function(form) { return describeForm(form, entry.framePath); }));
+        });
+        return { url: location.href, title: document.title, forms: forms.slice(0, maxItems) };
+      }, { maxItems: Math.max(1, Math.min(Number(limit) || 50, 100)), helpers: BROWSER_DOM_HELPERS });
+    },
     async queryAll(selector) {
       _ensurePage();
-      const elements = await page.evaluate((sel) => {
-        return Array.from(document.querySelectorAll(sel)).slice(0, 50).map(el => ({
-          tag: el.tagName.toLowerCase(),
-          text: (el.innerText || '').substring(0, 100),
-          type: el.type || null,
-          name: el.name || null,
-          id: el.id || null,
-          href: el.href || null,
-          placeholder: el.placeholder || null,
-        }));
-      }, selector);
+      const elements = await page.evaluate(({ sel, helpers }) => {
+        eval(helpers);
+        var out = [];
+        walkDocuments(4).forEach(function(entry) {
+          if (!entry.accessible) return;
+          var found = [];
+          try { found = Array.from(entry.doc.querySelectorAll(sel)); } catch (_) { found = []; }
+          found.slice(0, 50).forEach(function(el) {
+            var desc = describeInteractive(el, entry.framePath);
+            desc.placeholder = el.placeholder || null;
+            out.push(desc);
+          });
+        });
+        return out.slice(0, 50);
+      }, { sel: selector, helpers: BROWSER_DOM_HELPERS });
       return { elements };
+    },
+    async getNetworkLog({ limit = 50 } = {}) {
+      _ensurePage();
+      const maxItems = Math.max(1, Math.min(Number(limit) || 50, 200));
+      return { events: networkEvents.slice(-maxItems) };
+    },
+    async getNetworkBody(requestId) {
+      _ensurePage();
+      if (!requestId) throw new Error('requestId is required');
+      const body = responseBodies.get(String(requestId));
+      if (!body) throw new Error('No captured body for requestId: ' + requestId);
+      return body;
+    },
+    async getConsoleLog({ limit = 50 } = {}) {
+      _ensurePage();
+      const maxItems = Math.max(1, Math.min(Number(limit) || 50, 200));
+      return { events: consoleEvents.slice(-maxItems) };
     },
     async getCookies() {
       if (!context) return { cookies: [] };
@@ -262,9 +774,29 @@ class BrowserAgent {
     return { ok: true, ...(r || {}) };
   }
 
+  async clickText(text, opts = {}) {
+    const r = await this._driver().clickText(text, opts);
+    return { ok: true, ...(r || {}) };
+  }
+
+  async clickHandle(handle) {
+    const r = await this._driver().clickHandle(handle);
+    return { ok: true, ...(r || {}) };
+  }
+
   async type(selector, text) {
     await this._driver().type(selector, text);
     return { ok: true };
+  }
+
+  async fillByLabel(label, value, opts = {}) {
+    const r = await this._driver().fillByLabel(label, value, opts);
+    return { ok: true, ...(r || {}) };
+  }
+
+  async fillHandle(handle, value) {
+    const r = await this._driver().fillHandle(handle, value);
+    return { ok: true, ...(r || {}) };
   }
 
   async pressKey(key) {
@@ -289,10 +821,44 @@ class BrowserAgent {
     return { ok: true, url: r.url, title: r.title, content: trimmed, truncated: content.length > 10240 };
   }
 
+  async getPageSource(opts = {}) {
+    const r = await this._driver().getPageSource(opts);
+    const html = (r && r.html) || '';
+    const trimmed = html.substring(0, 200000);
+    return { ok: true, url: r.url, title: r.title, html: trimmed, truncated: html.length > 200000 };
+  }
+
+  async inspectDom(opts = {}) {
+    const r = await this._driver().inspectDom(opts);
+    return { ok: true, ...(r || {}) };
+  }
+
+  async getForms(opts = {}) {
+    const r = await this._driver().getForms(opts);
+    return { ok: true, ...(r || {}) };
+  }
+
   async queryAll(selector) {
     const r = await this._driver().queryAll(selector);
     const elements = (r && r.elements) || [];
     return { ok: true, count: elements.length, elements };
+  }
+
+  async getNetworkLog(opts = {}) {
+    const r = await this._driver().getNetworkLog(opts);
+    const events = (r && r.events) || [];
+    return { ok: true, count: events.length, events };
+  }
+
+  async getNetworkBody(requestId) {
+    const r = await this._driver().getNetworkBody(requestId);
+    return { ok: true, ...(r || {}) };
+  }
+
+  async getConsoleLog(opts = {}) {
+    const r = await this._driver().getConsoleLog(opts);
+    const events = (r && r.events) || [];
+    return { ok: true, count: events.length, events };
   }
 
   async getCookies() {
@@ -425,7 +991,11 @@ function mountBrowserRoutes(addRoute, json, { getConfig, repoRoot, broadcast, dr
   browserRoute('POST', '/api/browser/navigate', (body) => agent.navigate(body.url));
   browserRoute('POST', '/api/browser/fill', (body) => agent.fill(body.selector, body.value));
   browserRoute('POST', '/api/browser/click', (body) => agent.click(body.selector));
+  browserRoute('POST', '/api/browser/click-text', (body) => agent.clickText(body.text, body));
+  browserRoute('POST', '/api/browser/click-handle', (body) => agent.clickHandle(body.handle));
   browserRoute('POST', '/api/browser/type', (body) => agent.type(body.selector, body.text));
+  browserRoute('POST', '/api/browser/fill-by-label', (body) => agent.fillByLabel(body.label, body.value, body));
+  browserRoute('POST', '/api/browser/fill-handle', (body) => agent.fillHandle(body.handle, body.value));
   browserRoute('POST', '/api/browser/press-key', (body) => agent.pressKey(body.key));
   browserRoute('POST', '/api/browser/wait-for', (body) => agent.waitFor(body.selector, body));
   browserRoute('POST', '/api/browser/save-session', (body) => agent.saveSession(body.name));
@@ -434,7 +1004,13 @@ function mountBrowserRoutes(addRoute, json, { getConfig, repoRoot, broadcast, dr
 
   browserRoute('GET', '/api/browser/screenshot', () => agent.screenshot(), { checkIncognito: false });
   browserRoute('GET', '/api/browser/read-page', (_, url) => agent.readPage({ selector: url.searchParams.get('selector') }), { checkIncognito: false });
+  browserRoute('GET', '/api/browser/source', () => agent.getPageSource(), { checkIncognito: false });
+  browserRoute('GET', '/api/browser/dom', (_, url) => agent.inspectDom({ limit: Number(url.searchParams.get('limit') || 120) }), { checkIncognito: false });
+  browserRoute('GET', '/api/browser/forms', (_, url) => agent.getForms({ limit: Number(url.searchParams.get('limit') || 50) }), { checkIncognito: false });
   browserRoute('GET', '/api/browser/query-all', (_, url) => agent.queryAll(url.searchParams.get('selector') || '*'), { checkIncognito: false });
+  browserRoute('GET', '/api/browser/network', (_, url) => agent.getNetworkLog({ limit: Number(url.searchParams.get('limit') || 50) }), { checkIncognito: false });
+  browserRoute('GET', '/api/browser/network-body', (_, url) => agent.getNetworkBody(url.searchParams.get('requestId') || ''), { checkIncognito: false });
+  browserRoute('GET', '/api/browser/console', (_, url) => agent.getConsoleLog({ limit: Number(url.searchParams.get('limit') || 50) }), { checkIncognito: false });
   browserRoute('GET', '/api/browser/cookies', () => agent.getCookies(), { checkIncognito: false });
   browserRoute('GET', '/api/browser/sessions', () => agent.listSessions(), { checkIncognito: false });
 

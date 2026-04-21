@@ -136,12 +136,22 @@ curl -s -X POST http://127.0.0.1:3800/api/ui/view-note -H "Content-Type: applica
 | POST | `/api/browser/navigate` | Go to URL. Body: `{ url }` |
 | POST | `/api/browser/fill` | Fill form field. Body: `{ selector, value }` |
 | POST | `/api/browser/click` | Click element. Body: `{ selector }` |
+| POST | `/api/browser/click-text` | Click the best visible element by text or accessible label. Body: `{ text, exact? }` |
+| POST | `/api/browser/click-handle` | Click a previously returned stable element handle. Body: `{ handle }` |
 | POST | `/api/browser/type` | Type text into element. Body: `{ selector, text }` |
+| POST | `/api/browser/fill-by-label` | Fill the best matching field by label, aria-label, placeholder, name, or id. Body: `{ label, value, exact? }` |
+| POST | `/api/browser/fill-handle` | Fill a previously returned stable field handle. Body: `{ handle, value }` |
 | POST | `/api/browser/press-key` | Press keyboard key. Body: `{ key }` |
 | POST | `/api/browser/wait-for` | Wait for selector. Body: `{ selector, timeout }` |
 | GET | `/api/browser/screenshot` | Take screenshot (returns base64 PNG) |
 | GET | `/api/browser/read-page` | Extract text content. Query: `?selector=` (optional) |
+| GET | `/api/browser/source` | Return current page HTML source |
+| GET | `/api/browser/dom` | Return structured forms, fields, and interactive elements. Query: `?limit=` |
+| GET | `/api/browser/forms` | Return extracted form schemas with stable field and submit handles. Query: `?limit=` |
 | GET | `/api/browser/query-all` | List elements matching selector. Query: `?selector=` |
+| GET | `/api/browser/network` | Return recent network requests and responses. Query: `?limit=` |
+| GET | `/api/browser/network-body` | Return a captured response body. Query: `?requestId=` |
+| GET | `/api/browser/console` | Return recent console messages and runtime exceptions. Query: `?limit=` |
 | GET | `/api/browser/cookies` | Get current cookies |
 | GET | `/api/browser/sessions` | List saved sessions |
 | GET | `/api/browser/accounts` | List your saved accounts (name, email) |

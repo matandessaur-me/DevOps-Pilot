@@ -1,0 +1,1036 @@
+/**
+ * Browser Agent Chat - natural-language driver over the in-app webview.
+ *
+ * Runs a tool-use loop: user types a task, an LLM decides which browser
+ * primitive to call, we execute it against the in-app webview, and each step
+ * is broadcast over the main WebSocket for the UI to render live.
+ *
+ * Provider-agnostic. Works with whichever CLI/API key the user has:
+ *   - Anthropic (ANTHROPIC_API_KEY)
+ *   - OpenAI-compatible: OpenAI, xAI Grok, Qwen/DashScope (OPENAI_API_KEY / XAI_API_KEY / DASHSCOPE_API_KEY)
+ *   - Google Gemini (GEMINI_API_KEY)
+ *
+ * All providers speak the same internal tool schema; per-provider adapters
+ * translate on the way out and parse tool-calls on the way in.
+ */
+
+const https = require('https');
+
+const MAX_ITERATIONS = 30;
+const DEFAULT_MAX_TOKENS = 1024;
+// Keep the seed message + this many recent messages in context to control token usage.
+// Each "turn" is 2 messages (assistant + tool_result), so 12 = 6 turns.
+const MAX_HISTORY_MESSAGES = 14;
+
+// Canonical tool set. Each provider adapter translates to its own format.
+const BROWSER_TOOLS = [
+  { name: 'navigate',       description: 'Load a URL in the in-app browser.',
+    parameters: { type: 'object', properties: { url: { type: 'string', description: 'Absolute URL.' } }, required: ['url'] } },
+  { name: 'read_page',      description: 'Read the visible text of the current page (optionally scoped to a CSS selector).',
+    parameters: { type: 'object', properties: { selector: { type: 'string' } } } },
+  { name: 'get_page_source', description: 'Return the current page HTML source so you can inspect the actual markup.',
+    parameters: { type: 'object', properties: {} } },
+  { name: 'inspect_dom',    description: 'Return a structured DOM summary with forms, fields, labels, and interactive elements.',
+    parameters: { type: 'object', properties: { limit: { type: 'number' } } } },
+  { name: 'get_forms',      description: 'Return explicit form schemas with fields, handles, and submit controls.',
+    parameters: { type: 'object', properties: { limit: { type: 'number' } } } },
+  { name: 'query_elements', description: 'Return up to 50 elements matching a CSS selector with their text, id, name, href, placeholder. Use to find the right selector.',
+    parameters: { type: 'object', properties: { selector: { type: 'string' } }, required: ['selector'] } },
+  { name: 'click',          description: 'Click the first element matching the CSS selector.',
+    parameters: { type: 'object', properties: { selector: { type: 'string' } }, required: ['selector'] } },
+  { name: 'click_text',     description: 'Click the best visible interactive element whose text or accessible label matches the given text.',
+    parameters: { type: 'object', properties: { text: { type: 'string' }, exact: { type: 'boolean' } }, required: ['text'] } },
+  { name: 'click_handle',   description: 'Click a previously returned stable handle from inspect_dom, get_forms, or query_elements.',
+    parameters: { type: 'object', properties: { handle: { type: 'string' } }, required: ['handle'] } },
+  { name: 'fill',           description: 'Set the value of an input/textarea and fire input+change events.',
+    parameters: { type: 'object', properties: { selector: { type: 'string' }, value: { type: 'string' } }, required: ['selector', 'value'] } },
+  { name: 'fill_by_label',  description: 'Fill the best matching input, textarea, or select by its visible label, aria-label, placeholder, name, or id.',
+    parameters: { type: 'object', properties: { label: { type: 'string' }, value: { type: 'string' }, exact: { type: 'boolean' } }, required: ['label', 'value'] } },
+  { name: 'fill_handle',    description: 'Fill a previously returned stable field handle.',
+    parameters: { type: 'object', properties: { handle: { type: 'string' }, value: { type: 'string' } }, required: ['handle', 'value'] } },
+  { name: 'press_key',      description: 'Send a single keyboard key (Enter, Tab, Escape, etc).',
+    parameters: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] } },
+  { name: 'wait_for',       description: 'Wait until an element matching the CSS selector appears.',
+    parameters: { type: 'object', properties: { selector: { type: 'string' }, timeout_ms: { type: 'number' } }, required: ['selector'] } },
+  { name: 'get_network_log', description: 'Return the recent network requests and responses for the current page.',
+    parameters: { type: 'object', properties: { limit: { type: 'number' } } } },
+  { name: 'get_network_body', description: 'Return the captured response body for a specific requestId from get_network_log.',
+    parameters: { type: 'object', properties: { requestId: { type: 'string' } }, required: ['requestId'] } },
+  { name: 'get_console_log', description: 'Return recent console messages, runtime exceptions, and page errors.',
+    parameters: { type: 'object', properties: { limit: { type: 'number' } } } },
+  { name: 'screenshot',     description: 'Capture a PNG screenshot of the visible viewport.',
+    parameters: { type: 'object', properties: {} } },
+  { name: 'finish',         description: 'Stop the loop and return a final message.',
+    parameters: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] } },
+  { name: 'wait_for_user',  description: 'Pause automation and ask the user to take a manual action (e.g. solve CAPTCHA, log in). The user will click Resume when ready.',
+    parameters: { type: 'object', properties: { message: { type: 'string', description: 'What the user needs to do.' } }, required: ['message'] } },
+  { name: 'fill_saved_credentials', description: 'Fill a login form using saved credentials for the named account. Returns ok if credentials were found and filled.',
+    parameters: { type: 'object', properties: { account: { type: 'string', description: 'The account name as stored in settings (e.g. "Work", "Personal").' } }, required: ['account'] } },
+];
+
+const BASE_SYSTEM_PROMPT = `You drive the user's in-app web browser on their behalf. You are intelligent and autonomous — act like a skilled human who knows the web, not like a script runner.
+
+## Navigation strategy (follow this order)
+1. If you know the direct URL for the destination page, navigate there immediately. Do not click menus when a URL exists.
+2. If you don't know the URL, look for it in the current page first: inspect_dom or click_text on nav/header links is fast. Scan for <nav>, <header>, or elements with role="navigation".
+3. If the page nav doesn't have what you need, try common URL patterns: /contact, /about, /products, /pricing, /login, etc.
+4. If URL guessing fails, check the site's llm.txt (https://DOMAIN/llm.txt), robots.txt (https://DOMAIN/robots.txt), or sitemap (https://DOMAIN/sitemap.xml) before using a search engine. Parse the result with read_page.
+5. Only as a last resort use a search engine to find the page URL.
+
+## Filling forms
+- Always call get_forms first before filling any form — it gives you stable handles for every field.
+- Use fill_handle (not fill or fill_by_label) when you have handles from get_forms or inspect_dom.
+- Fill ALL required fields in one pass. Never fill one field, observe, then fill the next — get_forms gives you everything you need upfront.
+- If saved credentials are listed below, use fill_saved_credentials automatically when encountering a login/signup form. Do not ask the user for credentials that are already saved.
+- After a submit, save, login, search, Enter keypress, or any other state-changing action, inspect the network with get_network_log and get_network_body before finishing so you can report the actual payload/result instead of guessing.
+
+## General rules
+- Prefer SEMANTIC tools: inspect_dom, click_text, fill_by_label, get_page_source before raw CSS selectors.
+- SELECTORS: Standard CSS only. document.querySelector is used — NEVER :has-text(), :text(), :contains() (Playwright extensions). Discover selectors via inspect_dom or query_elements.
+- If the page structure or styling matters, inspect the actual HTML with get_page_source and use linked stylesheets or inline classes/styles as evidence.
+- If navigate returns url="about:blank", retry with the correct URL before doing anything else.
+- Read the page ONLY when you need to discover content or structure — not after every action.
+- Final answers must be valid Markdown. Prefer short sections like "Summary", "State", and "Payloads". When you have request or response data, include the important fields in fenced json blocks.
+- When done, call finish with a short summary. If blocked (CAPTCHA, hard login wall), call finish and explain.
+- Keep reasoning brief — the user sees every tool call live.
+- Never submit payments, send messages, or create accounts without explicit user confirmation.
+- If you detect a CAPTCHA, call wait_for_user immediately.
+- Prefer DuckDuckGo (https://duckduckgo.com/?q=QUERY) over Google to avoid CAPTCHAs.`;
+
+function buildSystemPrompt(learnings, savedAccounts) {
+  let prompt = BASE_SYSTEM_PROMPT;
+  if (savedAccounts && savedAccounts.length) {
+    const names = savedAccounts.map(a => `"${a}"`).join(', ');
+    prompt += `\n\n## Saved credentials\nThe user has saved credentials for these accounts: ${names}.\n- NEVER claim you don't have credentials if the site needs a login — use fill_saved_credentials with the matching account name.\n- If there is only one saved account and a login/form is needed, use it automatically.\n- If there are multiple saved accounts and it's ambiguous which to use, call wait_for_user to ask the user to pick one, listing the account names.`;
+  } else {
+    prompt += `\n\n## Saved credentials\nNo saved credentials are configured. If a site requires login, call wait_for_user and ask the user to log in manually or save credentials in Settings -> Browser Automation.`;
+  }
+  if (learnings && learnings.length) {
+    const lines = learnings.slice(0, 8).map(l => `- ${l.summary || l}`).join('\n');
+    prompt += '\n\nLearned from past sessions (apply these):\n' + lines;
+  }
+  return prompt;
+}
+
+// ── HTTP helper ────────────────────────────────────────────────────────────
+function httpJson({ hostname, path, method = 'POST', headers = {}, body, timeoutMs = 60000 }) {
+  return new Promise((resolve, reject) => {
+    const payload = body ? JSON.stringify(body) : '';
+    const req = https.request({
+      method, hostname, path,
+      headers: { 'content-type': 'application/json', ...headers, 'content-length': Buffer.byteLength(payload) },
+      timeout: timeoutMs,
+      agent: false,
+    }, (res) => {
+      let data = '';
+      res.on('data', c => { data += c; });
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+        } else {
+          reject(new Error(`${hostname} ${res.statusCode}: ${data.slice(0, 600)}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(new Error(hostname + ' request timed out')); });
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+function shortenContent(text, n = 4000) {
+  if (!text) return '';
+  const s = String(text);
+  return s.length <= n ? s : s.slice(0, n) + `\n…[truncated ${s.length - n} chars]`;
+}
+
+// ── Provider adapters ──────────────────────────────────────────────────────
+// Each adapter exposes:
+//   - initMessages(task): seed message log in provider format
+//   - appendAssistant(messages, assistantContent): record assistant turn
+//   - appendToolResults(messages, pairs): record [{toolUseId, name, resultBlocks}]
+//   - call({messages, apiKey, model}) -> Promise<{ text, toolCalls: [{id, name, args}] }>
+//   - buildToolResultBlocks(name, result): provider-shaped tool result content
+
+function trimHistory(messages, seedCount) {
+  // Keep the first `seedCount` seed messages (initial task) and the most recent MAX_HISTORY_MESSAGES.
+  if (messages.length <= seedCount + MAX_HISTORY_MESSAGES) return messages;
+  return [...messages.slice(0, seedCount), ...messages.slice(-(MAX_HISTORY_MESSAGES))];
+}
+
+function isTransientError(e) {
+  const msg = e.message || '';
+  return (
+    msg.includes('429') ||
+    msg.includes('SSL') ||
+    msg.includes('BAD_RECORD_MAC') ||
+    msg.includes('ECONNRESET') ||
+    msg.includes('ECONNREFUSED') ||
+    msg.includes('ETIMEDOUT') ||
+    msg.includes('socket hang up') ||
+    msg.includes('timed out')
+  );
+}
+
+async function httpJsonWithRetry(opts, maxRetries = 3) {
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try { return await httpJson(opts); } catch (e) {
+      lastErr = e;
+      if (isTransientError(e) && attempt < maxRetries) {
+        // Longer backoff for rate limits; short backoff for network glitches.
+        const wait = e.message && e.message.includes('429')
+          ? (attempt + 1) * 15000
+          : (attempt + 1) * 1500;
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
+function makeAnthropicAdapter() {
+  return {
+    kind: 'anthropic',
+    label: 'Anthropic',
+    defaultModel: 'claude-haiku-4-5-20251001',
+    initMessages(task) { return [{ role: 'user', content: task }]; },
+    buildToolResultBlocks(name, result) {
+      if (name === 'screenshot' && result && result.base64) {
+        return [
+          { type: 'image', source: { type: 'base64', media_type: result.mimeType || 'image/png', data: result.base64 } },
+          { type: 'text', text: 'Screenshot captured.' },
+        ];
+      }
+      if (name === 'read_page' && result) {
+        return [{ type: 'text', text: `URL: ${result.url || ''}\nTitle: ${result.title || ''}\n---\n${shortenContent(result.content || '', 2000)}` }];
+      }
+      if (name === 'get_page_source' && result) {
+        return [{ type: 'text', text: `URL: ${result.url || ''}\nTitle: ${result.title || ''}\n--- HTML ---\n${shortenContent(result.html || '', 8000)}` }];
+      }
+      if (name === 'inspect_dom' && result) {
+        return [{ type: 'text', text: shortenContent(JSON.stringify(result, null, 2), 8000) }];
+      }
+      if (name === 'get_forms' && result) {
+        return [{ type: 'text', text: shortenContent(JSON.stringify(result, null, 2), 8000) }];
+      }
+      if (name === 'query_elements' && result && Array.isArray(result.elements)) {
+        return [{ type: 'text', text: formatElements(result.elements) }];
+      }
+      if (name === 'get_network_log' && result && Array.isArray(result.events)) {
+        return [{ type: 'text', text: shortenContent(JSON.stringify(result.events, null, 2), 8000) }];
+      }
+      if (name === 'get_network_body' && result) {
+        return [{ type: 'text', text: shortenContent(JSON.stringify(result, null, 2), 8000) }];
+      }
+      if (name === 'get_console_log' && result && Array.isArray(result.events)) {
+        return [{ type: 'text', text: shortenContent(JSON.stringify(result.events, null, 2), 8000) }];
+      }
+      const text = result == null ? 'ok' : (typeof result === 'string' ? result : JSON.stringify(result).slice(0, 800));
+      return [{ type: 'text', text }];
+    },
+    appendAssistant(messages, assistantContent) { messages.push({ role: 'assistant', content: assistantContent }); },
+    appendToolResults(messages, pairs) {
+      messages.push({
+        role: 'user',
+        content: pairs.map(p => ({ type: 'tool_result', tool_use_id: p.toolUseId, is_error: p.isError || undefined, content: p.blocks })),
+      });
+    },
+    async call({ messages, apiKey, model, systemPrompt }) {
+      const tools = BROWSER_TOOLS.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters }));
+      const trimmed = trimHistory(messages, 1);
+      const resp = await httpJsonWithRetry({
+        hostname: 'api.anthropic.com', path: '/v1/messages',
+        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        body: { model: model || this.defaultModel, max_tokens: DEFAULT_MAX_TOKENS, system: systemPrompt || BASE_SYSTEM_PROMPT, tools, messages: trimmed },
+      });
+      const content = resp.content || [];
+      const text = content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+      const toolCalls = content.filter(b => b.type === 'tool_use').map(b => ({ id: b.id, name: b.name, args: b.input || {} }));
+      return { text, toolCalls, raw: content };
+    },
+  };
+}
+
+function makeOpenAIAdapter({ baseHost, basePath = '/v1/chat/completions', label, defaultModel, authHeader = 'Authorization', authPrefix = 'Bearer ' } = {}) {
+  return {
+    kind: 'openai-compat',
+    label: label || 'OpenAI',
+    defaultModel,
+    initMessages(task) {
+      return [
+        { role: 'system', content: BASE_SYSTEM_PROMPT },
+        { role: 'user', content: task },
+      ];
+    },
+    buildToolResultBlocks(name, result) {
+      // OpenAI returns tool results as plain strings in a `tool` message.
+      if (name === 'screenshot') return 'Screenshot captured (image omitted; call read_page for a text description of the current state).';
+      if (name === 'read_page' && result) return `URL: ${result.url || ''}\nTitle: ${result.title || ''}\n---\n${shortenContent(result.content || '')}`;
+      if (name === 'get_page_source' && result) return `URL: ${result.url || ''}\nTitle: ${result.title || ''}\n--- HTML ---\n${shortenContent(result.html || '', 12000)}`;
+      if (name === 'inspect_dom' && result) return shortenContent(JSON.stringify(result, null, 2), 12000);
+      if (name === 'get_forms' && result) return shortenContent(JSON.stringify(result, null, 2), 12000);
+      if (name === 'query_elements' && result && Array.isArray(result.elements)) return formatElements(result.elements);
+      if (name === 'get_network_log' && result && Array.isArray(result.events)) return shortenContent(JSON.stringify(result.events, null, 2), 12000);
+      if (name === 'get_network_body' && result) return shortenContent(JSON.stringify(result, null, 2), 12000);
+      if (name === 'get_console_log' && result && Array.isArray(result.events)) return shortenContent(JSON.stringify(result.events, null, 2), 12000);
+      return result == null ? 'ok' : (typeof result === 'string' ? result : JSON.stringify(result).slice(0, 1500));
+    },
+    appendAssistant(messages, assistantRaw) { messages.push(assistantRaw); },
+    appendToolResults(messages, pairs) {
+      for (const p of pairs) {
+        messages.push({ role: 'tool', tool_call_id: p.toolUseId, content: typeof p.blocks === 'string' ? p.blocks : JSON.stringify(p.blocks) });
+      }
+    },
+    async call({ messages, apiKey, model, systemPrompt }) {
+      const tools = BROWSER_TOOLS.map(t => ({
+        type: 'function',
+        function: { name: t.name, description: t.description, parameters: t.parameters },
+      }));
+      const trimmed = trimHistory(messages, 2); // seed = system + user
+      // Update system message with current systemPrompt if provided.
+      if (systemPrompt && trimmed.length && trimmed[0].role === 'system') trimmed[0].content = systemPrompt;
+      const resp = await httpJsonWithRetry({
+        hostname: baseHost, path: basePath,
+        headers: { [authHeader]: authPrefix + apiKey },
+        body: { model: model || defaultModel, messages: trimmed, tools, tool_choice: 'auto', max_tokens: DEFAULT_MAX_TOKENS },
+      });
+      const msg = (resp.choices && resp.choices[0] && resp.choices[0].message) || {};
+      const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls.map(tc => {
+        let args = {};
+        try { args = tc.function && tc.function.arguments ? JSON.parse(tc.function.arguments) : {}; } catch (_) {}
+        return { id: tc.id, name: tc.function && tc.function.name, args };
+      }) : [];
+      return { text: msg.content || '', toolCalls, raw: msg };
+    },
+  };
+}
+
+function makeGeminiAdapter() {
+  return {
+    kind: 'gemini',
+    label: 'Gemini',
+    defaultModel: 'gemini-2.5-flash',
+    initMessages(task) { return [{ role: 'user', parts: [{ text: task }] }]; },
+    buildToolResultBlocks(name, result) {
+      if (name === 'screenshot') return { ok: true, note: 'screenshot captured (image omitted from tool result)' };
+      if (name === 'read_page' && result) return { url: result.url, title: result.title, content: shortenContent(result.content || '', 3000) };
+      if (name === 'get_page_source' && result) return { url: result.url, title: result.title, html: shortenContent(result.html || '', 12000) };
+      if (name === 'inspect_dom' && result) return result;
+      if (name === 'get_forms' && result) return result;
+      if (name === 'query_elements' && result && Array.isArray(result.elements)) return { elements: result.elements.slice(0, 30) };
+      if (name === 'get_network_log' && result && Array.isArray(result.events)) return { events: result.events.slice(-Math.min(result.events.length, 50)) };
+      if (name === 'get_network_body' && result) return result;
+      if (name === 'get_console_log' && result && Array.isArray(result.events)) return { events: result.events.slice(-Math.min(result.events.length, 50)) };
+      if (typeof result === 'string') return { text: result };
+      return result || { ok: true };
+    },
+    appendAssistant(messages, parts) { messages.push({ role: 'model', parts }); },
+    appendToolResults(messages, pairs) {
+      messages.push({
+        role: 'user',
+        parts: pairs.map(p => ({ functionResponse: { name: p.name, response: typeof p.blocks === 'object' ? p.blocks : { result: p.blocks } } })),
+      });
+    },
+    async call({ messages, apiKey, model, systemPrompt }) {
+      const tools = [{ functionDeclarations: BROWSER_TOOLS.map(t => ({ name: t.name, description: t.description, parameters: t.parameters })) }];
+      const mdl = model || this.defaultModel;
+      const trimmed = trimHistory(messages, 1);
+      const resp = await httpJsonWithRetry({
+        hostname: 'generativelanguage.googleapis.com',
+        path: `/v1beta/models/${mdl}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        body: {
+          systemInstruction: { parts: [{ text: systemPrompt || BASE_SYSTEM_PROMPT }] },
+          contents: trimmed,
+          tools,
+          generationConfig: { maxOutputTokens: DEFAULT_MAX_TOKENS },
+        },
+      });
+      const cand = resp.candidates && resp.candidates[0];
+      const parts = (cand && cand.content && cand.content.parts) || [];
+      const text = parts.filter(p => p.text).map(p => p.text).join('\n').trim();
+      const toolCalls = parts.filter(p => p.functionCall).map((p, i) => ({
+        id: 'g_' + Date.now() + '_' + i,
+        name: p.functionCall.name,
+        args: p.functionCall.args || {},
+      }));
+      return { text, toolCalls, raw: parts };
+    },
+  };
+}
+
+function formatElements(elements) {
+  const lines = elements.slice(0, 30).map((e, i) => {
+    const attrs = [];
+    if (e.handle) attrs.push(`handle=${String(e.handle).slice(0, 80)}`);
+    if (e.id) attrs.push(`id=${e.id}`);
+    if (e.name) attrs.push(`name=${e.name}`);
+    if (e.type) attrs.push(`type=${e.type}`);
+    if (e.framePath && e.framePath.length) attrs.push(`frame=${e.framePath.join('.')}`);
+    if (e.placeholder) attrs.push(`ph="${String(e.placeholder).slice(0, 40)}"`);
+    if (e.href) attrs.push(`href=${String(e.href).slice(0, 60)}`);
+    const text = (e.text || '').replace(/\s+/g, ' ').slice(0, 80);
+    return `${i + 1}. <${e.tag}> ${attrs.join(' ')}${text ? ` :: "${text}"` : ''}`;
+  });
+  return `Found ${elements.length} element(s):\n${lines.join('\n')}`;
+}
+
+// ── Provider registry & selection ──────────────────────────────────────────
+function buildProviderRegistry(aiKeys) {
+  const registry = {};
+  if (aiKeys.ANTHROPIC_API_KEY) registry.anthropic = { adapter: makeAnthropicAdapter(), keyEnv: 'ANTHROPIC_API_KEY', apiKey: aiKeys.ANTHROPIC_API_KEY };
+  if (aiKeys.OPENAI_API_KEY) {
+    registry.openai = { adapter: makeOpenAIAdapter({ baseHost: 'api.openai.com', label: 'OpenAI', defaultModel: 'gpt-4o' }), keyEnv: 'OPENAI_API_KEY', apiKey: aiKeys.OPENAI_API_KEY };
+  }
+  if (aiKeys.XAI_API_KEY) {
+    registry.grok = { adapter: makeOpenAIAdapter({ baseHost: 'api.x.ai', label: 'Grok', defaultModel: 'grok-2-latest' }), keyEnv: 'XAI_API_KEY', apiKey: aiKeys.XAI_API_KEY };
+  }
+  if (aiKeys.DASHSCOPE_API_KEY) {
+    registry.qwen = { adapter: makeOpenAIAdapter({ baseHost: 'dashscope-intl.aliyuncs.com', basePath: '/compatible-mode/v1/chat/completions', label: 'Qwen', defaultModel: 'qwen-plus' }), keyEnv: 'DASHSCOPE_API_KEY', apiKey: aiKeys.DASHSCOPE_API_KEY };
+  }
+  if (aiKeys.GEMINI_API_KEY) registry.gemini = { adapter: makeGeminiAdapter(), keyEnv: 'GEMINI_API_KEY', apiKey: aiKeys.GEMINI_API_KEY };
+  return registry;
+}
+
+function pickProvider(registry, preferred) {
+  if (preferred && registry[preferred]) return registry[preferred];
+  // Priority order: Anthropic > OpenAI > Gemini > Grok > Qwen.
+  for (const k of ['anthropic', 'openai', 'gemini', 'grok', 'qwen']) {
+    if (registry[k]) return registry[k];
+  }
+  return null;
+}
+
+// ── Tool dispatch against BrowserAgent ─────────────────────────────────────
+async function executeTool(agent, name, args, credentials) {
+  args = args || {};
+  switch (name) {
+    case 'navigate':       return await agent.navigate(args.url);
+    case 'read_page':      return await agent.readPage({ selector: args.selector });
+    case 'get_page_source': return await agent.getPageSource();
+    case 'inspect_dom':    return await agent.inspectDom({ limit: args.limit });
+    case 'get_forms':      return await agent.getForms({ limit: args.limit });
+    case 'query_elements': return await agent.queryAll(args.selector);
+    case 'click':          return await agent.click(args.selector);
+    case 'click_text':     return await agent.clickText(args.text, { exact: !!args.exact });
+    case 'click_handle':   return await agent.clickHandle(args.handle);
+    case 'fill':           return await agent.fill(args.selector, args.value);
+    case 'fill_by_label':  return await agent.fillByLabel(args.label, args.value, { exact: !!args.exact });
+    case 'fill_handle':    return await agent.fillHandle(args.handle, args.value);
+    case 'press_key':      return await agent.pressKey(args.key);
+    case 'wait_for':       return await agent.waitFor(args.selector, { timeout: args.timeout_ms });
+    case 'get_network_log': return await agent.getNetworkLog({ limit: args.limit });
+    case 'get_network_body': return await agent.getNetworkBody(args.requestId);
+    case 'get_console_log': return await agent.getConsoleLog({ limit: args.limit });
+    case 'screenshot':     return await agent.screenshot();
+    case 'finish':         return { ok: true, finished: true, summary: args.summary || '' };
+    case 'wait_for_user':  return { ok: true, waiting: true, message: args.message || '' };
+    case 'fill_saved_credentials': {
+      const creds = credentials || {};
+      const acct = creds[args.account];
+      if (!acct) return { ok: false, error: `No saved credentials found for account "${args.account}". Available: ${Object.keys(creds).join(', ') || 'none'}` };
+      // Fill email then password using fill_by_label semantics
+      let filled = 0;
+      try { await agent.fillByLabel('email', acct.email, {}); filled++; } catch (_) {}
+      try { await agent.fillByLabel('password', acct.password, {}); filled++; } catch (_) {}
+      if (!filled) {
+        // Fallback: try common selector patterns
+        try { await agent.fill('input[type="email"]', acct.email); filled++; } catch (_) {}
+        try { await agent.fill('input[type="password"]', acct.password); filled++; } catch (_) {}
+      }
+      return filled > 0 ? { ok: true, filled, account: args.account } : { ok: false, error: 'Could not find login fields on this page.' };
+    }
+    default: throw new Error(`Unknown tool: ${name}`);
+  }
+}
+
+function describeAction(name, args) {
+  args = args || {};
+  switch (name) {
+    case 'navigate':       return `Navigate -> ${args.url || ''}`;
+    case 'read_page':      return args.selector ? `Read page (scope: ${args.selector})` : 'Read page';
+    case 'get_page_source': return 'Get page source';
+    case 'inspect_dom':    return `Inspect DOM${args.limit ? ` (limit ${args.limit})` : ''}`;
+    case 'get_forms':      return `Get forms${args.limit ? ` (limit ${args.limit})` : ''}`;
+    case 'query_elements': return `Query elements: ${args.selector || ''}`;
+    case 'click':          return `Click ${args.selector || ''}`;
+    case 'click_text':     return `Click text: ${args.text || ''}`;
+    case 'click_handle':   return `Click handle: ${String(args.handle || '').slice(0, 60)}`;
+    case 'fill':           return `Fill ${args.selector || ''} <- "${String(args.value || '').slice(0, 40)}"`;
+    case 'fill_by_label':  return `Fill label ${args.label || ''} <- "${String(args.value || '').slice(0, 40)}"`;
+    case 'fill_handle':    return `Fill handle ${String(args.handle || '').slice(0, 60)} <- "${String(args.value || '').slice(0, 40)}"`;
+    case 'press_key':      return `Press key ${args.key || ''}`;
+    case 'wait_for':       return `Wait for ${args.selector || ''}`;
+    case 'get_network_log': return `Get network log${args.limit ? ` (limit ${args.limit})` : ''}`;
+    case 'get_network_body': return `Get network body: ${args.requestId || ''}`;
+    case 'get_console_log': return `Get console log${args.limit ? ` (limit ${args.limit})` : ''}`;
+    case 'screenshot':     return 'Take screenshot';
+    case 'finish':         return `Finish: ${args.summary || ''}`;
+    case 'wait_for_user':  return `Waiting for user: ${args.message || ''}`;
+    case 'fill_saved_credentials': return `Fill saved credentials: ${args.account || ''}`;
+    default: return name;
+  }
+}
+
+const MUTATING_TOOLS = new Set([
+  'navigate',
+  'click',
+  'click_text',
+  'click_handle',
+  'fill',
+  'fill_by_label',
+  'fill_handle',
+  'press_key',
+  'fill_saved_credentials',
+]);
+
+function isMutatingTool(name) {
+  return MUTATING_TOOLS.has(name);
+}
+
+function safeJson(value) {
+  try { return JSON.stringify(value, null, 2); } catch (_) { return JSON.stringify({ value: String(value) }, null, 2); }
+}
+
+function normalizeMimeType(value) {
+  return String(value || '').split(';')[0].trim().toLowerCase();
+}
+
+function tryParsePayloadBody(body, mimeType, base64Encoded) {
+  if (!body) return { kind: 'empty', parsed: null, preview: '' };
+  if (base64Encoded) return { kind: 'base64', parsed: null, preview: shortenContent(body, 600) };
+  const text = String(body);
+  const mime = normalizeMimeType(mimeType);
+  if (mime.includes('json') || /^[\[{]/.test(text.trim())) {
+    try { return { kind: 'json', parsed: JSON.parse(text), preview: shortenContent(text, 1200) }; } catch (_) {}
+  }
+  if (mime.includes('x-www-form-urlencoded')) {
+    try {
+      const parsed = {};
+      for (const [k, v] of new URLSearchParams(text).entries()) parsed[k] = v;
+      return { kind: 'form', parsed, preview: shortenContent(text, 1200) };
+    } catch (_) {}
+  }
+  return { kind: 'text', parsed: null, preview: shortenContent(text, 1200) };
+}
+
+function normalizeActionResult(name, result) {
+  if (result == null) return { ok: true };
+  if (name === 'screenshot' && result) return { ok: true, mimeType: result.mimeType || 'image/png' };
+  if (typeof result === 'string') return { text: result };
+  if (typeof result !== 'object') return { value: result };
+  return result;
+}
+
+function summarizeUrl(url, maxLen = 96) {
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    const query = parsed.search
+      ? (parsed.search.length <= 24 ? parsed.search : '?...')
+      : '';
+    return shortenContent(
+      (parsed.host || '') + (parsed.pathname || '/') + query,
+      maxLen
+    );
+  } catch (_) {
+    return shortenContent(String(url), maxLen);
+  }
+}
+
+function formatStatusLabel(status) {
+  const num = Number(status);
+  if (!Number.isFinite(num) || num <= 0) return 'unknown';
+  return String(num);
+}
+
+function isRelevantNetworkResponse(event, payloadIds) {
+  if (!event) return false;
+  const type = String(event.resourceType || '').toLowerCase();
+  const method = String(event.method || 'GET').toUpperCase();
+  const status = Number(event.status || 0);
+  if (payloadIds.has(event.requestId)) return true;
+  if (status >= 400) return true;
+  if (method !== 'GET') return true;
+  return type === 'document' || type === 'xhr' || type === 'fetch';
+}
+
+function summarizePayload(payload) {
+  if (!payload) return 'Captured response payload.';
+  const kind = payload.bodyKind || 'response';
+  if (payload.parsed && typeof payload.parsed === 'object' && !Array.isArray(payload.parsed)) {
+    const keys = Object.keys(payload.parsed).slice(0, 5);
+    if (keys.length) return `Captured ${kind} payload with keys: ${keys.join(', ')}.`;
+  }
+  if (Array.isArray(payload.parsed)) {
+    return `Captured ${kind} payload with ${payload.parsed.length} item${payload.parsed.length === 1 ? '' : 's'}.`;
+  }
+  if (payload.preview) {
+    return `Captured ${kind} payload: ${shortenContent(payload.preview.replace(/\s+/g, ' '), 120)}.`;
+  }
+  return `Captured ${kind} payload.`;
+}
+
+function buildActionSummaryLines(report) {
+  const lines = [];
+  const relevantResponses = Array.isArray(report.relevantResponses) ? report.relevantResponses : [];
+  const relevantFailures = Array.isArray(report.relevantFailures) ? report.relevantFailures : [];
+  const payloads = Array.isArray(report.payloads) ? report.payloads : [];
+  const consoleItems = Array.isArray(report.console) ? report.console : [];
+
+  if (relevantResponses.length) {
+    const latest = relevantResponses[relevantResponses.length - 1];
+    const label = relevantResponses.length === 1 ? 'Relevant response' : `Relevant responses (${relevantResponses.length})`;
+    lines.push(
+      `${label}: ${String(latest.method || 'GET').toUpperCase()} ${summarizeUrl(latest.url)} -> ${formatStatusLabel(latest.status)}.`
+    );
+  }
+  if (relevantFailures.length) {
+    const latest = relevantFailures[relevantFailures.length - 1];
+    lines.push(
+      `Request failure: ${String(latest.method || 'GET').toUpperCase()} ${summarizeUrl(latest.url)} -> ${latest.errorText || 'failed'}.`
+    );
+  }
+  if (payloads.length) {
+    lines.push(summarizePayload(payloads[payloads.length - 1]));
+  }
+  const consoleProblems = consoleItems.filter((entry) => {
+    const type = String(entry.type || '').toLowerCase();
+    return type === 'warning' || type === 'warn' || type === 'error' || type === 'exception';
+  });
+  if (consoleProblems.length) {
+    const latest = consoleProblems[consoleProblems.length - 1];
+    lines.push(`Console ${latest.type || 'message'}: ${shortenContent(String(latest.text || ''), 120)}.`);
+  }
+  if (!lines.length && report.result && report.result.url) {
+    lines.push(`Current page: ${summarizeUrl(report.result.url)}.`);
+  }
+  return lines;
+}
+
+async function snapshotAgentState(agent) {
+  const [network, consoleLog] = await Promise.all([
+    agent.getNetworkLog({ limit: 200 }).catch(() => ({ events: [] })),
+    agent.getConsoleLog({ limit: 80 }).catch(() => ({ events: [] })),
+  ]);
+  return {
+    networkCount: Array.isArray(network.events) ? network.events.length : 0,
+    consoleCount: Array.isArray(consoleLog.events) ? consoleLog.events.length : 0,
+  };
+}
+
+async function captureActionTelemetry(agent, beforeState) {
+  const [network, consoleLog] = await Promise.all([
+    agent.getNetworkLog({ limit: 200 }).catch(() => ({ events: [] })),
+    agent.getConsoleLog({ limit: 80 }).catch(() => ({ events: [] })),
+  ]);
+  const networkEvents = Array.isArray(network.events) ? network.events : [];
+  const consoleEvents = Array.isArray(consoleLog.events) ? consoleLog.events : [];
+  const nextNetwork = networkEvents.slice(Math.min(beforeState.networkCount || 0, networkEvents.length));
+  const nextConsole = consoleEvents.slice(Math.min(beforeState.consoleCount || 0, consoleEvents.length));
+  const responses = nextNetwork.filter((event) => event && event.kind === 'response' && event.requestId);
+  const failures = nextNetwork.filter((event) => event && event.kind === 'failed');
+  const payloads = [];
+  for (const event of responses.slice(-4)) {
+    const resourceType = String(event.resourceType || '').toLowerCase();
+    if (resourceType !== 'fetch' && resourceType !== 'xhr') continue;
+    try {
+      const body = await agent.getNetworkBody(event.requestId);
+      if (!body) continue;
+      const parsed = tryParsePayloadBody(body.body, body.contentType || body.mimeType, body.base64Encoded);
+      payloads.push({
+        requestId: event.requestId,
+        url: body.url || event.url || null,
+        status: body.status || event.status || null,
+        resourceType: event.resourceType || null,
+        contentType: body.contentType || body.mimeType || null,
+        bodyKind: parsed.kind,
+        parsed: parsed.parsed,
+        preview: parsed.preview,
+        truncated: !!body.truncated,
+      });
+    } catch (_) {}
+  }
+  return {
+    network: {
+      totalEvents: nextNetwork.length,
+      responses: responses.map((event) => ({
+        requestId: event.requestId,
+        method: event.method || 'GET',
+        url: event.url || '',
+        status: event.status || null,
+        resourceType: event.resourceType || null,
+      })),
+      failures: failures.map((event) => ({
+        requestId: event.requestId || null,
+        method: event.method || 'GET',
+        url: event.url || '',
+        errorText: event.errorText || 'Request failed',
+        resourceType: event.resourceType || null,
+      })),
+    },
+    console: nextConsole.slice(-5).map((event) => ({
+      type: event.type || event.kind || 'log',
+      text: event.text || '',
+      url: event.url || null,
+    })),
+    payloads,
+  };
+}
+
+function hasStructuredTelemetry(name, telemetry) {
+  if (!telemetry) return false;
+  return !!(
+    (telemetry.payloads && telemetry.payloads.length) ||
+    (telemetry.network && ((telemetry.network.failures && telemetry.network.failures.length) || (name !== 'navigate' && telemetry.network.responses && telemetry.network.responses.length))) ||
+    (telemetry.console && telemetry.console.length)
+  );
+}
+
+function buildStructuredActionReport(report) {
+  const parts = [`### ${report.title}`];
+  if (report.summaryLines && report.summaryLines.length) {
+    report.summaryLines.forEach((line) => parts.push(`- ${line}`));
+  } else {
+    parts.push('- Relevant browser activity was captured.');
+  }
+  parts.push('', '```json', safeJson(report.result), '```');
+  return parts.join('\n');
+}
+
+function buildFinalBrowserReport(summary, actionReports) {
+  const interesting = (actionReports || []).filter((entry) => entry && entry.markdown);
+  if (!interesting.length) return summary || 'Done.';
+  const parts = [summary || 'Done.', '', '## Relevant Activity'];
+  interesting.slice(-4).forEach((entry) => {
+    parts.push('', entry.markdown);
+  });
+  return parts.join('\n');
+}
+
+function buildActionReport({ name, args, result, telemetry }) {
+  const normalizedResult = normalizeActionResult(name, result);
+  const payloads = telemetry && Array.isArray(telemetry.payloads) ? telemetry.payloads : [];
+  const payloadIds = new Set(payloads.map((payload) => payload && payload.requestId).filter(Boolean));
+  const allResponses = telemetry && telemetry.network && Array.isArray(telemetry.network.responses)
+    ? telemetry.network.responses
+    : [];
+  const allFailures = telemetry && telemetry.network && Array.isArray(telemetry.network.failures)
+    ? telemetry.network.failures
+    : [];
+  const consoleItems = telemetry && Array.isArray(telemetry.console) ? telemetry.console.slice(-6) : [];
+  const relevantResponses = allResponses.filter((event) => isRelevantNetworkResponse(event, payloadIds)).slice(-6);
+  const relevantFailures = allFailures.slice(-4);
+  const hasInterestingDetails = !!(relevantResponses.length || relevantFailures.length || payloads.length || consoleItems.length);
+  const report = {
+    title: describeAction(name, args),
+    name,
+    args,
+    result: normalizedResult,
+    telemetry,
+    relevantResponses,
+    relevantFailures,
+    payloads,
+    console: consoleItems,
+    summaryLines: [],
+    detail: {
+      action: describeAction(name, args),
+      result: normalizedResult,
+      relevantResponses,
+      allResponses: allResponses.slice(-20),
+      failures: allFailures.slice(-10),
+      payloads,
+      console: consoleItems,
+    },
+    markdown: '',
+  };
+  report.summaryLines = buildActionSummaryLines(report);
+  report.markdown = hasInterestingDetails && hasStructuredTelemetry(name, telemetry)
+    ? buildStructuredActionReport(report)
+    : '';
+  return report;
+}
+
+// ── Thread state ───────────────────────────────────────────────────────────
+class ChatThread {
+  constructor(id) {
+    this.id = id;
+    this.providerKind = null;
+    this.messages = [];
+    this.stopped = false;
+    this.running = false;
+    this.createdAt = Date.now();
+  }
+}
+
+const threads = new Map();
+function getThread(id) {
+  if (!threads.has(id)) threads.set(id, new ChatThread(id));
+  return threads.get(id);
+}
+
+function pruneThreads() {
+  const cutoff = Date.now() - 30 * 60 * 1000;
+  for (const [id, t] of threads) {
+    if (!t.running && t.createdAt < cutoff) threads.delete(id);
+  }
+}
+
+// ── Learnings helpers ─────────────────────────────────────────────────────
+async function fetchBrowserLearnings() {
+  return new Promise((resolve) => {
+    const req = require('http').request({ hostname: '127.0.0.1', port: 3800, path: '/api/learnings', method: 'GET' }, (res) => {
+      let d = '';
+      res.on('data', c => { d += c; });
+      res.on('end', () => {
+        try {
+          const all = JSON.parse(d);
+          const items = Array.isArray(all) ? all : (all.learnings || []);
+          resolve(items.filter(l => l.category === 'browser'));
+        } catch (_) { resolve([]); }
+      });
+    });
+    req.on('error', () => resolve([]));
+    req.end();
+  });
+}
+
+function saveBrowserLearning(summary) {
+  try {
+    const body = JSON.stringify({ category: 'browser', summary });
+    const req = require('http').request({
+      hostname: '127.0.0.1', port: 3800, path: '/api/learnings', method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+    });
+    req.on('error', () => {});
+    req.write(body);
+    req.end();
+  } catch (_) {}
+}
+
+// ── Runner ────────────────────────────────────────────────────────────────
+async function runThread({ thread, task, agent, providerEntry, model, broadcast, credentials }) {
+  thread.running = true;
+  const emit = (step) => {
+    if (typeof broadcast === 'function') {
+      broadcast({ type: 'browser-agent-step', threadId: thread.id, ...step, at: Date.now() });
+    }
+  };
+  emit({ kind: 'provider', provider: providerEntry.adapter.kind, label: providerEntry.adapter.label });
+
+  const learnings = await fetchBrowserLearnings().catch(() => []);
+  const savedAccounts = Object.keys(credentials || {});
+  const systemPrompt = buildSystemPrompt(learnings, savedAccounts);
+
+  try { await agent.launch({}); } catch (e) {
+    emit({ kind: 'error', message: 'Failed to open browser: ' + e.message });
+    thread.running = false;
+    return { ok: false, error: e.message };
+  }
+
+  // Reset thread state when provider changes mid-thread to avoid mixed formats.
+  if (thread.providerKind !== providerEntry.adapter.kind) {
+    thread.messages = providerEntry.adapter.initMessages(task);
+    thread.providerKind = providerEntry.adapter.kind;
+  } else {
+    // Continue thread; append user turn in provider format.
+    if (providerEntry.adapter.kind === 'gemini') thread.messages.push({ role: 'user', parts: [{ text: task }] });
+    else thread.messages.push({ role: 'user', content: task });
+  }
+  emit({ kind: 'user', text: task });
+
+  let iter = 0;
+  let finalSummary = null;
+  const recentActions = [];
+  const actionReports = [];
+  try {
+    while (iter < MAX_ITERATIONS) {
+      if (thread.stopped) { emit({ kind: 'stopped' }); break; }
+      iter++;
+      emit({ kind: 'thinking', iter });
+
+      let resp;
+      try {
+        resp = await providerEntry.adapter.call({
+          messages: thread.messages,
+          apiKey: providerEntry.apiKey,
+          model,
+          systemPrompt,
+        });
+      } catch (e) {
+        const msg = e.message || '';
+        if (msg.includes('429')) {
+          saveBrowserLearning('Rate limit hit mid-task. Reduce steps: prefer direct URL navigation over multi-step UI clicks. Use Haiku model for browser tasks.');
+        }
+        emit({ kind: 'error', message: providerEntry.adapter.label + ' API error: ' + msg });
+        thread.running = false;
+        return { ok: false, error: msg };
+      }
+
+      if (resp.text) emit({ kind: 'message', text: resp.text });
+
+      // Record assistant turn in provider-native shape.
+      providerEntry.adapter.appendAssistant(thread.messages, resp.raw);
+
+      if (!resp.toolCalls.length) {
+        finalSummary = resp.text || 'Done.';
+        break;
+      }
+
+      const pairs = [];
+      let finished = false;
+      for (const tc of resp.toolCalls) {
+        if (thread.stopped) break;
+        emit({ kind: 'action', tool: tc.name, args: tc.args, summary: describeAction(tc.name, tc.args) });
+        // Detect repeated identical actions (loop) and bail.
+        // Use the full args string so that fill_handle calls on different fields
+        // (which share a long CSS-path prefix) are never mistaken for duplicates.
+        const actionKey = tc.name + ':' + JSON.stringify(tc.args);
+        recentActions.push(actionKey);
+        if (recentActions.length > 6 && recentActions.slice(-4).every(a => a === actionKey)) {
+          saveBrowserLearning(`Loop detected: repeated "${tc.name}" with same args. Agent must detect when navigation is stuck and call finish instead of retrying.`);
+          emit({ kind: 'observation', tool: tc.name, ok: false, error: 'Loop detected — same action repeated 3 times. Stopping.' });
+          finalSummary = 'Stopped: the same action was repeated without progress. Please try rephrasing the task.';
+          finished = true;
+          break;
+        }
+        try {
+          const beforeState = isMutatingTool(tc.name) ? await snapshotAgentState(agent) : null;
+          const result = await executeTool(agent, tc.name, tc.args, credentials);
+          const telemetry = beforeState ? await captureActionTelemetry(agent, beforeState) : null;
+          const report = buildActionReport({ name: tc.name, args: tc.args, result, telemetry });
+          if (report.markdown) actionReports.push(report);
+          pairs.push({ toolUseId: tc.id, name: tc.name, blocks: providerEntry.adapter.buildToolResultBlocks(tc.name, result), isError: false });
+          emit({ kind: 'observation', tool: tc.name, ok: true, markdown: report.markdown, structured: report });
+          if (tc.name === 'finish') { finished = true; finalSummary = (tc.args && tc.args.summary) || 'Done.'; break; }
+          if (tc.name === 'wait_for_user') {
+            emit({ kind: 'waiting', message: result.message || 'User action required.' });
+            // Park the thread until resumed or stopped (poll every 2s up to 5 min).
+            const deadline = Date.now() + 5 * 60 * 1000;
+            while (!thread.stopped && !thread.resumed && Date.now() < deadline) {
+              await new Promise(r => setTimeout(r, 2000));
+            }
+            thread.resumed = false;
+            if (thread.stopped) break;
+          }
+        } catch (e) {
+          const errBlock = providerEntry.adapter.kind === 'anthropic'
+            ? [{ type: 'text', text: 'Error: ' + (e.message || String(e)) }]
+            : 'Error: ' + (e.message || String(e));
+          pairs.push({ toolUseId: tc.id, name: tc.name, blocks: errBlock, isError: true });
+          emit({ kind: 'observation', tool: tc.name, ok: false, error: e.message });
+        }
+      }
+      if (pairs.length) providerEntry.adapter.appendToolResults(thread.messages, pairs);
+      if (finished) break;
+    }
+    if (!finalSummary) finalSummary = iter >= MAX_ITERATIONS ? `Stopped after ${MAX_ITERATIONS} steps.` : 'Done.';
+    const finalReport = buildFinalBrowserReport(finalSummary, actionReports);
+    emit({ kind: 'done', summary: finalSummary, markdown: finalReport, reports: actionReports });
+    return { ok: true, summary: finalSummary, iterations: iter, report: finalReport, actionReports };
+  } catch (e) {
+    emit({ kind: 'error', message: e.message });
+    return { ok: false, error: e.message };
+  } finally {
+    thread.running = false;
+    pruneThreads();
+  }
+}
+
+// ── Routes ─────────────────────────────────────────────────────────────────
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => { try { resolve(body ? JSON.parse(body) : {}); } catch (e) { reject(e); } });
+    req.on('error', reject);
+  });
+}
+
+function mountBrowserAgentChatRoutes(addRoute, json, { getConfig, agent, broadcast }) {
+  if (!agent) {
+    console.log('  Browser agent chat skipped: no BrowserAgent instance');
+    return;
+  }
+
+  const isIncognito = () => (getConfig().IncognitoMode === true);
+  const buildRegistry = () => {
+    const aiKeys = Object.assign({}, getConfig().AiApiKeys || {});
+    // Environment variables are a fallback source.
+    for (const k of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'XAI_API_KEY', 'DASHSCOPE_API_KEY', 'GEMINI_API_KEY']) {
+      if (!aiKeys[k] && process.env[k]) aiKeys[k] = process.env[k];
+    }
+    return buildProviderRegistry(aiKeys);
+  };
+
+  addRoute('POST', '/api/browser/agent/chat', async (req, res) => {
+    if (isIncognito()) return json(res, { error: 'Blocked by Incognito Mode.' }, 403);
+    let body;
+    try { body = await readBody(req); } catch (e) { return json(res, { error: 'Bad JSON: ' + e.message }, 400); }
+    const task = (body.task || body.message || '').trim();
+    if (!task) return json(res, { error: 'task required' }, 400);
+    const threadId = body.threadId || 'default';
+    const registry = buildRegistry();
+    const entry = pickProvider(registry, body.provider);
+    if (!entry) {
+      return json(res, {
+        error: 'No AI provider configured. Set one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, XAI_API_KEY, or DASHSCOPE_API_KEY in Settings -> AI Keys.',
+        providers: Object.keys(registry),
+      }, 400);
+    }
+    const thread = getThread(threadId);
+    if (thread.running) return json(res, { error: 'Thread already running. Stop it first.' }, 409);
+    thread.stopped = false;
+    const model = body.model || entry.adapter.defaultModel;
+
+    const credentials = getConfig().BrowserCredentials || {};
+    json(res, { ok: true, threadId, provider: entry.adapter.kind, label: entry.adapter.label, model });
+    runThread({ thread, task, agent, providerEntry: entry, model, broadcast, credentials }).catch(() => {});
+  });
+
+  addRoute('POST', '/api/browser/agent/stop', async (req, res) => {
+    let body = {};
+    try { body = await readBody(req); } catch (_) {}
+    const thread = getThread(body.threadId || 'default');
+    thread.stopped = true;
+    json(res, { ok: true });
+  });
+
+  addRoute('POST', '/api/browser/agent/resume', async (req, res) => {
+    let body = {};
+    try { body = await readBody(req); } catch (_) {}
+    const thread = getThread(body.threadId || 'default');
+    thread.resumed = true;
+    json(res, { ok: true });
+  });
+
+  addRoute('POST', '/api/browser/agent/reset', async (req, res) => {
+    let body = {};
+    try { body = await readBody(req); } catch (_) {}
+    const id = body.threadId || 'default';
+    const t = threads.get(id);
+    if (t) { t.messages = []; t.providerKind = null; t.stopped = false; }
+    json(res, { ok: true });
+  });
+
+  addRoute('GET', '/api/browser/agent/status', async (req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const id = url.searchParams.get('threadId') || 'default';
+    const t = threads.get(id);
+    const registry = buildRegistry();
+    const providers = Object.entries(registry).map(([k, v]) => ({ key: k, label: v.adapter.label, keyEnv: v.keyEnv, defaultModel: v.adapter.defaultModel }));
+    json(res, {
+      ok: true,
+      running: !!(t && t.running),
+      stopped: !!(t && t.stopped),
+      messages: t ? t.messages.length : 0,
+      providers,
+      defaultProvider: providers.length ? (pickProvider(registry).adapter.kind || null) : null,
+    });
+  });
+}
+
+module.exports = { mountBrowserAgentChatRoutes };

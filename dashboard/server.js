@@ -2904,8 +2904,15 @@ hybridSearch.initialize({ notesDir, learnings: _learningsInstance })
 // ── Mount browser agent ──────────────────────────────────────────────────────
 try {
   const { mountBrowserRoutes } = require('./browser-agent');
-  mountBrowserRoutes(addRoute, json, { getConfig, repoRoot, broadcast });
+  const browserAgentInstance = mountBrowserRoutes(addRoute, json, { getConfig, repoRoot, broadcast });
   console.log('  Browser agent mounted (/api/browser/*)');
+  try {
+    const { mountBrowserAgentChatRoutes } = require('./browser-agent-chat');
+    mountBrowserAgentChatRoutes(addRoute, json, { getConfig, agent: browserAgentInstance, broadcast });
+    console.log('  Browser agent chat mounted (/api/browser/agent/*)');
+  } catch (e2) {
+    console.log('  Browser agent chat skipped:', e2.message);
+  }
 } catch (e) {
   console.log('  Browser agent skipped:', e.message);
 }

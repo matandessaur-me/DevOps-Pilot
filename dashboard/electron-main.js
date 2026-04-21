@@ -42,11 +42,11 @@ function _broadcastToRenderer(msg) {
 
 async function _ensureBrowserTab() {
   if (!win || win.isDestroyed()) throw new Error('Main window not available');
-  // Tell the renderer to open the Browser tab and create the webview if missing.
-  // We always pass 'about:blank' here -- the driver's navigate() is responsible
-  // for the real URL, so we avoid double-navigating the same URL.
+  // Open the Browser tab and ensure the webview exists. Do NOT pass a URL here
+  // to avoid a race where openBrowserTab's 50ms timeout fires after the driver's
+  // loadURL(url) and navigates back to about:blank.
   await win.webContents.executeJavaScript(
-    `(function(){ try { if (typeof openBrowserTab === 'function') { openBrowserTab('about:blank'); } } catch(_){} })();`
+    `(function(){ try { if (typeof _ensureInappBrowser === 'function') { _ensureInappBrowser(); } if (typeof switchTab === 'function') { switchTab('browser'); } } catch(_){} })();`
   );
   const start = Date.now();
   while (Date.now() - start < 3000) {
@@ -75,6 +75,447 @@ async function _exec(wc, code) {
   return wc.executeJavaScript(code, true);
 }
 
+const _debugState = new WeakMap();
+const MAX_BROWSER_NETWORK_EVENTS = 200;
+
+function _getDebugState(wc) {
+  let state = _debugState.get(wc);
+  if (!state) {
+    state = {
+      listening: false,
+      networkEnabled: false,
+      runtimeEnabled: false,
+      logEnabled: false,
+      events: [],
+      consoleEvents: [],
+      requests: new Map(),
+      responseBodies: new Map(),
+    };
+    _debugState.set(wc, state);
+  }
+  return state;
+}
+
+function _trimValue(value, maxLen = 240) {
+  if (value == null) return null;
+  const text = String(value);
+  return text.length <= maxLen ? text : (text.slice(0, maxLen) + '...');
+}
+
+function _pushNetworkEvent(state, event) {
+  state.events.push(event);
+  if (state.events.length > MAX_BROWSER_NETWORK_EVENTS) state.events.splice(0, state.events.length - MAX_BROWSER_NETWORK_EVENTS);
+}
+
+function _pushConsoleEvent(state, event) {
+  state.consoleEvents.push(event);
+  if (state.consoleEvents.length > MAX_BROWSER_NETWORK_EVENTS) state.consoleEvents.splice(0, state.consoleEvents.length - MAX_BROWSER_NETWORK_EVENTS);
+}
+
+async function _ensureDebugger(wc) {
+  const state = _getDebugState(wc);
+  if (!wc || !wc.debugger) return state;
+  if (!wc.debugger.isAttached()) wc.debugger.attach('1.3');
+  if (!state.listening) {
+    wc.debugger.on('message', (_event, method, params) => {
+      try {
+        if (method === 'Network.requestWillBeSent') {
+          const req = params && params.request ? params.request : {};
+          state.requests.set(params.requestId, {
+            requestId: params.requestId,
+            url: req.url || '',
+            method: req.method || 'GET',
+            resourceType: params.type || null,
+            initiator: params.initiator && params.initiator.type ? params.initiator.type : null,
+            startedAt: Date.now(),
+          });
+          _pushNetworkEvent(state, {
+            kind: 'request',
+            requestId: params.requestId,
+            method: req.method || 'GET',
+            url: req.url || '',
+            resourceType: params.type || null,
+            initiator: params.initiator && params.initiator.type ? params.initiator.type : null,
+            startedAt: Date.now(),
+          });
+          return;
+        }
+        if (method === 'Network.responseReceived') {
+          const prev = state.requests.get(params.requestId) || {};
+          const res = params && params.response ? params.response : {};
+          const event = {
+            kind: 'response',
+            requestId: params.requestId,
+            method: prev.method || 'GET',
+            url: res.url || prev.url || '',
+            status: res.status,
+            statusText: res.statusText || null,
+            mimeType: res.mimeType || null,
+            resourceType: params.type || prev.resourceType || null,
+            fromDiskCache: !!res.fromDiskCache,
+            fromServiceWorker: !!res.fromServiceWorker,
+            hasBodyPreview: false,
+            receivedAt: Date.now(),
+          };
+          state.requests.set(params.requestId, { ...prev, ...event });
+          _pushNetworkEvent(state, event);
+          return;
+        }
+        if (method === 'Network.loadingFailed') {
+          const prev = state.requests.get(params.requestId) || {};
+          const event = {
+            kind: 'failed',
+            requestId: params.requestId,
+            method: prev.method || 'GET',
+            url: prev.url || '',
+            errorText: params.errorText || 'Request failed',
+            canceled: !!params.canceled,
+            resourceType: params.type || prev.resourceType || null,
+            failedAt: Date.now(),
+          };
+          state.requests.delete(params.requestId);
+          _pushNetworkEvent(state, event);
+          return;
+        }
+        if (method === 'Network.loadingFinished') {
+          const prev = state.requests.get(params.requestId) || {};
+          const event = {
+            kind: 'finished',
+            requestId: params.requestId,
+            method: prev.method || 'GET',
+            url: prev.url || '',
+            status: prev.status || null,
+            resourceType: prev.resourceType || null,
+            encodedDataLength: params.encodedDataLength || 0,
+            finishedAt: Date.now(),
+          };
+          _pushNetworkEvent(state, event);
+          return;
+        }
+        if (method === 'Runtime.consoleAPICalled') {
+          _pushConsoleEvent(state, {
+            kind: 'console',
+            type: params.type || 'log',
+            text: (params.args || []).map((arg) => _trimValue(arg.value != null ? arg.value : arg.description || arg.type || '')).filter(Boolean).join(' '),
+            at: Date.now(),
+          });
+          return;
+        }
+        if (method === 'Runtime.exceptionThrown') {
+          const details = params && params.exceptionDetails ? params.exceptionDetails : {};
+          _pushConsoleEvent(state, {
+            kind: 'exception',
+            type: 'exception',
+            text: _trimValue((details.exception && (details.exception.description || details.exception.value)) || details.text || 'Exception thrown', 2000),
+            url: details.url || null,
+            lineNumber: details.lineNumber,
+            columnNumber: details.columnNumber,
+            at: Date.now(),
+          });
+          return;
+        }
+        if (method === 'Log.entryAdded') {
+          const entry = params && params.entry ? params.entry : {};
+          _pushConsoleEvent(state, {
+            kind: 'log',
+            type: entry.level || 'info',
+            source: entry.source || null,
+            text: _trimValue(entry.text || '', 2000),
+            url: entry.url || null,
+            at: Date.now(),
+          });
+        }
+      } catch (_) {}
+    });
+    wc.on('destroyed', () => { _debugState.delete(wc); });
+    state.listening = true;
+  }
+  if (!state.networkEnabled) {
+    await wc.debugger.sendCommand('Network.enable');
+    state.networkEnabled = true;
+  }
+  if (!state.runtimeEnabled) {
+    await wc.debugger.sendCommand('Runtime.enable');
+    state.runtimeEnabled = true;
+  }
+  if (!state.logEnabled) {
+    await wc.debugger.sendCommand('Log.enable');
+    state.logEnabled = true;
+  }
+  return state;
+}
+
+async function _preferLightColorScheme(wc) {
+  if (!wc || wc.isDestroyed()) return;
+  try {
+    await _ensureDebugger(wc);
+    await wc.debugger.sendCommand('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-color-scheme', value: 'light' }],
+    });
+  } catch (_) {}
+}
+
+const BROWSER_DOM_HELPERS = `
+function normalizeText(value) {
+  return String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+}
+function cleanText(value, maxLen) {
+  var text = String(value || '').replace(/\\s+/g, ' ').trim();
+  if (!maxLen || text.length <= maxLen) return text;
+  return text.slice(0, maxLen) + '...';
+}
+function safeCssEscape(value) {
+  if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') return CSS.escape(value);
+  return String(value || '').replace(/[^a-zA-Z0-9_-]/g, function(ch) {
+    return '\\\\' + ch;
+  });
+}
+function isVisible(el) {
+  if (!el) return false;
+  var win = el.ownerDocument && el.ownerDocument.defaultView ? el.ownerDocument.defaultView : window;
+  var style = win.getComputedStyle(el);
+  if (!style || style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+  var rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+function getFrameElements(doc) {
+  return Array.from(doc.querySelectorAll('iframe, frame'));
+}
+function getDocumentByFramePath(framePath) {
+  var doc = document;
+  for (var i = 0; i < (framePath || []).length; i++) {
+    var idx = framePath[i];
+    var frames = getFrameElements(doc);
+    var frameEl = frames[idx];
+    if (!frameEl) return null;
+    try {
+      doc = frameEl.contentDocument;
+    } catch (_) {
+      return null;
+    }
+    if (!doc) return null;
+  }
+  return doc;
+}
+function getFrameMeta(doc, framePath) {
+  if (!framePath || !framePath.length) return { framePath: [], frameName: null, frameSrc: location.href, accessible: true };
+  var parentDoc = document;
+  var frameEl = null;
+  for (var i = 0; i < framePath.length; i++) {
+    var frames = getFrameElements(parentDoc);
+    var candidate = frames[framePath[i]];
+    if (!candidate) break;
+    frameEl = candidate;
+    try { parentDoc = candidate.contentDocument; } catch (_) { break; }
+  }
+  return {
+    framePath: framePath.slice(),
+    frameName: frameEl ? (frameEl.name || frameEl.id || null) : null,
+    frameSrc: frameEl ? (frameEl.getAttribute('src') || null) : null,
+    accessible: !!(frameEl && frameEl.contentDocument)
+  };
+}
+function walkDocuments(maxDepth) {
+  maxDepth = Math.max(0, Math.min(maxDepth || 4, 8));
+  var out = [];
+  function visit(doc, framePath, depth) {
+    out.push({ doc: doc, framePath: framePath.slice(), accessible: true });
+    if (depth >= maxDepth) return;
+    getFrameElements(doc).forEach(function(frameEl, idx) {
+      var nextPath = framePath.concat(idx);
+      try {
+        if (frameEl.contentDocument) visit(frameEl.contentDocument, nextPath, depth + 1);
+        else out.push({ framePath: nextPath, accessible: false, frameName: frameEl.name || frameEl.id || null, frameSrc: frameEl.getAttribute('src') || null });
+      } catch (_) {
+        out.push({ framePath: nextPath, accessible: false, frameName: frameEl.name || frameEl.id || null, frameSrc: frameEl.getAttribute('src') || null });
+      }
+    });
+  }
+  visit(document, [], 0);
+  return out;
+}
+function labelsFor(el) {
+  var doc = el && el.ownerDocument ? el.ownerDocument : document;
+  var labels = [];
+  try {
+    if (el.labels && el.labels.length) {
+      labels = labels.concat(Array.from(el.labels).map(function(label) { return cleanText(label.innerText || label.textContent || '', 160); }));
+    }
+  } catch (_) {}
+  if (el.id) {
+    try {
+      labels = labels.concat(Array.from(doc.querySelectorAll('label[for="' + safeCssEscape(el.id) + '"]')).map(function(label) {
+        return cleanText(label.innerText || label.textContent || '', 160);
+      }));
+    } catch (_) {}
+  }
+  return Array.from(new Set(labels.filter(Boolean)));
+}
+function selectorHint(el) {
+  if (!el || !el.tagName) return null;
+  var tag = el.tagName.toLowerCase();
+  if (el.id) return '#' + el.id;
+  if (el.name) return tag + '[name="' + el.name + '"]';
+  var type = el.getAttribute && el.getAttribute('type');
+  if (type) return tag + '[type="' + type + '"]';
+  return tag;
+}
+function cssPath(el) {
+  if (!el || !el.tagName) return null;
+  if (el.id) return '#' + safeCssEscape(el.id);
+  var parts = [];
+  var cur = el;
+  while (cur && cur.nodeType === 1 && cur.tagName.toLowerCase() !== 'html') {
+    var tag = cur.tagName.toLowerCase();
+    if (cur.id) {
+      parts.unshift('#' + safeCssEscape(cur.id));
+      break;
+    }
+    var part = tag;
+    var parent = cur.parentElement;
+    if (parent) {
+      var siblings = Array.from(parent.children).filter(function(node) { return node.tagName === cur.tagName; });
+      if (siblings.length > 1) part += ':nth-of-type(' + (siblings.indexOf(cur) + 1) + ')';
+    }
+    parts.unshift(part);
+    cur = parent;
+  }
+  return parts.join(' > ');
+}
+function makeHandle(framePath, element) {
+  return JSON.stringify({ framePath: framePath || [], cssPath: cssPath(element) });
+}
+function parseHandle(handle) {
+  if (!handle) return null;
+  if (typeof handle === 'object') return handle;
+  try { return JSON.parse(String(handle)); } catch (_) { return null; }
+}
+function getElementByHandle(handle) {
+  var parsed = parseHandle(handle);
+  if (!parsed || !parsed.cssPath) return null;
+  var doc = getDocumentByFramePath(parsed.framePath || []);
+  if (!doc) return null;
+  try { return doc.querySelector(parsed.cssPath); } catch (_) { return null; }
+}
+function candidateTexts(el) {
+  var texts = [];
+  texts.push(cleanText(el.innerText || el.textContent || '', 200));
+  texts.push(cleanText(el.value || '', 200));
+  texts.push(cleanText(el.getAttribute && el.getAttribute('aria-label'), 200));
+  texts.push(cleanText(el.getAttribute && el.getAttribute('placeholder'), 200));
+  texts.push(cleanText(el.getAttribute && el.getAttribute('title'), 200));
+  texts.push(cleanText(el.getAttribute && el.getAttribute('alt'), 200));
+  texts.push(cleanText(el.getAttribute && el.getAttribute('name'), 200));
+  texts.push(cleanText(el.id || '', 200));
+  labelsFor(el).forEach(function(label) { texts.push(label); });
+  return Array.from(new Set(texts.filter(Boolean)));
+}
+function scoreText(target, candidate, exact) {
+  if (!candidate) return 0;
+  if (candidate === target) return 500;
+  if (exact) return 0;
+  if (candidate.startsWith(target)) return 350;
+  if (candidate.indexOf(target) >= 0) return 300;
+  if (target.indexOf(candidate) >= 0) return 120;
+  return 0;
+}
+function clickElement(el, framePath) {
+  el.scrollIntoView({ block: 'center', inline: 'center' });
+  try { el.focus({ preventScroll: true }); } catch (_) {}
+  var doc = el.ownerDocument || document;
+  var win = doc.defaultView || window;
+  var rect = el.getBoundingClientRect();
+  var x = rect.left + Math.max(1, Math.min(rect.width / 2, rect.width - 1));
+  var y = rect.top + Math.max(1, Math.min(rect.height / 2, rect.height - 1));
+  var hit = doc.elementFromPoint ? doc.elementFromPoint(x, y) : null;
+  var target = hit && (hit === el || el.contains(hit)) ? hit : el;
+  ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(function(type) {
+    try {
+      target.dispatchEvent(new win.MouseEvent(type, { bubbles: true, cancelable: true, view: win, clientX: x, clientY: y, button: 0 }));
+    } catch (_) {}
+  });
+  try { target.click(); } catch (_) {}
+  return {
+    clickedText: cleanText(target.innerText || target.textContent || target.value || target.getAttribute('aria-label') || '', 200),
+    selectorHint: selectorHint(target),
+    handle: makeHandle(framePath || [], target)
+  };
+}
+function assignElementValue(el, value, framePath) {
+  var nextValue = String(value == null ? '' : value);
+  el.scrollIntoView({ block: 'center', inline: 'center' });
+  try { el.focus({ preventScroll: true }); } catch (_) {}
+  if (el.tagName === 'SELECT') {
+    var wanted = normalizeText(nextValue);
+    var option = Array.from(el.options || []).find(function(opt) {
+      return normalizeText(opt.text) === wanted || normalizeText(opt.value) === wanted;
+    }) || Array.from(el.options || []).find(function(opt) {
+      return normalizeText(opt.text).indexOf(wanted) >= 0 || normalizeText(opt.value).indexOf(wanted) >= 0;
+    });
+    el.value = option ? option.value : nextValue;
+  } else {
+    var proto = Object.getPrototypeOf(el);
+    var desc = proto && Object.getOwnPropertyDescriptor(proto, 'value');
+    if (desc && typeof desc.set === 'function') desc.set.call(el, nextValue);
+    else el.value = nextValue;
+  }
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  return {
+    filledLabel: labelsFor(el)[0] || cleanText(el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.name || el.id || '', 160),
+    selectorHint: selectorHint(el),
+    handle: makeHandle(framePath || [], el)
+  };
+}
+function describeField(el, framePath) {
+  var meta = getFrameMeta(el.ownerDocument, framePath || []);
+  return {
+    tag: el.tagName.toLowerCase(),
+    type: el.type || null,
+    name: el.name || null,
+    id: el.id || null,
+    role: el.getAttribute && el.getAttribute('role') || null,
+    placeholder: cleanText(el.getAttribute && el.getAttribute('placeholder'), 120),
+    ariaLabel: cleanText(el.getAttribute && el.getAttribute('aria-label'), 120),
+    labels: labelsFor(el),
+    valueText: (el.tagName === 'SELECT')
+      ? cleanText(((el.selectedOptions && el.selectedOptions[0]) ? el.selectedOptions[0].text : ''), 120)
+      : cleanText((el.type === 'password' ? '' : (el.value || '')), 120),
+    visible: isVisible(el),
+    disabled: !!el.disabled,
+    selectorHint: selectorHint(el),
+    cssPath: cssPath(el),
+    handle: makeHandle(framePath || [], el),
+    framePath: meta.framePath,
+    frameName: meta.frameName,
+    frameSrc: meta.frameSrc
+  };
+}
+function describeInteractive(el, framePath) {
+  var desc = describeField(el, framePath || []);
+  desc.text = cleanText(el.innerText || el.textContent || el.value || '', 160);
+  desc.href = cleanText(el.getAttribute && el.getAttribute('href'), 240);
+  return desc;
+}
+function describeForm(form, framePath) {
+  var meta = getFrameMeta(form.ownerDocument, framePath || []);
+  var fieldSelector = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), textarea, select';
+  return {
+    id: form.id || null,
+    name: form.name || null,
+    method: form.method || 'get',
+    action: form.action || form.ownerDocument.location.href,
+    cssPath: cssPath(form),
+    handle: makeHandle(framePath || [], form),
+    framePath: meta.framePath,
+    frameName: meta.frameName,
+    frameSrc: meta.frameSrc,
+    fields: Array.from(form.querySelectorAll(fieldSelector)).slice(0, 40).map(function(el) { return describeField(el, framePath || []); }),
+    submitControls: Array.from(form.querySelectorAll('button, input[type="submit"], input[type="button"]')).slice(0, 10).map(function(el) { return describeInteractive(el, framePath || []); })
+  };
+}
+`;
+
 const internalWebviewDriver = {
   kind: 'internal-webview',
 
@@ -86,6 +527,13 @@ const internalWebviewDriver = {
 
   async navigate(url) {
     const wc = await _ensureBrowserTab();
+    try {
+      const state = await _ensureDebugger(wc);
+      state.events = [];
+      state.consoleEvents = [];
+      state.requests.clear();
+      state.responseBodies.clear();
+    } catch (_) {}
     try { await wc.loadURL(url); } catch (_) { /* allow waitForLoad to settle */ }
     await _waitForLoad(wc);
     const title = await _exec(wc, 'document.title').catch(() => '');
@@ -113,16 +561,83 @@ const internalWebviewDriver = {
   async click(selector) {
     const wc = await _ensureBrowserTab();
     const js = `(function(){
-      var el = document.querySelector(${JSON.stringify(selector)});
-      if (!el) throw new Error('No element for selector: ' + ${JSON.stringify(selector)});
+      var sel = ${JSON.stringify(selector)};
+      var el;
+      try { el = document.querySelector(sel); } catch(e) {
+        throw new Error('Invalid CSS selector: ' + sel + ' — use standard CSS only (no Playwright/jQuery extensions like :has-text)');
+      }
+      if (!el) throw new Error('No element found for: ' + sel);
       el.scrollIntoView({ block: 'center' });
-      el.click();
+      try { el.click(); } catch(_) {}
       return true;
     })();`;
     await _exec(wc, js);
     // Give the page up to 5s to settle if the click navigates
     await Promise.race([_waitForLoad(wc, 5000), new Promise(r => setTimeout(r, 250))]);
     return { url: wc.getURL() };
+  },
+
+  async clickText(text, { exact = false } = {}) {
+    const wc = await _ensureBrowserTab();
+    const js = `(function(){
+      ${BROWSER_DOM_HELPERS}
+      var wanted = normalizeText(${JSON.stringify(String(text || ''))});
+      var exactOnly = ${exact ? 'true' : 'false'};
+      if (!wanted) throw new Error('clickText requires non-empty text');
+      var selectors = 'button, a[href], input[type="button"], input[type="submit"], input[type="reset"], summary, [role="button"], [role="link"], [aria-label]';
+      var ranked = walkDocuments(4).filter(function(entry) { return entry.accessible; }).flatMap(function(entry) {
+        return Array.from(entry.doc.querySelectorAll(selectors))
+        .filter(isVisible)
+        .map(function(el) {
+          var best = { score: 0, text: '' };
+          candidateTexts(el).forEach(function(candidate) {
+            var normalized = normalizeText(candidate);
+            var score = scoreText(wanted, normalized, exactOnly);
+            if (score > best.score) best = { score: score, text: candidate };
+          });
+          if (best.score > 0) {
+            if (el.matches('button, input[type="submit"], input[type="button"]')) best.score += 25;
+            if (el.matches('[role="button"]')) best.score += 10;
+            if (el.matches('a[href]')) best.score += 5;
+          }
+          return { el: el, framePath: entry.framePath, score: best.score, text: best.text };
+        });
+      })
+        .filter(function(item) { return item.score > 0; })
+        .sort(function(a, b) { return b.score - a.score; });
+      if (!ranked.length) {
+        var sample = walkDocuments(4).filter(function(entry) { return entry.accessible; }).flatMap(function(entry) {
+          return Array.from(entry.doc.querySelectorAll(selectors))
+            .filter(isVisible)
+            .slice(0, 12)
+            .map(function(el) { return candidateTexts(el)[0] || selectorHint(el) || el.tagName.toLowerCase(); });
+        })
+          .filter(Boolean);
+        throw new Error('No clickable element matched text "' + ${JSON.stringify(String(text || ''))} + '". Visible candidates: ' + sample.join(' | '));
+      }
+      var chosen = ranked[0];
+      var result = clickElement(chosen.el, chosen.framePath);
+      result.matchedText = chosen.text || result.clickedText || '';
+      result.score = chosen.score;
+      return result;
+    })();`;
+    const result = await _exec(wc, js);
+    await Promise.race([_waitForLoad(wc, 5000), new Promise(r => setTimeout(r, 250))]);
+    return { url: wc.getURL(), ...(result || {}) };
+  },
+
+  async clickHandle(handle) {
+    const wc = await _ensureBrowserTab();
+    const js = `(function(){
+      ${BROWSER_DOM_HELPERS}
+      var el = getElementByHandle(${JSON.stringify(handle || '')});
+      if (!el) throw new Error('No element found for handle');
+      var parsed = parseHandle(${JSON.stringify(handle || '')}) || {};
+      return clickElement(el, parsed.framePath || []);
+    })();`;
+    const result = await _exec(wc, js);
+    await Promise.race([_waitForLoad(wc, 5000), new Promise(r => setTimeout(r, 250))]);
+    return { url: wc.getURL(), ...(result || {}) };
   },
 
   async type(selector, text) {
@@ -179,23 +694,184 @@ const internalWebviewDriver = {
     return await _exec(wc, js);
   },
 
+  async getPageSource() {
+    const wc = await _ensureBrowserTab();
+    const js = `(function(){
+      return {
+        url: location.href,
+        title: document.title,
+        html: document.documentElement ? document.documentElement.outerHTML : ''
+      };
+    })();`;
+    return await _exec(wc, js);
+  },
+
+  async inspectDom({ limit = 120 } = {}) {
+    const wc = await _ensureBrowserTab();
+    const js = `(function(){
+      ${BROWSER_DOM_HELPERS}
+      var maxItems = Math.max(10, Math.min(Number(${Number(limit) || 120}) || 120, 400));
+      var fieldSelector = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), textarea, select';
+      var docs = walkDocuments(4);
+      var frames = [];
+      var fields = [];
+      var forms = [];
+      var interactives = [];
+      docs.forEach(function(entry) {
+        if (!entry.accessible) {
+          frames.push({ framePath: entry.framePath, frameName: entry.frameName || null, frameSrc: entry.frameSrc || null, accessible: false });
+          return;
+        }
+        var meta = getFrameMeta(entry.doc, entry.framePath);
+        frames.push({ framePath: meta.framePath, frameName: meta.frameName, frameSrc: meta.frameSrc, accessible: true });
+        fields = fields.concat(Array.from(entry.doc.querySelectorAll(fieldSelector)).slice(0, maxItems).map(function(el) { return describeField(el, entry.framePath); }));
+        forms = forms.concat(Array.from(entry.doc.forms || []).slice(0, 20).map(function(form) { return describeForm(form, entry.framePath); }));
+        interactives = interactives.concat(Array.from(entry.doc.querySelectorAll('button, a[href], input, textarea, select, summary, [role="button"], [role="link"]'))
+          .filter(isVisible)
+          .slice(0, maxItems)
+          .map(function(el) { return describeInteractive(el, entry.framePath); }));
+      });
+      return {
+        url: location.href,
+        title: document.title,
+        frames: frames,
+        forms: forms.slice(0, maxItems),
+        fields: fields.slice(0, maxItems),
+        interactives: interactives.slice(0, maxItems)
+      };
+    })();`;
+    return await _exec(wc, js);
+  },
+
+  async getForms({ limit = 50 } = {}) {
+    const wc = await _ensureBrowserTab();
+    const js = `(function(){
+      ${BROWSER_DOM_HELPERS}
+      var maxItems = Math.max(1, Math.min(Number(${Number(limit) || 50}) || 50, 100));
+      var docs = walkDocuments(4);
+      var forms = [];
+      docs.forEach(function(entry) {
+        if (!entry.accessible) return;
+        forms = forms.concat(Array.from(entry.doc.forms || []).slice(0, maxItems).map(function(form) { return describeForm(form, entry.framePath); }));
+      });
+      return { url: location.href, title: document.title, forms: forms.slice(0, maxItems) };
+    })();`;
+    return await _exec(wc, js);
+  },
+
   async queryAll(selector) {
     const wc = await _ensureBrowserTab();
     const js = `(function(){
-      return Array.from(document.querySelectorAll(${JSON.stringify(selector)})).slice(0, 50).map(function(el){
-        return {
-          tag: el.tagName.toLowerCase(),
-          text: (el.innerText || '').substring(0, 100),
-          type: el.type || null,
-          name: el.name || null,
-          id: el.id || null,
-          href: el.href || null,
-          placeholder: el.placeholder || null,
-        };
+      ${BROWSER_DOM_HELPERS}
+      var sel = ${JSON.stringify(selector)};
+      var out = [];
+      walkDocuments(4).forEach(function(entry) {
+        if (!entry.accessible) return;
+        var list; try { list = entry.doc.querySelectorAll(sel); } catch(e) { throw new Error('Invalid CSS selector: ' + sel); }
+        Array.from(list).slice(0, 50).forEach(function(el){
+          var desc = describeInteractive(el, entry.framePath);
+          desc.placeholder = el.placeholder || null;
+          out.push(desc);
+        });
       });
+      return out.slice(0, 50);
     })();`;
     const elements = await _exec(wc, js);
     return { elements };
+  },
+
+  async fillByLabel(label, value, { exact = false } = {}) {
+    const wc = await _ensureBrowserTab();
+    const js = `(function(){
+      ${BROWSER_DOM_HELPERS}
+      var wanted = normalizeText(${JSON.stringify(String(label || ''))});
+      var nextValue = ${JSON.stringify(String(value == null ? '' : value))};
+      var exactOnly = ${exact ? 'true' : 'false'};
+      if (!wanted) throw new Error('fillByLabel requires a non-empty label');
+      var selector = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), textarea, select';
+      var ranked = walkDocuments(4).filter(function(entry) { return entry.accessible; }).flatMap(function(entry) {
+        return Array.from(entry.doc.querySelectorAll(selector))
+        .filter(function(el) { return !el.disabled; })
+        .map(function(el) {
+          var best = { score: 0, text: '' };
+          candidateTexts(el).forEach(function(candidate) {
+            var normalized = normalizeText(candidate);
+            var score = scoreText(wanted, normalized, exactOnly);
+            if (score > best.score) best = { score: score, text: candidate };
+          });
+          if (best.score > 0 && isVisible(el)) best.score += 15;
+          return { el: el, framePath: entry.framePath, score: best.score, text: best.text };
+        });
+      })
+        .filter(function(item) { return item.score > 0; })
+        .sort(function(a, b) { return b.score - a.score; });
+      if (!ranked.length) {
+        var sample = walkDocuments(4).filter(function(entry) { return entry.accessible; }).flatMap(function(entry) {
+          return Array.from(entry.doc.querySelectorAll(selector))
+            .slice(0, 15)
+            .map(function(el) { return candidateTexts(el)[0] || selectorHint(el) || el.tagName.toLowerCase(); });
+        })
+          .filter(Boolean);
+        throw new Error('No form field matched label "' + ${JSON.stringify(String(label || ''))} + '". Available fields: ' + sample.join(' | '));
+      }
+      var chosen = ranked[0];
+      var result = assignElementValue(chosen.el, nextValue, chosen.framePath);
+      result.matchedLabel = chosen.text || result.filledLabel || '';
+      result.score = chosen.score;
+      return result;
+    })();`;
+    return await _exec(wc, js);
+  },
+
+  async fillHandle(handle, value) {
+    const wc = await _ensureBrowserTab();
+    const js = `(function(){
+      ${BROWSER_DOM_HELPERS}
+      var el = getElementByHandle(${JSON.stringify(handle || '')});
+      if (!el) throw new Error('No field found for handle');
+      var parsed = parseHandle(${JSON.stringify(handle || '')}) || {};
+      return assignElementValue(el, ${JSON.stringify(String(value == null ? '' : value))}, parsed.framePath || []);
+    })();`;
+    return await _exec(wc, js);
+  },
+
+  async getNetworkLog({ limit = 50 } = {}) {
+    const wc = await _ensureBrowserTab();
+    const state = await _ensureDebugger(wc).catch(() => _getDebugState(wc));
+    const maxItems = Math.max(1, Math.min(Number(limit) || 50, MAX_BROWSER_NETWORK_EVENTS));
+    return { events: state.events.slice(-maxItems) };
+  },
+
+  async getNetworkBody(requestId) {
+    const wc = await _ensureBrowserTab();
+    if (!requestId) throw new Error('requestId is required');
+    const state = await _ensureDebugger(wc).catch(() => _getDebugState(wc));
+    if (state.responseBodies.has(requestId)) return state.responseBodies.get(requestId);
+    try {
+      const body = await wc.debugger.sendCommand('Network.getResponseBody', { requestId });
+      const meta = state.requests.get(requestId) || {};
+      const text = body && body.body ? String(body.body) : '';
+      const result = {
+        requestId,
+        url: meta.url || null,
+        status: meta.status || null,
+        mimeType: meta.mimeType || null,
+        base64Encoded: !!(body && body.base64Encoded),
+        body: text.slice(0, 20000),
+        truncated: text.length > 20000,
+      };
+      state.responseBodies.set(requestId, result);
+      return result;
+    } catch (err) {
+      throw new Error('No captured body for requestId: ' + requestId + ' (' + (err.message || err) + ')');
+    }
+  },
+
+  async getConsoleLog({ limit = 50 } = {}) {
+    const wc = await _ensureBrowserTab();
+    const state = await _ensureDebugger(wc).catch(() => _getDebugState(wc));
+    const maxItems = Math.max(1, Math.min(Number(limit) || 50, MAX_BROWSER_NETWORK_EVENTS));
+    return { events: state.consoleEvents.slice(-maxItems) };
   },
 
   async getCookies() {
@@ -329,11 +1005,15 @@ if (!gotLock) {
   });
 
   // Track any <webview> webContents so the browser-agent driver can find them.
+  // Browser appearance is handled by the Browser tab itself; do not inject a
+  // global light/dark override here or remote sites will render incorrectly.
   app.on('web-contents-created', (_event, contents) => {
     try {
       if (!contents || typeof contents.getType !== 'function') return;
       if (contents.getType() === 'webview') {
         _webviewContents = contents;
+        _preferLightColorScheme(contents);
+        contents.on('did-start-navigation', () => { _preferLightColorScheme(contents); });
         contents.on('destroyed', () => { if (_webviewContents === contents) _webviewContents = null; });
       }
     } catch (_) {}
