@@ -2553,6 +2553,8 @@ function writePluginHints() {
 
 // ── Mount orchestrator ───────────────────────────────────────────────────────
 const orchestrator = mountOrchestrator(addRoute, json, { terminals, broadcast, repoRoot, createTerminal, getConfig, getLearnings: () => _learningsInstance });
+const { mountJobs } = require('./jobs-scheduler');
+mountJobs(addRoute, json, { repoRoot, orchestrator, broadcast });
 console.log('  Orchestrator bus mounted (/api/orchestrator/*)');
 
 // ── Mount learnings ─────────────────────────────────────────────────────────

@@ -690,6 +690,18 @@
     .orch-cta-title { font-size: 12px; font-weight: 600; color: var(--text); }
     .orch-cta-sub { font-size: 11px; color: var(--subtext0); }
 
+    /* ── Scheduled jobs modal rows ────────────────────────────────────── */
+    .job-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px; border-bottom: 1px solid var(--surface1);
+    }
+    .job-row:last-child { border-bottom: none; }
+    .job-main { flex: 1; min-width: 0; }
+    .job-name { font-size: 13px; font-weight: 600; color: var(--text); }
+    .job-meta { font-size: 11px; color: var(--subtext0); margin-top: 2px; font-family: var(--font-mono); }
+    .job-flag { font-size: 10px; color: var(--yellow); text-transform: uppercase; margin-left: 6px; letter-spacing: 0.5px; }
+    .job-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
     /* ── Onboarding panel ─────────────────────────────────────────────── */
     .onboarding-panel {
       position: fixed; z-index: 4000;
@@ -4079,6 +4091,163 @@ requestAnimationFrame(fitTerminalNow);
       reconnectTimer = setTimeout(connect, 2500);
     };
   }
+
+// ── Scheduled / recurring AI jobs ───────────────────────────────────────
+// Thin UI over /api/jobs. A job is a saved prompt + CLI + schedule that the
+// server fires automatically. Shape exactly mirrors jobs-scheduler.js.
+
+async function _fetchJobs() {
+  try {
+    const res = await fetch('/api/jobs');
+    if (!res.ok) return [];
+    return await res.json();
+  } catch (_) { return []; }
+}
+
+function _fmtWhen(ms) {
+  if (!ms) return 'never';
+  const d = new Date(ms);
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  return sameDay
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+async function openJobsModal() {
+  let overlay = document.getElementById('jobsOverlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
+  overlay.id = 'jobsOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3200;display:flex;align-items:center;justify-content:center;font-family:var(--font-ui);';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  const jobs = await _fetchJobs();
+  const rows = jobs.length ? jobs.map(j => {
+    const cliLabel = (CLI_CONFIG[j.cli] && CLI_CONFIG[j.cli].label) || j.cli;
+    return '<div class="job-row">' +
+      '<div class="job-main">' +
+        '<div class="job-name">' + esc(j.name) + (j.enabled ? '' : ' <span class="job-flag">paused</span>') + '</div>' +
+        '<div class="job-meta">' + esc(cliLabel) + ' - ' + esc(j.schedule) + ' - next ' + _fmtWhen(j.nextRun) + '</div>' +
+      '</div>' +
+      '<div class="job-actions">' +
+        '<button class="orch-task-btn" onclick="runJobNow(\'' + j.id + '\')">Run</button>' +
+        '<button class="orch-task-btn" onclick="openJobEditor(\'' + j.id + '\')">Edit</button>' +
+        '<button class="orch-task-btn cancel" onclick="deleteJob(\'' + j.id + '\')">Delete</button>' +
+      '</div>' +
+    '</div>';
+  }).join('') : '<div style="padding:26px 12px;text-align:center;color:var(--subtext0);font-size:12px;">No scheduled jobs yet. Create one to run an AI prompt on a recurring schedule.</div>';
+  overlay.innerHTML =
+    '<div style="background:var(--surface0);border:1px solid var(--surface2);border-radius:10px;width:640px;max-width:92vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,0.5);">' +
+      '<div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--surface2);">' +
+        '<i data-lucide="calendar-clock" style="width:18px;height:18px;color:var(--accent);"></i>' +
+        '<strong style="font-size:14px;">Scheduled Jobs</strong>' +
+        '<div style="flex:1;"></div>' +
+        '<button onclick="openJobEditor()" class="tab-bar-btn" style="padding:4px 12px;">+ New</button>' +
+        '<button onclick="document.getElementById(\'jobsOverlay\').remove()" style="background:transparent;border:none;color:var(--subtext0);cursor:pointer;"><i data-lucide="x" style="width:14px;height:14px;"></i></button>' +
+      '</div>' +
+      '<div style="overflow-y:auto;padding:8px 10px;">' + rows + '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  try { lucide.createIcons({ nodes: [overlay] }); } catch (_) {}
+}
+
+async function openJobEditor(id) {
+  const jobs = await _fetchJobs();
+  const existing = id ? jobs.find(j => j.id === id) : null;
+  let overlay = document.getElementById('jobEditorOverlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
+  overlay.id = 'jobEditorOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3300;display:flex;align-items:center;justify-content:center;font-family:var(--font-ui);';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  const cliOpts = Object.keys(CLI_CONFIG).map(k =>
+    '<option value="' + k + '"' + ((existing ? existing.cli : 'claude') === k ? ' selected' : '') + '>' + esc(CLI_CONFIG[k].label) + '</option>'
+  ).join('');
+  overlay.innerHTML =
+    '<div style="background:var(--surface0);border:1px solid var(--surface2);border-radius:10px;width:520px;max-width:92vw;box-shadow:0 12px 40px rgba(0,0,0,0.5);padding:16px 20px;">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">' +
+        '<i data-lucide="' + (existing ? 'pencil' : 'plus') + '" style="width:17px;height:17px;color:var(--accent);"></i>' +
+        '<strong style="font-size:14px;">' + (existing ? 'Edit job' : 'New scheduled job') + '</strong>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr;gap:10px;">' +
+        '<label style="font-size:11px;color:var(--subtext0);">Name<input id="jobName" type="text" value="' + esc(existing ? existing.name : '') + '" placeholder="Morning digest" style="width:100%;margin-top:4px;padding:7px 10px;background:var(--crust);border:1px solid var(--surface2);border-radius:6px;color:var(--text);font:13px var(--font-ui);outline:none;"></label>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
+          '<label style="font-size:11px;color:var(--subtext0);">Runner<select id="jobCli" style="width:100%;margin-top:4px;padding:7px 10px;background:var(--crust);border:1px solid var(--surface2);border-radius:6px;color:var(--text);font:13px var(--font-ui);outline:none;">' + cliOpts + '</select></label>' +
+          '<label style="font-size:11px;color:var(--subtext0);">Schedule<input id="jobSchedule" type="text" value="' + esc(existing ? existing.schedule : 'daily 09:00') + '" placeholder="daily 09:00" style="width:100%;margin-top:4px;padding:7px 10px;background:var(--crust);border:1px solid var(--surface2);border-radius:6px;color:var(--text);font:13px var(--font-mono);outline:none;"></label>' +
+        '</div>' +
+        '<div style="font-size:10px;color:var(--overlay1);line-height:1.5;">Formats: <code>daily HH:MM</code>, <code>hourly :MM</code>, <code>weekly DOW HH:MM</code> (DOW 0=Sun), <code>every Nm</code>, <code>every Nh</code></div>' +
+        '<label style="font-size:11px;color:var(--subtext0);">Prompt<textarea id="jobPrompt" placeholder="Summarize my notes from the past 7 days and list any open action items." style="width:100%;margin-top:4px;padding:10px;background:var(--crust);border:1px solid var(--surface2);border-radius:6px;color:var(--text);font:13px var(--font-ui);outline:none;min-height:120px;resize:vertical;">' + esc(existing ? existing.prompt : '') + '</textarea></label>' +
+        '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--subtext1);"><input id="jobEnabled" type="checkbox"' + (existing && existing.enabled === false ? '' : ' checked') + '> Enabled</label>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
+        '<button onclick="document.getElementById(\'jobEditorOverlay\').remove()" class="tab-bar-btn">Cancel</button>' +
+        '<button onclick="saveJobFromEditor(' + (existing ? '\'' + existing.id + '\'' : 'null') + ')" class="tab-bar-btn" style="background:var(--accent);color:var(--crust);border-color:var(--accent);">Save</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  try { lucide.createIcons({ nodes: [overlay] }); } catch (_) {}
+  setTimeout(() => { document.getElementById('jobName')?.focus(); }, 60);
+}
+
+async function saveJobFromEditor(id) {
+  const body = {
+    id: id || undefined,
+    name:     (document.getElementById('jobName')?.value || '').trim(),
+    cli:      document.getElementById('jobCli')?.value || 'claude',
+    schedule: (document.getElementById('jobSchedule')?.value || '').trim(),
+    prompt:   (document.getElementById('jobPrompt')?.value || '').trim(),
+    enabled:  !!document.getElementById('jobEnabled')?.checked,
+  };
+  if (!body.name) { toast('Name is required', 'warning'); return; }
+  if (!body.prompt) { toast('Prompt is required', 'warning'); return; }
+  try {
+    const res = await fetch('/api/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || ('HTTP ' + res.status));
+    }
+    document.getElementById('jobEditorOverlay')?.remove();
+    toast(id ? 'Job updated' : 'Job scheduled', 'success');
+    if (document.getElementById('jobsOverlay')) openJobsModal();
+  } catch (e) {
+    toast('Save failed: ' + e.message, 'error');
+  }
+}
+
+async function runJobNow(id) {
+  try {
+    const res = await fetch('/api/jobs/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    toast('Job dispatched', 'success', {
+      action: { label: 'View', onClick: () => { document.getElementById('jobsOverlay')?.remove(); switchTab('orchestrator'); } },
+    });
+    try { orchRefreshTasks(); } catch (_) {}
+  } catch (e) {
+    toast('Run failed: ' + e.message, 'error');
+  }
+}
+
+async function deleteJob(id) {
+  const ok = await (typeof confirmDialog === 'function' ? confirmDialog('Delete this scheduled job?', { confirmText: 'Delete', danger: true }) : Promise.resolve(confirm('Delete this scheduled job?')));
+  if (!ok) return;
+  try {
+    await fetch('/api/jobs', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    toast('Job deleted', 'info');
+    if (document.getElementById('jobsOverlay')) openJobsModal();
+  } catch (e) {
+    toast('Delete failed: ' + e.message, 'error');
+  }
+}
 
 // ── Onboarding checklist ────────────────────────────────────────────────
 // Small dismissible chip in the header showing "N of M complete". Clicking
@@ -12006,6 +12175,9 @@ function getCmdActions() {
     { label: 'Resume Session', icon: 'rotate-ccw', action: () => { resumeAiSession(); switchTab('terminal'); }, category: 'AI' },
     // Settings
     { label: 'Open Settings', icon: 'settings', action: () => openSettings(), category: 'Settings' },
+    // Scheduled jobs (recurring prompts to any CLI)
+    { label: 'Scheduled Jobs', icon: 'calendar-clock', action: () => openJobsModal(), category: 'AI', hint: 'Run AI prompts on a schedule' },
+    { label: 'Create Scheduled Job', icon: 'plus', action: () => openJobEditor(), category: 'AI' },
   ];
   // Plugin-contributed quick actions + AI actions. No plugin names hardcoded.
   // The palette reads from each loaded plugin's leftQuickActions and aiActions
