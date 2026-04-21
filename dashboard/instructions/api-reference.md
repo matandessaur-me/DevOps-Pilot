@@ -130,9 +130,12 @@ curl -s -X POST http://127.0.0.1:3800/api/ui/view-note -H "Content-Type: applica
 | POST | `/api/learnings/sync` | Pull shared learnings + push unsynced ones |
 
 ### Browser Automation Endpoints
+
+**To open a URL: POST `/api/browser/launch` (body `{ session? }`), then POST `/api/browser/navigate` (body `{ url }`). There is no `/api/browser/open` — do not invent routes. Consult this table before calling any `/api/browser/*` endpoint.**
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/browser/launch` | Launch browser. Body: `{ headless, session }` |
+| POST | `/api/browser/launch` | Launch browser. Body: `{ headless, session }`. Does NOT accept `url` — call `navigate` next. |
 | POST | `/api/browser/navigate` | Go to URL. Body: `{ url }` |
 | POST | `/api/browser/fill` | Fill form field. Body: `{ selector, value }` |
 | POST | `/api/browser/click` | Click element. Body: `{ selector }` |
