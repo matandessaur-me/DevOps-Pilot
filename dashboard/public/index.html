@@ -17419,6 +17419,12 @@ async function loadGitStatusForDiffTab(repoName) {
     if (!git.error && git.branch) {
       const el = document.getElementById('repoSidebarBranch');
       if (el) el.textContent = git.branch;
+      // Keep the header branch chip in sync when the branch changes outside the UI
+      // (e.g. a terminal checkout). Only touch the chip for the active repo.
+      if (repoName === activeRepo) {
+        const chipLabel = document.getElementById('branchChipLabel');
+        if (chipLabel && chipLabel.textContent !== git.branch) _setBranchChip(git.branch);
+      }
     }
     if (!git.error && git.files && git.files.length > 0) {
       document.getElementById('diffviewTabBtn').style.display = '';
