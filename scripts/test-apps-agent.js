@@ -68,11 +68,12 @@ async function closeNotepad(hwnd) {
   await driver.focusWindow(np.hwnd);
 
   const sessionId = 'test-' + Date.now().toString(36);
+  const marker = 'symphonee-test-' + Math.random().toString(36).slice(2, 8);
   const session = chat.getSession(sessionId);
   session.hwnd = np.hwnd;
   session.title = np.title;
   session.app = 'notepad';
-  session.goal = 'Type a short haiku about Tuesday inside the Notepad window and stop.';
+  session.goal = `Type the exact string "${marker}" on a fresh line inside Notepad. First press Ctrl+End to go to the document end so you do not overwrite existing text, then Enter for a new line, then type the marker.`;
 
   const events = [];
   const broadcast = (msg) => {
@@ -92,8 +93,7 @@ async function closeNotepad(hwnd) {
     `Goal: ${session.goal}`,
     '',
     `Target window: "${session.title}" (hwnd=${np.hwnd})`,
-    'The window is already focused. Start with a screenshot and work toward the goal.',
-    'This is a Notepad window. Just type the haiku directly with type_text; no clicking needed.',
+    'The window is already focused. Start with a screenshot, then do what the goal says.',
   ].join('\n');
 
   const t0 = Date.now();
@@ -116,7 +116,7 @@ async function closeNotepad(hwnd) {
   await closeNotepad(np.hwnd);
 
   const actionCount = events.filter(e => e.kind === 'action').length;
-  const typed = events.some(e => e.kind === 'action' && /type|key/.test(e.tool || ''));
+  const typed = events.some(e => e.kind === 'action' && e.tool === 'type_text' && String((e.args && e.args.text) || '').includes(marker));
   const finished = events.some(e => e.kind === 'done' || (e.kind === 'action' && e.tool === 'finish'));
 
   console.log('');

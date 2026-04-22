@@ -2926,7 +2926,7 @@ try {
 // ── Mount apps agent (desktop control) ──────────────────────────────────────
 try {
   const { mountAppsRoutes } = require('./apps-agent');
-  mountAppsRoutes(addRoute, json, { getConfig, broadcast });
+  mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate });
   console.log('  Apps agent mounted (/api/apps/*)');
 } catch (e) {
   console.log('  Apps agent skipped:', e.message);

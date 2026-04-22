@@ -514,7 +514,11 @@ async function executeTool(driver, session, name, args) {
   switch (name) {
     case 'screenshot':
       if (hwnd == null) throw new Error('no target window focused');
-      return await driver.screenshotWindow(hwnd, { format: 'jpeg', quality: 60 });
+      {
+        const shot = await driver.screenshotWindow(hwnd, { format: 'jpeg', quality: 60 });
+        if (shot && shot.rect) session.lastShotRect = shot.rect;
+        return shot;
+      }
     case 'list_windows':
       return await driver.listWindows({ force: true });
     case 'focus_window': {
@@ -525,6 +529,12 @@ async function executeTool(driver, session, name, args) {
     }
     case 'click': {
       if (hwnd == null) throw new Error('no target window focused');
+      // If the window has moved more than a tolerance since the last
+      // screenshot, refuse the click so the agent takes a fresh screenshot
+      // instead of clicking where the window USED to be.
+      if (session.lastShotRect) {
+        await driver.verifyStableRect(hwnd, session.lastShotRect);
+      }
       return await driver.click(args.x, args.y, { hwnd, button: args.button, double: !!args.double });
     }
     case 'mouse_move':

@@ -21,7 +21,7 @@ function readBody(req) {
   });
 }
 
-function mountAppsRoutes(addRoute, json, { getConfig, broadcast } = {}) {
+function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}) {
   const isIncognito = () => (getConfig && getConfig().IncognitoMode === true);
   const buildRegistry = () => {
     const aiKeys = Object.assign({}, (getConfig && getConfig().AiApiKeys) || {});
@@ -50,6 +50,14 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast } = {}) {
     const hwnd = Number(body.hwnd);
     if (!Number.isFinite(hwnd) || hwnd <= 0) return json(res, { error: 'hwnd required (see /api/apps/windows)' }, 400);
 
+    // Gate: starting a session gives the AI pixel-level control of another
+    // app. Ask in edit/trusted modes, deny in review. `bypass` auto-allows.
+    if (typeof permGate === 'function') {
+      const label = 'Control "' + (body.app || 'a window') + '": ' + goal.slice(0, 80);
+      const ok = await permGate(res, 'api', 'POST /api/apps/session/start', label);
+      if (!ok) return;
+    }
+
     const sessionId = body.sessionId || ('apps-' + Date.now().toString(36));
     const session = chat.getSession(sessionId);
     if (session.running) return json(res, { error: 'Session already running. Stop it first.' }, 409);
@@ -63,6 +71,8 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast } = {}) {
       session.stopped = false;
       driver.resetStopped();
     } catch (e) {
+      const code = e && e.code;
+      if (code === 'deny_listed') return json(res, { error: e.message, code }, 403);
       return json(res, { error: 'Failed to focus target window: ' + e.message }, 400);
     }
 
