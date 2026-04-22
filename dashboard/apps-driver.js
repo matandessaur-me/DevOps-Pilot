@@ -61,6 +61,20 @@ public static extern bool GetWindowRect(System.IntPtr h, out RECT r);
 public static extern System.IntPtr GetForegroundWindow();
 [System.Runtime.InteropServices.DllImport("user32.dll")]
 public static extern bool SetWindowPos(System.IntPtr h, System.IntPtr hInsertAfter, int x, int y, int cx, int cy, uint flags);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern uint GetWindowThreadProcessId(System.IntPtr hWnd, out uint lpdwProcessId);
+[System.Runtime.InteropServices.DllImport("kernel32.dll")]
+public static extern uint GetCurrentThreadId();
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool BringWindowToTop(System.IntPtr hWnd);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern System.IntPtr SetFocus(System.IntPtr hWnd);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern System.IntPtr GetFocus();
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, System.UIntPtr dwExtraInfo);
 [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
 public static extern int DwmGetWindowAttribute(System.IntPtr h, int attr, out int pvAttribute, int cb);
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
@@ -185,27 +199,80 @@ $h = [System.IntPtr]${w.hwnd}
 }
 
 // Ensure a target window is still the foreground one. If it lost focus
-// (because a click landed outside, a notification stole it, etc.) the agent
+// (click landed outside, notification stole it, user alt-tabbed) the agent
 // would otherwise send keys and mouse events to whatever is on top --
-// which is how the stuck-loop behavior happens. Called before every action.
+// which is how Figma-style "nothing happens" loops occur.
+//
+// Windows actively blocks background processes from calling SetForegroundWindow
+// directly (the "focus stealing prevention" rule). The reliable workaround:
+// attach to the current foreground thread's input queue first, call
+// SetForegroundWindow / BringWindowToTop / SetFocus while attached, then
+// detach. We also simulate an ALT keystroke since that briefly lifts the
+// focus-lock on some Windows versions. After all that we VERIFY with
+// GetForegroundWindow and throw a typed error if the window still isn't in
+// front, so input tools abort instead of mis-routing clicks into another app.
 async function ensureForeground(hwnd) {
   const script = `
 ${WIN32_TYPES}
-$h = [System.IntPtr]${hwnd}
+$target = [System.IntPtr]${hwnd}
 $fg = [Sy.SyWin32]::GetForegroundWindow()
-if ($fg -ne $h) {
-  [void][Sy.SyWin32]::ShowWindow($h, 9)
-  [void][Sy.SyWin32]::SetForegroundWindow($h)
-  [void][Sy.SyWin32]::SetWindowPos($h, [System.IntPtr]::new(-1), 0, 0, 0, 0, 0x13)
-  Write-Output 'refocused'
-} else {
-  Write-Output 'ok'
+if ($fg -eq $target) { Write-Output 'ok'; exit 0 }
+
+# Restore if minimized so SetForegroundWindow has something to raise.
+[void][Sy.SyWin32]::ShowWindow($target, 9)
+
+$pid = 0
+$fgThread = [Sy.SyWin32]::GetWindowThreadProcessId($fg, [ref]$pid)
+$myThread = [Sy.SyWin32]::GetCurrentThreadId()
+$targetThread = [Sy.SyWin32]::GetWindowThreadProcessId($target, [ref]$pid)
+
+# Quick nudge: ALT keypress briefly relaxes focus-stealing prevention.
+[Sy.SyWin32]::keybd_event(0x12, 0, 0, [System.UIntPtr]::Zero)   # ALT down
+[Sy.SyWin32]::keybd_event(0x12, 0, 2, [System.UIntPtr]::Zero)   # ALT up
+
+# Attach our thread to both the foreground thread and the target thread so
+# SetForegroundWindow / BringWindowToTop / SetFocus are honored cross-process.
+$attachedFg = $false; $attachedTgt = $false
+if ($fgThread -ne 0 -and $fgThread -ne $myThread) {
+  $attachedFg = [Sy.SyWin32]::AttachThreadInput($myThread, $fgThread, $true)
 }
+if ($targetThread -ne 0 -and $targetThread -ne $myThread -and $targetThread -ne $fgThread) {
+  $attachedTgt = [Sy.SyWin32]::AttachThreadInput($myThread, $targetThread, $true)
+}
+try {
+  [void][Sy.SyWin32]::BringWindowToTop($target)
+  [void][Sy.SyWin32]::SetForegroundWindow($target)
+  [void][Sy.SyWin32]::SetFocus($target)
+  # Re-assert topmost so an unrelated popup can't steal it back mid-action.
+  [void][Sy.SyWin32]::SetWindowPos($target, [System.IntPtr]::new(-1), 0, 0, 0, 0, 0x13)
+} finally {
+  if ($attachedFg)  { [void][Sy.SyWin32]::AttachThreadInput($myThread, $fgThread, $false) }
+  if ($attachedTgt) { [void][Sy.SyWin32]::AttachThreadInput($myThread, $targetThread, $false) }
+}
+
+# Verify. Give Windows a beat to finish the WM_ACTIVATE dance.
+Start-Sleep -Milliseconds 120
+$fg2 = [Sy.SyWin32]::GetForegroundWindow()
+if ($fg2 -eq $target) { Write-Output 'refocused' }
+else { Write-Output "failed:$([int64]$fg2)" }
 `;
+  let out;
   try {
-    const out = (await runPs(script, { timeoutMs: 4000 })).trim();
+    out = (await runPs(script, { timeoutMs: 6000 })).trim();
+  } catch (e) {
+    const err = new Error(`foreground enforcement failed: ${e.message}`);
+    err.code = 'focus_failed';
+    throw err;
+  }
+  if (out === 'ok' || out === 'refocused') {
     if (out === 'refocused') await new Promise(r => setTimeout(r, 80));
-  } catch (_) { /* best effort */ }
+    return;
+  }
+  if (out.startsWith('failed:')) {
+    const err = new Error(`target window is not in the foreground; another window (hwnd=${out.slice(7)}) refused to release focus. Click the target window once yourself, then retry the task.`);
+    err.code = 'focus_stolen';
+    throw err;
+  }
 }
 
 // Drop the topmost pin when a session ends so the window behaves normally

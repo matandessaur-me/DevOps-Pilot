@@ -149,6 +149,7 @@ const BASE_SYSTEM_PROMPT = `You drive a Windows desktop application on the user'
 3. After any action that could change the screen (click, type_text, key, scroll, drag), call screenshot again before deciding the next step. Do not issue multiple clicks without screenshotting between them.
 4. Use key for named keys (Enter, Tab, Escape, Ctrl+S, Alt+F4). Use type_text only for literal characters. Passing "\\n" to type_text will NOT press Enter; use key("Enter").
 5. If the window closes, minimizes, or moves, the driver will tell you in the error. Re-list windows and refocus before continuing.
+   If you see a "focus_stolen" error on an input tool, it means another window was on top when you tried to click/type. Call focus_window again with the target hwnd before retrying. If it keeps happening, ask_user to bring the app to the front themselves.
 6. Scrolling: use ONE axis per call. If you need to reveal content BELOW, use scroll({ dy: 5 }). If you need content to the RIGHT, use scroll({ dx: 5 }). Never set dx and dy in the same call. If vertical scrolling doesn't change the page but a horizontal scrollbar is visible, you need dx, not dy.
 
 ## Being honest about limits
@@ -685,7 +686,17 @@ async function executeTool(driver, session, name, args) {
   args = args || {};
   const hwnd = session.hwnd;
   if (INPUT_TOOLS.has(name) && hwnd != null && typeof driver.ensureForeground === 'function') {
-    await driver.ensureForeground(hwnd);
+    try {
+      await driver.ensureForeground(hwnd);
+    } catch (e) {
+      // Refusing to send input into the wrong window is critical: the agent
+      // would otherwise report "nothing changed" and loop forever. Surface
+      // the focus-stolen code so the model can react (retry via focus_window
+      // tool, call ask_user, or declare_stuck cleanly).
+      const err = new Error(e.message || 'focus enforcement failed');
+      err.code = e.code || 'focus_failed';
+      throw err;
+    }
     session._pendingChange = true;
   }
   switch (name) {
