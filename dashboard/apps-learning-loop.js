@@ -209,68 +209,121 @@ async function runObserver({ session, providerEntry, model, lastActions }) {
 // ---- Research sub-task ------------------------------------------------------
 
 async function runResearch({ session, providerEntry, model, goal, reason, lastScreenshots }) {
-  const adapter = providerEntry.adapter;
-  if (adapter.kind !== 'anthropic') {
-    // Other providers: no web search yet; hand back a pep-talk so the
-    // main loop still has something to consume.
+  // Always prefer a provider with a real web-search tool. Priority:
+  // 1. An Anthropic entry in the session registry (Anthropic web_search).
+  // 2. A Gemini entry (google_search tool).
+  // 3. An OpenAI entry (web_search_preview tool).
+  // Fall back to the caller-supplied providerEntry only if none are present.
+  const registry = session && session._providerRegistry;
+  const chosen = pickResearchProvider(registry, providerEntry);
+  const adapter = chosen.entry.adapter;
+  const query = `How to "${goal}" in ${session.app || 'the target Windows application'}: the agent is stuck because "${reason}". Focus on keyboard shortcuts and menu paths that would move it past this point.`;
+  const prompt = `Research question: ${query}\n\nReturn a <= 350-word markdown summary of what you find. Do NOT write long intros; bullet points with concrete steps/shortcuts only.`;
+  try {
+    if (chosen.kind === 'anthropic') return await researchAnthropic(chosen.entry, chosen.model || model || adapter.defaultModel, prompt);
+    if (chosen.kind === 'gemini')    return await researchGemini(chosen.entry, chosen.model || model || adapter.defaultModel, prompt);
+    if (chosen.kind === 'openai')    return await researchOpenAI(chosen.entry, chosen.model || model || adapter.defaultModel, prompt);
     return {
       provider: adapter.kind,
-      summary: `Web research is only wired for Anthropic right now. Try a different approach: break the goal down, look for keyboard shortcuts, or call declare_stuck to pause.`,
+      summary: 'No research-capable provider configured. Set ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY in Settings -> AI Keys to enable web_research.',
     };
-  }
-  const query = `How to "${goal}" in ${session.app || 'the target Windows application'}: the agent is stuck because "${reason}". Focus on keyboard shortcuts and menu paths that would move it past this point.`;
-
-  try {
-    const tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }];
-    const messages = [
-      { role: 'user', content: [
-        { type: 'text', text: `Research question: ${query}\n\nReturn a <= 350-word markdown summary of what you find. Do NOT write long intros; bullet points with concrete steps/shortcuts only.` },
-      ] },
-    ];
-    const body = {
-      model: model || adapter.defaultModel,
-      max_tokens: 1024,
-      system: 'You are a short, concrete web researcher. Cite sources with bare URLs inline.',
-      tools,
-      messages,
-    };
-    // Use the adapter's own HTTP helper by piggybacking on its `call`.
-    // adapter.call expects a message log; we just feed it the prepared
-    // messages and tools via a direct call-through.
-    const https = require('https');
-    const payload = JSON.stringify(body);
-    const resp = await new Promise((resolve, reject) => {
-      const req = https.request({
-        method: 'POST', hostname: 'api.anthropic.com', path: '/v1/messages',
-        headers: {
-          'content-type': 'application/json',
-          'content-length': Buffer.byteLength(payload),
-          'x-api-key': providerEntry.apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-beta': 'web-search-2025-03-05',
-        },
-        timeout: 60000,
-      }, (r) => {
-        let d = '';
-        r.on('data', c => d += c);
-        r.on('end', () => {
-          if (r.statusCode >= 200 && r.statusCode < 300) {
-            try { resolve(JSON.parse(d)); } catch (e) { reject(e); }
-          } else {
-            reject(new Error(`anthropic web_search ${r.statusCode}: ${d.slice(0, 400)}`));
-          }
-        });
-      });
-      req.on('error', reject);
-      req.on('timeout', () => req.destroy(new Error('web research timed out')));
-      req.write(payload); req.end();
-    });
-    const content = resp.content || [];
-    const summary = content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
-    return { provider: 'anthropic', summary: summary || 'No results.', raw: content };
   } catch (e) {
-    return { provider: 'anthropic', summary: `Research failed: ${e.message}. Consider calling declare_stuck so the user can help.` };
+    return { provider: chosen.kind, summary: `Research failed: ${e.message}. Consider calling declare_stuck so the user can help.` };
   }
+}
+
+function pickResearchProvider(registry, fallbackEntry) {
+  if (registry && registry.anthropic) return { kind: 'anthropic', entry: registry.anthropic };
+  if (registry && registry.gemini)    return { kind: 'gemini',    entry: registry.gemini };
+  if (registry && registry.openai)    return { kind: 'openai',    entry: registry.openai };
+  const kind = fallbackEntry && fallbackEntry.adapter && fallbackEntry.adapter.kind;
+  return { kind, entry: fallbackEntry };
+}
+
+function postJsonHost({ hostname, path, headers, payload, timeoutMs = 60000 }) {
+  const https = require('https');
+  return new Promise((resolve, reject) => {
+    const req = https.request({ method: 'POST', hostname, path, headers, timeout: timeoutMs }, (r) => {
+      let d = '';
+      r.on('data', c => d += c);
+      r.on('end', () => {
+        if (r.statusCode >= 200 && r.statusCode < 300) {
+          try { resolve(JSON.parse(d)); } catch (e) { reject(e); }
+        } else {
+          reject(new Error(`${hostname} ${r.statusCode}: ${d.slice(0, 400)}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error('web research timed out')));
+    req.write(payload); req.end();
+  });
+}
+
+async function researchAnthropic(entry, model, prompt) {
+  const body = {
+    model,
+    max_tokens: 1024,
+    system: 'You are a short, concrete web researcher. Cite sources with bare URLs inline.',
+    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
+    messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+  };
+  const payload = JSON.stringify(body);
+  const resp = await postJsonHost({
+    hostname: 'api.anthropic.com', path: '/v1/messages',
+    headers: {
+      'content-type': 'application/json',
+      'content-length': Buffer.byteLength(payload),
+      'x-api-key': entry.apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'web-search-2025-03-05',
+    },
+    payload,
+  });
+  const content = resp.content || [];
+  const summary = content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+  return { provider: 'anthropic', summary: summary || 'No results.', raw: content };
+}
+
+async function researchGemini(entry, model, prompt) {
+  const body = {
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    tools: [{ googleSearch: {} }],
+    generationConfig: { maxOutputTokens: 1024, temperature: 0.2 },
+  };
+  const payload = JSON.stringify(body);
+  const resp = await postJsonHost({
+    hostname: 'generativelanguage.googleapis.com',
+    path: `/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(entry.apiKey)}`,
+    headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) },
+    payload,
+  });
+  const parts = (resp.candidates && resp.candidates[0] && resp.candidates[0].content && resp.candidates[0].content.parts) || [];
+  const summary = parts.filter(p => p && p.text).map(p => p.text).join('\n').trim();
+  return { provider: 'gemini', summary: summary || 'No results.', raw: resp };
+}
+
+async function researchOpenAI(entry, model, prompt) {
+  const body = {
+    model,
+    input: prompt,
+    tools: [{ type: 'web_search_preview' }],
+  };
+  const payload = JSON.stringify(body);
+  const resp = await postJsonHost({
+    hostname: 'api.openai.com', path: '/v1/responses',
+    headers: {
+      'content-type': 'application/json',
+      'content-length': Buffer.byteLength(payload),
+      'authorization': `Bearer ${entry.apiKey}`,
+    },
+    payload,
+  });
+  const text = typeof resp.output_text === 'string' && resp.output_text
+    || (Array.isArray(resp.output)
+      ? resp.output.flatMap(o => (o && o.content) || []).filter(c => c && c.type === 'output_text').map(c => c.text).join('\n')
+      : '');
+  return { provider: 'openai', summary: (text || '').trim() || 'No results.', raw: resp };
 }
 
 module.exports = {

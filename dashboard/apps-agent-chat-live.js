@@ -20,27 +20,10 @@ const GEMINI_LIVE_ENDPOINT = 'wss://generativelanguage.googleapis.com/ws/google.
 const DEFAULT_GEMINI_LIVE_MODEL = 'gemini-2.0-flash-exp';
 const DEFAULT_OPENAI_REALTIME_MODEL = 'gpt-4o-realtime-preview';
 
-// Batch-text provider to use inside a live session when a tool needs a
-// regular request/response call (e.g. web_research). Maps a live provider
-// kind to the classic counterpart key in the registry.
-const CLASSIC_COUNTERPART = {
-  'gemini-live': 'gemini',
-  'openai-realtime': 'openai',
-};
-
-function stashResearchProvider(session, providerEntry) {
-  // The live adapter is a stub that can't do a regular text turn. Swap in
-  // the matching classic provider so web_research / ask_user internals work.
-  const classicKey = CLASSIC_COUNTERPART[providerEntry && providerEntry.adapter && providerEntry.adapter.kind];
-  const registry = session._providerRegistry;
-  if (classicKey && registry && registry[classicKey]) {
-    session._researchProviderEntry = registry[classicKey];
-    session._researchModel = registry[classicKey].adapter.defaultModel;
-  } else if (registry && registry.anthropic) {
-    session._researchProviderEntry = registry.anthropic;
-    session._researchModel = registry.anthropic.adapter.defaultModel;
-  }
-}
+// web_research now resolves its own provider from session._providerRegistry
+// (see apps-learning-loop.pickResearchProvider), so the live runners don't
+// need to stash anything extra - they just need the registry set on the
+// session, which apps-agent.js does in session/start.
 const DEFAULT_FRAME_INTERVAL_MS = 500;
 const DEFAULT_FRAME_QUALITY = 45;
 
@@ -87,8 +70,6 @@ async function runGeminiLive({ session, task, driver, providerEntry, model, broa
   session._model = chosenModel;
   session.running = true;
   session.messages = session.messages || [];
-  stashResearchProvider(session, providerEntry);
-
   emit({ kind: 'provider', provider: 'gemini-live', label: 'Gemini Live', streaming: true });
 
   return await new Promise((resolve) => {
@@ -289,8 +270,6 @@ async function runOpenAIRealtime({ session, task, driver, providerEntry, model, 
   session._model = chosenModel;
   session.running = true;
   session.messages = session.messages || [];
-  stashResearchProvider(session, providerEntry);
-
   emit({ kind: 'provider', provider: 'openai-realtime', label: 'OpenAI Realtime', streaming: true });
 
   return await new Promise((resolve) => {
