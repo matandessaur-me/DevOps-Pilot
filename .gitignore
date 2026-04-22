@@ -6,8 +6,11 @@ config/themes.json
 config/browser-sessions/
 config/plugin-configs-preserved/
 config/uninstalled-plugins.json
+config/application-state.json
 dashboard/plugins/*
 !dashboard/plugins/sdk/
+dashboard/app-memory/*
+!dashboard/app-memory/README.md
 notes/
 .ai-workspace/
 .claude/

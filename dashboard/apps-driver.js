@@ -1,0 +1,771 @@
+// DesktopDriver - Windows-only thin wrapper around @nut-tree-fork/nut-js
+// for input + screenshot, and powershell.exe for HWND enumeration,
+// foreground activation, and window-rect queries.
+//
+// All coordinates the agent sees are window-relative. Translation to
+// absolute screen coordinates happens inside this module.
+
+const { spawn } = require('child_process');
+
+let nut = null;
+function loadNut() {
+  if (nut) return nut;
+  nut = require('@nut-tree-fork/nut-js');
+  // Fast cadence; the agent is latency-bound anyway.
+  nut.mouse.config.mouseSpeed = 1200;
+  nut.keyboard.config.autoDelayMs = 8;
+  return nut;
+}
+
+function runPs(script, { timeoutMs = 8000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const p = spawn('powershell.exe', [
+      '-ExecutionPolicy', 'Bypass',
+      '-NoProfile',
+      '-Command', script
+    ]);
+    let out = '';
+    let err = '';
+    const timer = setTimeout(() => {
+      try { p.kill('SIGKILL'); } catch (_) {}
+      reject(new Error(`powershell timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    p.stdout.on('data', c => out += c);
+    p.stderr.on('data', c => err += c);
+    p.on('close', code => {
+      clearTimeout(timer);
+      if (code !== 0) return reject(new Error(err.trim() || `powershell exit ${code}`));
+      resolve(out);
+    });
+  });
+}
+
+// Inline C# once; SetForegroundWindow / GetWindowRect / ShowWindow / IsIconic
+// plus visibility / cloaked / tool-window checks used to filter out service
+// and system windows from the Running list.
+const WIN32_TYPES = `
+Add-Type -Name SyWin32 -Namespace Sy -MemberDefinition @"
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool SetForegroundWindow(System.IntPtr h);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool ShowWindow(System.IntPtr h, int c);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool IsIconic(System.IntPtr h);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool IsWindowVisible(System.IntPtr h);
+[System.Runtime.InteropServices.DllImport("user32.dll", SetLastError=true)]
+public static extern int GetWindowLong(System.IntPtr h, int i);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool GetWindowRect(System.IntPtr h, out RECT r);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern System.IntPtr GetForegroundWindow();
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool SetWindowPos(System.IntPtr h, System.IntPtr hInsertAfter, int x, int y, int cx, int cy, uint flags);
+[System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+public static extern int DwmGetWindowAttribute(System.IntPtr h, int attr, out int pvAttribute, int cb);
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+public struct RECT { public int left; public int top; public int right; public int bottom; }
+"@ -ErrorAction SilentlyContinue
+`;
+
+// Process names that consistently surface service / shell / helper windows,
+// never a real app the user would want to drive.
+const SYSTEM_PROCESS_NAMES = new Set([
+  'explorer',                    // Program Manager, File Explorer shell
+  'dwm', 'csrss', 'winlogon', 'wininit', 'lsass', 'services', 'smss',
+  'svchost', 'sihost', 'runtimebroker', 'conhost', 'taskhostw', 'ctfmon',
+  'searchhost', 'searchapp', 'searchui', 'searchindexer',
+  'startmenuexperiencehost', 'shellexperiencehost', 'textinputhost',
+  'applicationframehost', 'lockapp', 'systemsettings', 'widgets', 'widgetservice',
+  'nvcontainer', 'nvdisplay.container', 'radeonsoftware', 'armsvc',
+  'useroobebroker', 'securityhealthsystray', 'securityhealthservice',
+  'fontdrvhost', 'audiodg', 'msmpeng', 'dllhost', 'backgroundtaskhost',
+  'gamebar', 'gamebarftserver', 'gamingservices', 'phoneexperiencehost',
+  'yourphone', 'people', 'video.ui', 'crossdeviceservice',
+]);
+const SYSTEM_TITLE_RE = /^(Program Manager|Settings|Windows Input Experience|Microsoft Text Input Application|Search|Cortana|Task View|Start|Action center|Notification Center|HiddenFrame)$/i;
+
+const DENY_TITLE_RE = /password|1password|bitwarden|keychain|banking|bank of|paypal/i;
+
+function assertAllowed(title) {
+  if (title && DENY_TITLE_RE.test(title)) {
+    const e = new Error('window is on the deny list');
+    e.code = 'deny_listed';
+    throw e;
+  }
+}
+
+// Coarse cache to keep listWindows cheap when called repeatedly.
+let _listCache = null;
+let _listCacheAt = 0;
+const LIST_CACHE_MS = 500;
+
+async function listWindows({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && _listCache && (now - _listCacheAt) < LIST_CACHE_MS) return _listCache;
+
+  // Filter at the PS layer so we only return windows a human would call "an
+  // app": visible, not DWM-cloaked, not a tool window, with a real title and
+  // a reasonable on-screen footprint. Also skip known shell/service procs.
+  const script = `
+${WIN32_TYPES}
+$GWL_EXSTYLE = -20
+$WS_EX_TOOLWINDOW = 0x00000080
+$DWMWA_CLOAKED = 14
+$procs = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle }
+$out = foreach ($p in $procs) {
+  $h = $p.MainWindowHandle
+  if (-not [Sy.SyWin32]::IsWindowVisible($h)) { continue }
+  $cloaked = 0
+  [void][Sy.SyWin32]::DwmGetWindowAttribute($h, $DWMWA_CLOAKED, [ref]$cloaked, 4)
+  if ($cloaked -ne 0) { continue }
+  $ex = [Sy.SyWin32]::GetWindowLong($h, $GWL_EXSTYLE)
+  if (($ex -band $WS_EX_TOOLWINDOW) -ne 0) { continue }
+  $r = New-Object Sy.SyWin32+RECT
+  [void][Sy.SyWin32]::GetWindowRect($h, [ref]$r)
+  $w = $r.right - $r.left
+  $ht = $r.bottom - $r.top
+  # Discard degenerate or sliver windows (many service trays paint 0x0 or 1x1).
+  if (-not [Sy.SyWin32]::IsIconic($h) -and ($w -lt 120 -or $ht -lt 80)) { continue }
+  [PSCustomObject]@{
+    hwnd = [int64]$h
+    pid = $p.Id
+    processName = $p.ProcessName
+    title = $p.MainWindowTitle
+    isMinimized = [Sy.SyWin32]::IsIconic($h)
+    rect = @{ x = $r.left; y = $r.top; w = $w; h = $ht }
+  }
+}
+$out | ConvertTo-Json -Depth 4 -Compress
+`;
+  const raw = await runPs(script);
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { parsed = []; }
+  let list = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+  list = list.filter(w => {
+    const proc = String(w.processName || '').toLowerCase();
+    if (SYSTEM_PROCESS_NAMES.has(proc)) return false;
+    if (SYSTEM_TITLE_RE.test(w.title || '')) return false;
+    return true;
+  });
+  _listCache = list;
+  _listCacheAt = now;
+  return list;
+}
+
+async function findWindow(hwnd) {
+  const list = await listWindows({ force: true });
+  const w = list.find(x => String(x.hwnd) === String(hwnd));
+  if (!w) {
+    const e = new Error(`hwnd ${hwnd} not found`);
+    e.code = 'window_gone';
+    throw e;
+  }
+  assertAllowed(w.title);
+  return w;
+}
+
+async function focusWindow(hwnd) {
+  const w = await findWindow(hwnd);
+  const script = `
+${WIN32_TYPES}
+$h = [System.IntPtr]${w.hwnd}
+# 9 = SW_RESTORE
+[void][Sy.SyWin32]::ShowWindow($h, 9)
+[void][Sy.SyWin32]::SetForegroundWindow($h)
+# Pin as topmost so a stray click or an unrelated popup can't steal focus
+# and make the agent loop against a window it no longer controls.
+# HWND_TOPMOST = -1; flags: NOMOVE|NOSIZE|NOACTIVATE = 0x13
+[void][Sy.SyWin32]::SetWindowPos($h, [System.IntPtr]::new(-1), 0, 0, 0, 0, 0x13)
+`;
+  await runPs(script);
+  // Give Windows a beat to actually move focus.
+  await new Promise(r => setTimeout(r, 80));
+  return { ok: true, hwnd: w.hwnd, title: w.title };
+}
+
+// Ensure a target window is still the foreground one. If it lost focus
+// (because a click landed outside, a notification stole it, etc.) the agent
+// would otherwise send keys and mouse events to whatever is on top --
+// which is how the stuck-loop behavior happens. Called before every action.
+async function ensureForeground(hwnd) {
+  const script = `
+${WIN32_TYPES}
+$h = [System.IntPtr]${hwnd}
+$fg = [Sy.SyWin32]::GetForegroundWindow()
+if ($fg -ne $h) {
+  [void][Sy.SyWin32]::ShowWindow($h, 9)
+  [void][Sy.SyWin32]::SetForegroundWindow($h)
+  [void][Sy.SyWin32]::SetWindowPos($h, [System.IntPtr]::new(-1), 0, 0, 0, 0, 0x13)
+  Write-Output 'refocused'
+} else {
+  Write-Output 'ok'
+}
+`;
+  try {
+    const out = (await runPs(script, { timeoutMs: 4000 })).trim();
+    if (out === 'refocused') await new Promise(r => setTimeout(r, 80));
+  } catch (_) { /* best effort */ }
+}
+
+// Drop the topmost pin when a session ends so the window behaves normally
+// after the agent is done. Non-fatal if it fails.
+async function unpinTopmost(hwnd) {
+  const script = `
+${WIN32_TYPES}
+$h = [System.IntPtr]${hwnd}
+# HWND_NOTOPMOST = -2
+[void][Sy.SyWin32]::SetWindowPos($h, [System.IntPtr]::new(-2), 0, 0, 0, 0, 0x13)
+`;
+  try { await runPs(script, { timeoutMs: 4000 }); } catch (_) {}
+}
+
+async function getWindowRect(hwnd) {
+  const w = await findWindow(hwnd);
+  return { ...w.rect, hwnd: w.hwnd, title: w.title, isMinimized: w.isMinimized };
+}
+
+function translate({ x, y, rect }) {
+  return { x: rect.x + Math.round(x), y: rect.y + Math.round(y) };
+}
+
+// Capture the specified window directly via PrintWindow (PW_RENDERFULLCONTENT),
+// so overlapping windows and the desktop around the target are NOT included.
+// Falls back to a screen-region grab only if PrintWindow returns an empty frame
+// (some DirectX / protected-content windows refuse PrintWindow).
+async function screenshotWindowViaPrintWindow(hwnd, { format, quality }) {
+  const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class SyCap {
+  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L; public int T; public int R; public int B; }
+}
+"@ -ErrorAction SilentlyContinue
+$h = [IntPtr]${hwnd}
+$r = New-Object SyCap+RECT
+[void][SyCap]::GetWindowRect($h, [ref]$r)
+$w = $r.R - $r.L
+$ht = $r.B - $r.T
+if ($w -le 0 -or $ht -le 0) { Write-Output 'EMPTY'; exit 0 }
+$bmp = New-Object System.Drawing.Bitmap $w, $ht
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$hdc = $g.GetHdc()
+# PW_RENDERFULLCONTENT = 2, required for DWM-composed / chromium content.
+$ok = [SyCap]::PrintWindow($h, $hdc, 2)
+$g.ReleaseHdc($hdc)
+$g.Dispose()
+if (-not $ok) { Write-Output 'EMPTY'; exit 0 }
+$ms = New-Object System.IO.MemoryStream
+if ('${format}' -eq 'png') {
+  $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+} else {
+  $enc = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' } | Select-Object -First 1
+  $ep = New-Object System.Drawing.Imaging.EncoderParameters 1
+  $qp = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), ([long]${quality})
+  $ep.Param[0] = $qp
+  $bmp.Save($ms, $enc, $ep)
+}
+$bmp.Dispose()
+[Convert]::ToBase64String($ms.ToArray())
+`;
+  const out = (await runPs(script, { timeoutMs: 15000 })).trim();
+  if (!out || out === 'EMPTY') return null;
+  return {
+    base64: out,
+    mimeType: format === 'png' ? 'image/png' : 'image/jpeg',
+  };
+}
+
+async function screenshotWindow(hwnd, { format = 'jpeg', quality = 60 } = {}) {
+  let w = await findWindow(hwnd);
+  if (w.isMinimized) {
+    // Auto-restore the window so the agent can keep working instead of
+    // bailing. Users are told up-front that the Apps tab drives the real
+    // desktop, so un-minimizing an already-chosen target is expected.
+    try { await focusWindow(hwnd); } catch (_) {}
+    w = await findWindow(hwnd);
+    if (w.isMinimized) return { error: 'window_minimized', hwnd: w.hwnd };
+  }
+  if (w.rect.w <= 0 || w.rect.h <= 0) {
+    return { error: 'window_degenerate_rect', hwnd: w.hwnd, rect: w.rect };
+  }
+
+  const q = Math.max(1, Math.min(100, quality | 0));
+  try {
+    const shot = await screenshotWindowViaPrintWindow(hwnd, { format, quality: q });
+    if (shot) {
+      return {
+        base64: shot.base64,
+        mimeType: shot.mimeType,
+        width: w.rect.w,
+        height: w.rect.h,
+        rect: w.rect,
+        capturedAt: Date.now(),
+      };
+    }
+  } catch (_) {
+    // Fall through to screen-region fallback.
+  }
+
+  // Fallback for windows where PrintWindow refuses (some DRM / DirectX paths).
+  // This captures screen pixels at the window's rect, which may include
+  // whatever is overlapping, but is better than failing.
+  const n = loadNut();
+  const region = new n.Region(w.rect.x, w.rect.y, w.rect.w, w.rect.h);
+  const img = await n.screen.grabRegion(region);
+  const Jimp = require('jimp');
+  const src = img.data;
+  const jimg = new Jimp(img.width, img.height);
+  const dst = jimg.bitmap.data;
+  for (let i = 0; i < src.length; i += 4) {
+    dst[i]     = src[i + 2];
+    dst[i + 1] = src[i + 1];
+    dst[i + 2] = src[i];
+    dst[i + 3] = src[i + 3];
+  }
+  const mime = format === 'png' ? Jimp.MIME_PNG : Jimp.MIME_JPEG;
+  if (format !== 'png') jimg.quality(q);
+  const buf = await jimg.getBufferAsync(mime);
+  return {
+    base64: buf.toString('base64'),
+    mimeType: mime,
+    width: img.width,
+    height: img.height,
+    rect: w.rect,
+    capturedAt: Date.now(),
+    fallback: 'screen_region',
+  };
+}
+
+async function verifyStableRect(hwnd, originalRect) {
+  const current = await getWindowRect(hwnd);
+  const dx = Math.abs(current.x - originalRect.x);
+  const dy = Math.abs(current.y - originalRect.y);
+  if (dx > 50 || dy > 50) {
+    const e = new Error('window moved since last screenshot');
+    e.code = 'window_moved';
+    e.currentRect = current;
+    throw e;
+  }
+  return current;
+}
+
+async function click(xOrOpts, y, opts = {}) {
+  // Two call shapes:
+  //   click({ x, y, hwnd, button, double })
+  //   click(x, y, { hwnd, button, double })
+  let x, hwnd, button, dbl;
+  if (typeof xOrOpts === 'object' && xOrOpts !== null) {
+    ({ x, y, hwnd, button = 'left', double: dbl = false } = xOrOpts);
+  } else {
+    x = xOrOpts;
+    ({ hwnd, button = 'left', double: dbl = false } = opts);
+  }
+  const n = loadNut();
+  let abs = { x, y };
+  if (hwnd != null) {
+    const w = await findWindow(hwnd);
+    await focusWindow(hwnd);
+    abs = translate({ x, y, rect: w.rect });
+  }
+  await n.mouse.setPosition(new n.Point(abs.x, abs.y));
+  const btn = button === 'right' ? n.Button.RIGHT : button === 'middle' ? n.Button.MIDDLE : n.Button.LEFT;
+  if (dbl) await n.mouse.doubleClick(btn);
+  else await n.mouse.click(btn);
+  return { ok: true, at: abs };
+}
+
+async function mouseMove(xOrOpts, y, opts = {}) {
+  let x, hwnd, smooth;
+  if (typeof xOrOpts === 'object' && xOrOpts !== null) {
+    ({ x, y, hwnd, smooth = false } = xOrOpts);
+  } else {
+    x = xOrOpts;
+    ({ hwnd, smooth = false } = opts);
+  }
+  const n = loadNut();
+  let abs = { x, y };
+  if (hwnd != null) {
+    const w = await findWindow(hwnd);
+    await focusWindow(hwnd);
+    abs = translate({ x, y, rect: w.rect });
+  }
+  if (smooth) {
+    await n.mouse.move(n.straightTo(new n.Point(abs.x, abs.y)));
+  } else {
+    await n.mouse.setPosition(new n.Point(abs.x, abs.y));
+  }
+  return { ok: true, at: abs };
+}
+
+async function drag(fromX, fromY, toX, toY, { hwnd } = {}) {
+  const n = loadNut();
+  let from = { x: fromX, y: fromY };
+  let to = { x: toX, y: toY };
+  if (hwnd != null) {
+    const w = await findWindow(hwnd);
+    await focusWindow(hwnd);
+    from = translate({ x: fromX, y: fromY, rect: w.rect });
+    to = translate({ x: toX, y: toY, rect: w.rect });
+  }
+  await n.mouse.setPosition(new n.Point(from.x, from.y));
+  await n.mouse.pressButton(n.Button.LEFT);
+  await n.mouse.move(n.straightTo(new n.Point(to.x, to.y)));
+  await n.mouse.releaseButton(n.Button.LEFT);
+  return { ok: true, from, to };
+}
+
+async function scroll(dx, dy, { hwnd } = {}) {
+  const n = loadNut();
+  if (hwnd != null) await focusWindow(hwnd);
+  if (dy) {
+    if (dy > 0) await n.mouse.scrollDown(dy);
+    else await n.mouse.scrollUp(-dy);
+  }
+  if (dx) {
+    if (dx > 0) await n.mouse.scrollRight(dx);
+    else await n.mouse.scrollLeft(-dx);
+  }
+  return { ok: true, dx, dy };
+}
+
+async function type(text, { hwnd } = {}) {
+  const n = loadNut();
+  if (hwnd != null) await focusWindow(hwnd);
+  await n.keyboard.type(String(text));
+  return { ok: true };
+}
+
+// Map strings like "Ctrl+Shift+S" to nut.js Key enum plus modifiers.
+function parseKeyCombo(combo) {
+  const n = loadNut();
+  const parts = String(combo).split('+').map(s => s.trim()).filter(Boolean);
+  if (!parts.length) throw new Error('empty key combo');
+  const keyName = parts.pop();
+  const modMap = {
+    ctrl: n.Key.LeftControl, control: n.Key.LeftControl,
+    shift: n.Key.LeftShift,
+    alt: n.Key.LeftAlt,
+    win: n.Key.LeftSuper, windows: n.Key.LeftSuper, super: n.Key.LeftSuper, meta: n.Key.LeftSuper
+  };
+  const mods = parts.map(p => {
+    const k = modMap[p.toLowerCase()];
+    if (k == null) throw new Error(`unknown modifier: ${p}`);
+    return k;
+  });
+  // Key normalization.
+  const specialMap = {
+    enter: 'Return', return: 'Return',
+    esc: 'Escape', escape: 'Escape',
+    space: 'Space', spacebar: 'Space',
+    tab: 'Tab', backspace: 'Backspace', delete: 'Delete', del: 'Delete',
+    up: 'Up', down: 'Down', left: 'Left', right: 'Right',
+    home: 'Home', end: 'End', pageup: 'PageUp', pagedown: 'PageDown',
+    insert: 'Insert', ins: 'Insert'
+  };
+  const lowered = keyName.toLowerCase();
+  let resolved;
+  if (specialMap[lowered] && n.Key[specialMap[lowered]] != null) {
+    resolved = n.Key[specialMap[lowered]];
+  } else if (/^f\d{1,2}$/i.test(keyName)) {
+    resolved = n.Key[keyName.toUpperCase()];
+  } else if (keyName.length === 1) {
+    const ch = keyName.toUpperCase();
+    resolved = n.Key[ch] != null ? n.Key[ch] : n.Key[`Num${ch}`];
+  } else {
+    resolved = n.Key[keyName];
+  }
+  if (resolved == null) throw new Error(`unknown key: ${keyName}`);
+  return { mods, key: resolved };
+}
+
+async function key(combo, { hwnd } = {}) {
+  const n = loadNut();
+  if (hwnd != null) await focusWindow(hwnd);
+  const { mods, key: k } = parseKeyCombo(combo);
+  await n.keyboard.pressKey(...mods, k);
+  await n.keyboard.releaseKey(...mods, k);
+  return { ok: true, combo };
+}
+
+async function waitMs(ms) {
+  const n = Math.max(0, Math.min(60000, ms | 0));
+  await new Promise(r => setTimeout(r, n));
+  return { ok: true, ms: n };
+}
+
+async function calibrateMouseLook({ hwnd, testDeltaPx = 200 }) {
+  const before = await screenshotWindow(hwnd);
+  const n = loadNut();
+  await focusWindow(hwnd);
+  const pos = await n.mouse.getPosition();
+  await n.mouse.setPosition(new n.Point(pos.x + testDeltaPx, pos.y));
+  await waitMs(150);
+  const after = await screenshotWindow(hwnd);
+  return { before, after, deltaPx: testDeltaPx };
+}
+
+// ── Installed-app discovery and launching ─────────────────────────────
+// We merge three sources:
+//   1. UWP / modern apps via Get-StartApps (fast, gives AppUserModelID).
+//   2. Win32 shortcuts in the Start Menu (both users + current user).
+// Manually-added apps are stored client-side (localStorage) and come in via
+// the launch endpoint's { path } parameter.
+let _installedCache = null;
+let _installedCacheAt = 0;
+const INSTALLED_CACHE_MS = 60000;
+
+// Install roots where user-installed apps actually live. Anything outside
+// these is almost certainly a system tool we don't want in the launcher.
+function _isUserInstalledPath(p) {
+  if (!p) return false;
+  const s = String(p).toLowerCase().replace(/\//g, '\\');
+  const pf  = (process.env['ProgramFiles']        || 'C:\\Program Files').toLowerCase();
+  const pf86 = (process.env['ProgramFiles(x86)']  || 'C:\\Program Files (x86)').toLowerCase();
+  const local = (process.env['LOCALAPPDATA']      || '').toLowerCase();
+  const roaming = (process.env['APPDATA']         || '').toLowerCase();
+  const sysroot = (process.env['SystemRoot']      || 'C:\\Windows').toLowerCase();
+  // Reject Windows + WindowsApps (UWP store installs) outright.
+  if (s.startsWith(sysroot + '\\')) return false;
+  if (s.includes('\\windowsapps\\')) return false;
+  if (s.includes('\\systemapps\\')) return false;
+  return (pf && s.startsWith(pf + '\\'))
+    || (pf86 && s.startsWith(pf86 + '\\'))
+    || (local && s.startsWith(local + '\\'))
+    || (roaming && s.startsWith(roaming + '\\'))
+    || /^[a-z]:\\(games|tools|apps)\\/i.test(s);
+}
+
+// Shortcut-name and folder filters so we don't list "Notepad", "Calculator",
+// "Edge", "Command Prompt", "PowerShell ISE", etc.
+function _isSystemShortcut(name, lnkPath) {
+  const n = String(name || '').toLowerCase();
+  const lp = String(lnkPath || '').toLowerCase();
+  if (!n) return true;
+  // Folder-based rejects: anything Windows ships under these Start-menu groups.
+  if (/\\(accessories|administrative tools|windows powershell|windows system|accessibility|maintenance|windows kits|startup|microsoft edge)\\/i.test(lp)) return true;
+  // Name-based rejects: OS accessories and component helpers that slip through.
+  const SYSTEM_NAMES = new Set([
+    'calculator', 'notepad', 'wordpad', 'paint', 'snipping tool', 'snip & sketch',
+    'character map', 'math input panel', 'remote desktop connection', 'steps recorder',
+    'windows media player', 'windows media player legacy', 'command prompt', 'file explorer',
+    'run', 'task manager', 'settings', 'control panel', 'windows security',
+    'microsoft edge', 'internet explorer', 'xbox', 'xbox game bar',
+    'powershell', 'powershell ise', 'powershell 7', 'powershell (x86)',
+    'windows terminal', 'clock', 'weather', 'mail', 'calendar', 'maps', 'people',
+    'photos', 'movies & tv', 'groove music', 'voice recorder', 'alarms & clock',
+    'camera', 'phone link', 'your phone', 'tips', 'get help', 'feedback hub',
+    'microsoft store', 'game bar', 'print management', 'oobe', 'sticky notes',
+    'cortana', 'paint 3d', 'view 3d', '3d viewer', 'mixed reality portal',
+  ]);
+  if (SYSTEM_NAMES.has(n)) return true;
+  // Common non-app shortcut patterns.
+  if (/^unins|^uninstall|^update|^repair|^readme|^manual|^license|^release notes|^changelog|^help$/i.test(name)) return true;
+  if (/ uninstall$| readme$| help$| documentation$| manual$/i.test(name)) return true;
+  return false;
+}
+
+async function listInstalledApps({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && _installedCache && (now - _installedCacheAt) < INSTALLED_CACHE_MS) {
+    return _installedCache;
+  }
+  const script = `
+$ErrorActionPreference = 'SilentlyContinue'
+$paths = @(
+  [Environment]::GetFolderPath('CommonStartMenu'),
+  [Environment]::GetFolderPath('StartMenu'),
+  [Environment]::GetFolderPath('Desktop'),
+  [Environment]::GetFolderPath('CommonDesktopDirectory')
+) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+$shell = New-Object -ComObject WScript.Shell
+$lnks = @()
+foreach ($p in $paths) {
+  Get-ChildItem -Path $p -Recurse -Filter *.lnk -ErrorAction SilentlyContinue | ForEach-Object {
+    try {
+      $sc = $shell.CreateShortcut($_.FullName)
+      $t = $sc.TargetPath
+      if ($t -and ($t -like '*.exe') -and (Test-Path $t)) {
+        $lnks += [PSCustomObject]@{
+          Name = [IO.Path]::GetFileNameWithoutExtension($_.Name)
+          Path = $t
+          Arguments = $sc.Arguments
+          Lnk = $_.FullName
+        }
+      }
+    } catch {}
+  }
+}
+$lnks | ConvertTo-Json -Depth 3 -Compress
+`;
+  const raw = await runPs(script, { timeoutMs: 20000 });
+  let lnks = [];
+  try { const p = JSON.parse((raw || '').trim()); lnks = Array.isArray(p) ? p : p ? [p] : []; } catch (_) {}
+
+  const byKey = new Map();
+  for (const l of lnks) {
+    if (!l || !l.Name || !l.Path) continue;
+    if (_isSystemShortcut(l.Name, l.Lnk)) continue;
+    if (!_isUserInstalledPath(l.Path)) continue;
+    // De-dupe by target exe so "Firefox" from Start Menu and Desktop don't both show.
+    const dedupe = 'exe:' + l.Path.toLowerCase();
+    if (byKey.has(dedupe)) continue;
+    byKey.set(dedupe, {
+      id: l.Path,
+      name: l.Name,
+      path: l.Path,
+      args: l.Arguments || null,
+      lnk: l.Lnk || null,
+      kind: 'win32',
+    });
+  }
+  const out = Array.from(byKey.values()).sort((a, b) => a.name.localeCompare(b.name));
+  _installedCache = out;
+  _installedCacheAt = now;
+  return out;
+}
+
+async function launchApp({ id, path, name } = {}) {
+  // Snapshot existing HWNDs so we can tell which window is NEW. Matching by
+  // process name alone is unreliable (many apps ship a launcher that exits,
+  // and display names rarely match the exe basename).
+  const before = new Set(
+    (await listWindows({ force: true })).map(w => String(w.hwnd))
+  );
+
+  // Prefer `path` (real exe) — fall back to `shell:AppsFolder\<id>` for
+  // Start-menu / UWP entries. Start-Process spawns detached and returns
+  // immediately; we don't wait on the child here.
+  let psCmd;
+  if (path) {
+    psCmd = `Start-Process -FilePath '${path.replace(/'/g, "''")}'`;
+  } else if (id) {
+    psCmd = `Start-Process -FilePath 'shell:AppsFolder\\${String(id).replace(/'/g, "''")}'`;
+  } else {
+    throw new Error('launchApp requires id or path');
+  }
+  try {
+    await runPs(psCmd, { timeoutMs: 8000 });
+  } catch (e) {
+    throw new Error('Start-Process failed: ' + e.message);
+  }
+
+  // Poll for up to 30s. Cold launches of Steam / Electron apps / big IDEs
+  // routinely take 5-15s to paint a window; 10s was too tight.
+  const exeBase = path
+    ? path.toLowerCase().replace(/\\/g, '/').split('/').pop().replace(/\.exe$/, '')
+    : '';
+  const nameLc = (name || '').toLowerCase();
+  const deadline = Date.now() + 30000;
+  let anyNewWindow = null;
+
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 500));
+    const ws = await listWindows({ force: true });
+
+    // Build candidates: NEW windows that weren't present before launch.
+    const newOnes = ws.filter(w =>
+      w.title && !w.isMinimized && !before.has(String(w.hwnd))
+    );
+    if (!newOnes.length) continue;
+
+    // Prefer a name/exe match; otherwise take any brand-new window.
+    let match = newOnes.find(w => {
+      const proc = (w.processName || '').toLowerCase();
+      const title = (w.title || '').toLowerCase();
+      if (exeBase && (proc === exeBase || title.includes(exeBase) || proc.includes(exeBase))) return true;
+      if (nameLc && (proc.includes(nameLc) || nameLc.includes(proc) || title.includes(nameLc))) return true;
+      return false;
+    });
+    if (!match) {
+      // Hold onto "any new window" as a fallback but keep polling briefly
+      // in case the real window paints after a launcher window.
+      anyNewWindow = anyNewWindow || newOnes[0];
+      if (Date.now() + 3000 >= deadline) match = anyNewWindow;
+    }
+    if (match) return { hwnd: match.hwnd, title: match.title, processName: match.processName };
+  }
+  if (anyNewWindow) {
+    return { hwnd: anyNewWindow.hwnd, title: anyNewWindow.title, processName: anyNewWindow.processName };
+  }
+  throw new Error('Launched, but no window appeared within 30s. Open it yourself, then pick it from the Running list.');
+}
+
+// Icon extraction via System.Drawing.Icon.ExtractAssociatedIcon. We return a
+// small PNG base64. For UWP (AppID with '!'), we currently just return null
+// because their icons come from their package manifest and aren't reachable
+// via ExtractAssociatedIcon — the frontend falls back to a letter avatar.
+const _iconCache = new Map();
+async function extractAppIcon(idOrPath) {
+  if (_iconCache.has(idOrPath)) return _iconCache.get(idOrPath);
+  // UWP/shell entries have '!' in the id and no filesystem path.
+  if (String(idOrPath).includes('!')) {
+    _iconCache.set(idOrPath, { base64: null });
+    return { base64: null };
+  }
+  const target = String(idOrPath).replace(/'/g, "''");
+  const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing
+try {
+  $icon = [System.Drawing.Icon]::ExtractAssociatedIcon('${target}')
+  if (-not $icon) { Write-Output 'EMPTY'; exit 0 }
+  $bmp = $icon.ToBitmap()
+  $ms = New-Object System.IO.MemoryStream
+  $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+  [Convert]::ToBase64String($ms.ToArray())
+} catch { Write-Output 'EMPTY' }
+`;
+  try {
+    const out = (await runPs(script, { timeoutMs: 10000 })).trim();
+    const result = (!out || out === 'EMPTY') ? { base64: null } : { base64: out, mimeType: 'image/png' };
+    _iconCache.set(idOrPath, result);
+    return result;
+  } catch (_) {
+    _iconCache.set(idOrPath, { base64: null });
+    return { base64: null };
+  }
+}
+
+let _stopped = false;
+function stop() {
+  _stopped = true;
+  // nut-js has no in-flight abort; best effort is to drop the cache so the
+  // next call re-enumerates before acting.
+  _listCache = null;
+}
+
+function isStopped() { return _stopped; }
+function resetStopped() { _stopped = false; }
+
+module.exports = {
+  listWindows,
+  listInstalledApps,
+  launchApp,
+  extractAppIcon,
+  focusWindow,
+  ensureForeground,
+  unpinTopmost,
+  getWindowRect,
+  screenshotWindow,
+  verifyStableRect,
+  click,
+  mouseMove,
+  drag,
+  scroll,
+  type,
+  key,
+  waitMs,
+  calibrateMouseLook,
+  stop,
+  isStopped,
+  resetStopped,
+  // Exposed for tests / advanced callers:
+  _runPs: runPs,
+  _parseKeyCombo: parseKeyCombo
+};

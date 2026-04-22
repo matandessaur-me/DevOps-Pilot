@@ -1,7 +1,7 @@
 /**
  * Electron main process — wraps the HTTP+WS server in a desktop window.
  */
-const { app, BrowserWindow, nativeImage, dialog, screen, shell, webContents: webContentsNS } = require('electron');
+const { app, BrowserWindow, nativeImage, dialog, screen, shell, webContents: webContentsNS, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -1459,6 +1459,35 @@ if (!gotLock) {
       });
     });
 
+    // ── Apps agent panic hotkey ────────────────────────────────────────
+    // Ctrl+Alt+Shift+X from anywhere on the desktop tears down every live
+    // Apps session and kills any in-flight input emission. This is the
+    // emergency stop for pixel-level automation.
+    try {
+      const ok = globalShortcut.register('CommandOrControl+Alt+Shift+X', () => {
+        try {
+          const http = require('http');
+          const req = http.request({
+            hostname: '127.0.0.1', port: PORT, path: '/api/apps/panic', method: 'POST',
+            headers: { 'content-length': 0 },
+          }, (r) => { r.on('data', () => {}); r.on('end', () => {}); });
+          req.on('error', () => {});
+          req.end();
+        } catch (_) {}
+        try {
+          if (win && !win.isDestroyed()) {
+            win.show();
+            win.focus();
+            win.webContents.send('apps-panic-hotkey');
+          }
+        } catch (_) {}
+      });
+      if (!ok) console.warn('  Apps panic hotkey (Ctrl+Alt+Shift+X) not registered');
+      else console.log('  Apps panic hotkey registered: Ctrl+Alt+Shift+X');
+    } catch (e) {
+      console.warn('  Apps panic hotkey failed:', e.message);
+    }
+
     startServer();
   }).catch((err) => {
     dialog.showErrorBox('Symphonee - Startup Error',
@@ -1468,5 +1497,9 @@ if (!gotLock) {
 
   app.on('window-all-closed', () => {
     app.quit();
+  });
+
+  app.on('will-quit', () => {
+    try { globalShortcut.unregisterAll(); } catch (_) {}
   });
 }

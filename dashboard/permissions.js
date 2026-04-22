@@ -43,6 +43,7 @@ const MODE_DEFAULTS = {
       'api:POST /api/github/pulls/comment', 'api:POST /api/github/pulls/review',
       'api:POST /api/workitems/*/comments',
       'api:POST /api/workitems', 'api:PATCH /api/workitems/*',
+      'api:POST /api/apps/session/start',
       'plugin:*:publish', 'plugin:*:delete',
       'cli:*:spawn',
     ],
@@ -50,7 +51,11 @@ const MODE_DEFAULTS = {
   },
   trusted: {
     deny: [],
-    ask: ['cmd:npm publish*', 'cmd:yarn publish*', 'api:POST /api/github/pulls/review'],
+    ask: [
+      'cmd:npm publish*', 'cmd:yarn publish*',
+      'api:POST /api/github/pulls/review',
+      'api:POST /api/apps/session/start',
+    ],
     allow: ['tool:*', 'path:*', 'api:*', 'cmd:*', 'plugin:*', 'cli:*'],
   },
   bypass: { deny: [], ask: [], allow: ['*'] },
