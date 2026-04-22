@@ -13575,6 +13575,14 @@ function handleAppsAgentStep(msg) {
     _appsAppendLog({ kind: 'stuck', text: 'Stuck: ' + (msg.reason || ''), klass: 'stuck' });
     return;
   }
+  if (kind === 'research') {
+    _appsAppendLog({ kind: 'research', text: 'Research notes arrived', klass: 'memory', pre: msg.summary || '' });
+    return;
+  }
+  if (kind === 'memory') {
+    _appsAppendLog({ kind: 'memory', text: '[' + (msg.section || '?') + '] ' + (msg.note || ''), klass: 'memory' });
+    return;
+  }
   if (kind === 'done') {
     _appsAppendLog({ kind: 'done', text: msg.summary || 'Done.', klass: 'done' });
     _appsState.running = false;

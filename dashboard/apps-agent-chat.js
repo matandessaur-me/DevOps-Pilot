@@ -12,6 +12,7 @@
 
 const https = require('https');
 const memory = require('./apps-memory');
+const learning = require('./apps-learning-loop');
 
 const MAX_ITERATIONS = 40;
 const DEFAULT_MAX_TOKENS = 1024;
@@ -705,6 +706,8 @@ async function runSession({ session, task, driver, providerEntry, model, broadca
 
       const pairs = [];
       let finished = false;
+      let stuckSignal = null;
+      const lastActionsForObserver = [];
       for (const tc of resp.toolCalls) {
         if (session.stopped) break;
         emit({ kind: 'action', tool: tc.name, args: tc.args, summary: describeAction(tc.name, tc.args) });
@@ -715,8 +718,22 @@ async function runSession({ session, task, driver, providerEntry, model, broadca
           finalSummary = 'Stopped: the same action was repeated without progress.';
           finished = true; break;
         }
+        // Retry-with-variation guard: if this exact call recently failed,
+        // reject it before executing so the model must try something new.
+        const dup = learning.alreadyFailedIdentically(session, tc.name, tc.args);
+        if (dup) {
+          const msg = `Already tried ${tc.name} with these exact args and it failed. Try a different approach (different coordinates, a different tool, or declare_stuck).`;
+          const errBlock = providerEntry.adapter.kind === 'anthropic' ? [{ type: 'text', text: msg }] : msg;
+          pairs.push({ toolUseId: tc.id, name: tc.name, blocks: errBlock, isError: true });
+          emit({ kind: 'observation', tool: tc.name, ok: false, error: msg, code: 'already_tried' });
+          learning.trackTry(session, tc.name, tc.args);
+          lastActionsForObserver.push({ tool: tc.name, summary: describeAction(tc.name, tc.args), ok: false, error: 'already_tried' });
+          continue;
+        }
         try {
+          learning.trackTry(session, tc.name, tc.args);
           const result = await executeTool(driver, session, tc.name, tc.args);
+          learning.recordOutcome(session, tc.name, tc.args, true);
           pairs.push({
             toolUseId: tc.id, name: tc.name,
             blocks: providerEntry.adapter.buildToolResultBlocks(tc.name, result),
@@ -728,17 +745,23 @@ async function runSession({ session, task, driver, providerEntry, model, broadca
           // when the tool result itself is consumed by the model.
           if (tc.name === 'screenshot' && result && result.base64) {
             emit({ kind: 'screenshot', base64: result.base64, mimeType: result.mimeType || 'image/jpeg', width: result.width, height: result.height, rect: result.rect });
+            learning.noteScreenshot(session, result);
           }
+          learning.noteAction(session, tc.name);
+          lastActionsForObserver.push({ tool: tc.name, summary: describeAction(tc.name, tc.args), ok: true });
           emit({ kind: 'observation', tool: tc.name, ok: true, preview: summarizeResultForUi(tc.name, result) });
           if (tc.name === 'finish') { finished = true; finalSummary = (tc.args && tc.args.summary) || 'Done.'; break; }
           if (tc.name === 'declare_stuck') {
-            emit({ kind: 'stuck', reason: (tc.args && tc.args.reason) || '' });
+            stuckSignal = (tc.args && tc.args.reason) || 'declared stuck';
+            emit({ kind: 'stuck', reason: stuckSignal });
           }
         } catch (e) {
+          learning.recordOutcome(session, tc.name, tc.args, false);
           const errText = 'Error: ' + (e.message || String(e)) + (e.code ? ` (${e.code})` : '');
           const errBlock = providerEntry.adapter.kind === 'anthropic' ? [{ type: 'text', text: errText }] : errText;
           pairs.push({ toolUseId: tc.id, name: tc.name, blocks: errBlock, isError: true });
           emit({ kind: 'observation', tool: tc.name, ok: false, error: e.message, code: e.code || null });
+          lastActionsForObserver.push({ tool: tc.name, summary: describeAction(tc.name, tc.args), ok: false, error: e.message });
         }
       }
       if (pairs.length) {
@@ -749,6 +772,40 @@ async function runSession({ session, task, driver, providerEntry, model, broadca
         }
       }
       if (finished) break;
+
+      // Stuck detection: either explicit declare_stuck or heuristic.
+      if (!stuckSignal) {
+        const probe = learning.isStuck(session);
+        if (probe.stuck) stuckSignal = probe.reason;
+      }
+      if (stuckSignal && !session._researchFired) {
+        session._researchFired = true;
+        emit({ kind: 'stuck', reason: stuckSignal });
+        const research = await learning.runResearch({
+          session, providerEntry, model,
+          goal: session.goal || task.slice(0, 200),
+          reason: stuckSignal,
+        });
+        emit({ kind: 'research', provider: research.provider, summary: research.summary });
+        // Inject research as a user turn so the main loop picks it up.
+        const inject = `Research notes (use these to try a different approach):\n\n${research.summary}`;
+        if (providerEntry.adapter.kind === 'gemini') session.messages.push({ role: 'user', parts: [{ text: inject }] });
+        else session.messages.push({ role: 'user', content: inject });
+      }
+
+      // Observer pass: every N actions, fire-and-forget a side call to
+      // capture anything memory-worthy.
+      if (learning.shouldObserve(session)) {
+        // Don't block the main loop on this; fire concurrently.
+        learning.runObserver({
+          session, providerEntry, model,
+          lastActions: lastActionsForObserver,
+        }).then(r => {
+          if (r && r.wrote) {
+            emit({ kind: 'memory', section: r.section, note: r.note, source: 'observer' });
+          }
+        }).catch(() => {});
+      }
     }
     if (!finalSummary) finalSummary = iter >= MAX_ITERATIONS ? `Stopped after ${MAX_ITERATIONS} steps.` : 'Done.';
     emit({ kind: 'done', summary: finalSummary });
