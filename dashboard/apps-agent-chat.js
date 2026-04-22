@@ -654,11 +654,6 @@ function buildProviderRegistry(aiKeys) {
   if (aiKeys.ANTHROPIC_API_KEY) registry.anthropic = { adapter: makeAnthropicAdapter(), keyEnv: 'ANTHROPIC_API_KEY', apiKey: aiKeys.ANTHROPIC_API_KEY };
   if (aiKeys.OPENAI_API_KEY) {
     registry.openai = { adapter: makeOpenAIAdapter({ baseHost: 'api.openai.com', label: 'OpenAI', defaultModel: 'gpt-4o' }), keyEnv: 'OPENAI_API_KEY', apiKey: aiKeys.OPENAI_API_KEY };
-    registry['openai-realtime'] = {
-      adapter: { kind: 'openai-realtime', label: 'OpenAI Realtime', defaultModel: 'gpt-realtime', streaming: true },
-      keyEnv: 'OPENAI_API_KEY',
-      apiKey: aiKeys.OPENAI_API_KEY,
-    };
   }
   if (aiKeys.XAI_API_KEY) {
     registry.grok = { adapter: makeOpenAIAdapter({ baseHost: 'api.x.ai', label: 'Grok', defaultModel: 'grok-2-latest' }), keyEnv: 'XAI_API_KEY', apiKey: aiKeys.XAI_API_KEY };
@@ -666,14 +661,7 @@ function buildProviderRegistry(aiKeys) {
   if (aiKeys.DASHSCOPE_API_KEY) {
     registry.qwen = { adapter: makeOpenAIAdapter({ baseHost: 'dashscope-intl.aliyuncs.com', basePath: '/compatible-mode/v1/chat/completions', label: 'Qwen', defaultModel: 'qwen-plus' }), keyEnv: 'DASHSCOPE_API_KEY', apiKey: aiKeys.DASHSCOPE_API_KEY };
   }
-  if (aiKeys.GEMINI_API_KEY) {
-    registry.gemini = { adapter: makeGeminiAdapter(), keyEnv: 'GEMINI_API_KEY', apiKey: aiKeys.GEMINI_API_KEY };
-    registry['gemini-live'] = {
-      adapter: { kind: 'gemini-live', label: 'Gemini Live', defaultModel: 'gemini-2.0-flash-exp', streaming: true },
-      keyEnv: 'GEMINI_API_KEY',
-      apiKey: aiKeys.GEMINI_API_KEY,
-    };
-  }
+  if (aiKeys.GEMINI_API_KEY) registry.gemini = { adapter: makeGeminiAdapter(), keyEnv: 'GEMINI_API_KEY', apiKey: aiKeys.GEMINI_API_KEY };
   return registry;
 }
 

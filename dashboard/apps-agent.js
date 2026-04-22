@@ -11,21 +11,9 @@
 
 const driver = require('./apps-driver');
 const chat = require('./apps-agent-chat');
-const live = require('./apps-agent-chat-live');
 const memory = require('./apps-memory');
 
-function isStreamingAdapter(adapter) {
-  return !!(adapter && adapter.streaming);
-}
-
 function runSessionForEntry({ entry, session, task, driver, model, broadcast }) {
-  const kind = entry.adapter && entry.adapter.kind;
-  if (kind === 'gemini-live') {
-    return live.runGeminiLive({ session, task, driver, providerEntry: entry, model, broadcast });
-  }
-  if (kind === 'openai-realtime') {
-    return live.runOpenAIRealtime({ session, task, driver, providerEntry: entry, model, broadcast });
-  }
   return chat.runSession({ session, task, driver, providerEntry: entry, model, broadcast });
 }
 
@@ -177,9 +165,6 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     if (session.abortController) {
       try { session.abortController.abort(); } catch (_) {}
     }
-    if (typeof session._liveStop === 'function') {
-      try { session._liveStop(); } catch (_) {}
-    }
     driver.stop();
     if (typeof broadcast === 'function') {
       broadcast({ type: 'apps-agent-step', sessionId, kind: 'stopped', at: Date.now() });
@@ -266,7 +251,6 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     for (const s of chat.sessions.values()) {
       s.stopped = true;
       if (s.abortController) { try { s.abortController.abort(); } catch (_) {} }
-      if (typeof s._liveStop === 'function') { try { s._liveStop(); } catch (_) {} }
     }
     driver.stop();
     if (typeof broadcast === 'function') {
