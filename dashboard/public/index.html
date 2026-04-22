@@ -944,7 +944,7 @@
       font-size: 9px; color: var(--overlay1); margin-top: 2px;
     }
     .apps-viewport {
-      background: var(--mantle); display: flex; align-items: center; justify-content: center;
+      background: transparent; display: flex; align-items: center; justify-content: center;
       position: relative; overflow: hidden; border-radius: 6px;
     }
     .apps-viewport img {
@@ -953,15 +953,8 @@
       image-rendering: -webkit-optimize-contrast;
     }
     .apps-viewport .apps-viewport-empty {
-      color: var(--subtext0); font: 12px/1.7 var(--font-ui); text-align: center;
-      padding: 24px 32px; max-width: 480px;
-      display: flex; flex-direction: column; align-items: center; gap: 10px;
-    }
-    .apps-viewport .apps-viewport-empty::before {
-      content: ''; width: 40px; height: 40px; border-radius: 10px;
-      background: color-mix(in srgb, var(--accent) 16%, transparent);
-      border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-      display: block;
+      color: var(--subtext0); font: 12px var(--font-ui); text-align: center;
+      padding: 16px;
     }
     .apps-viewport .apps-click-dot {
       position: absolute; width: 18px; height: 18px; border-radius: 50%;
@@ -4614,8 +4607,7 @@
           <div class="apps-viewport-wrap">
             <div class="apps-viewport" id="appsViewport">
               <div class="apps-viewport-empty" id="appsViewportEmpty">
-                Pick a window and start a goal. The AI will show its work here.<br><br>
-                Heads-up: this takes over your real mouse and keyboard. Keep your hands off until it finishes or you stop it.
+                Pick a window to start.
               </div>
               <img id="appsViewportImg" alt="target window" style="display:none;">
             </div>
