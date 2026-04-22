@@ -4104,8 +4104,9 @@
         <div class="tab-bar-scroll" id="tabBarScroll">
           <button class="tab-btn active" data-tab="terminal" onclick="switchTab('terminal')">Terminal</button>
           <button class="tab-btn" data-tab="orchestrator" id="orchestratorTabBtn" onclick="switchTab('orchestrator')">Orchestrator</button>
-          <button class="tab-btn" data-tab="browser" id="browserTabBtn" onclick="switchTab('browser')">Browser</button>
-          <button class="tab-btn" data-tab="apps" id="appsTabBtn" onclick="switchTab('apps')">Apps</button>
+          <button class="tab-btn" data-tab="automation" id="automationTabBtn" onclick="switchTab('automation')">Automation</button>
+          <button class="tab-btn" data-tab="browser" id="browserTabBtn" onclick="switchTab('browser')" style="display:none;">Browser</button>
+          <button class="tab-btn" data-tab="apps" id="appsTabBtn" onclick="switchTab('apps')" style="display:none;">Apps</button>
           <button class="tab-btn" data-tab="backlog" data-plugin-id="azure-devops" id="backlogTabBtn" onclick="switchTab('backlog')" style="display:none;">Backlog</button>
           <button class="tab-btn" data-tab="workitem" id="workitemTabBtn" onclick="switchTab('workitem')" style="display:none;">Work Item</button>
           <button class="tab-btn closable" data-tab="recipe-editor" id="recipeEditorTabBtn" onclick="switchTab('recipe-editor')" style="display:none;"><span>Recipe Editor</span><span class="tab-close" onclick="event.stopPropagation();closeRecipeEditor();" title="Close">&times;</span></button>
@@ -4121,6 +4122,15 @@
         <button class="tab-bar-btn" onclick="toggleOpenTabMenu()" title="Open a plugin tab"><i data-lucide="puzzle" style="width:13px;height:13px;"></i> Plugins</button>
         <div class="tab-open-menu" id="tabOpenMenu"></div>
       </div>
+    </div>
+
+    <div class="automation-subtabs" id="automationSubtabs" style="display:none;align-items:center;gap:2px;padding:4px 10px;border-bottom:1px solid var(--surface1);background:var(--mantle);">
+      <button class="sy-btn sy-btn-ghost" type="button" id="automationSubBrowser" onclick="switchAutomationSubTab('browser')" style="height:26px;padding:0 12px;font:500 11px var(--font-ui);border-radius:4px;">
+        <i data-lucide="globe" style="width:12px;height:12px;"></i> Browser
+      </button>
+      <button class="sy-btn sy-btn-ghost" type="button" id="automationSubApps" onclick="switchAutomationSubTab('apps')" style="height:26px;padding:0 12px;font:500 11px var(--font-ui);border-radius:4px;">
+        <i data-lucide="app-window" style="width:12px;height:12px;"></i> Apps
+      </button>
     </div>
 
     <!-- Terminal -->
@@ -11326,6 +11336,23 @@ function askAi(prompt) {
 
 // ── Tab Switching ───────────────────────────────────────────────────────
 function switchTab(tab, preserveSearch) {
+  // Remap legacy direct calls to the now-nested sub-tabs: keep the top
+  // "Automation" button highlighted and show the sub-tab strip while
+  // activating the underlying panel.
+  if (tab === 'browser' || tab === 'apps') {
+    _setAutomationSubTab(tab, { activate: true });
+    tab = 'automation';
+  }
+  // When we enter the synthetic automation tab, show the sub-bar and
+  // resolve which child panel should be active.
+  var panelTab = tab;
+  if (tab === 'automation') {
+    var sub = _getAutomationSubTab();
+    _setAutomationSubTab(sub, { activate: false });
+    panelTab = sub;
+  } else {
+    _hideAutomationSubBar();
+  }
   try { _pushFocus({ activeTab: tab }); } catch (_) {}
   document.querySelectorAll('.tab-btn').forEach(el => {
     var isActive = el.dataset.tab === tab;
@@ -11341,7 +11368,7 @@ function switchTab(tab, preserveSearch) {
       }
     }
   });
-  document.querySelectorAll('.tab-panel').forEach(el => el.classList.toggle('active', el.id === `panel-${tab}`));
+  document.querySelectorAll('.tab-panel').forEach(el => el.classList.toggle('active', el.id === `panel-${panelTab}`));
   // Scroll active tab into view if overflowed
   var activeBtn = document.querySelector('.tab-btn[data-tab="' + tab + '"]');
   if (activeBtn) activeBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
@@ -11354,8 +11381,36 @@ function switchTab(tab, preserveSearch) {
   if (tab === 'prs') { populatePRsRepoSelect(); loadPRs(); }
   if (tab === 'notes') loadNotesList();
   if (tab === 'orchestrator') orchRefresh();
-  if (tab === 'apps' && typeof appsRefreshWindows === 'function') appsRefreshWindows();
-  notifyPluginIframes('tabActivated', { tab: tab });
+  if (panelTab === 'apps' && typeof appsRefreshWindows === 'function') appsRefreshWindows();
+  notifyPluginIframes('tabActivated', { tab: panelTab });
+}
+
+const _AUTOMATION_SUB_KEY = 'symphonee-automation-subtab-v1';
+function _getAutomationSubTab() {
+  try { const v = localStorage.getItem(_AUTOMATION_SUB_KEY); if (v === 'browser' || v === 'apps') return v; } catch (_) {}
+  return 'apps';
+}
+function _saveAutomationSubTab(v) { try { localStorage.setItem(_AUTOMATION_SUB_KEY, v); } catch (_) {} }
+function _hideAutomationSubBar() {
+  const el = document.getElementById('automationSubtabs');
+  if (el) el.style.display = 'none';
+}
+function _setAutomationSubTab(which, opts) {
+  opts = opts || {};
+  if (which !== 'browser' && which !== 'apps') which = 'apps';
+  _saveAutomationSubTab(which);
+  const bar = document.getElementById('automationSubtabs');
+  const btnBrowser = document.getElementById('automationSubBrowser');
+  const btnApps = document.getElementById('automationSubApps');
+  if (bar) bar.style.display = 'flex';
+  const activeStyle = 'background:var(--surface1);color:var(--text);';
+  const inactiveStyle = 'background:transparent;color:var(--subtext1);';
+  if (btnBrowser) btnBrowser.style.cssText += ';' + (which === 'browser' ? activeStyle : inactiveStyle);
+  if (btnApps) btnApps.style.cssText += ';' + (which === 'apps' ? activeStyle : inactiveStyle);
+}
+function switchAutomationSubTab(which) {
+  _setAutomationSubTab(which, { activate: true });
+  switchTab('automation');
 }
 
 function switchIntelTab(tab) {
