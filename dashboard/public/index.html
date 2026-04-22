@@ -4960,7 +4960,7 @@
       <textarea id="appsInstructionsText" style="flex:1; width:100%; min-height:260px; box-sizing:border-box; background:var(--bg); color:var(--text); border:1px solid var(--surface2); border-radius:6px; padding:10px 12px; font:12px/1.5 var(--font-mono); resize:vertical; outline:none;" spellcheck="false"></textarea>
       <input type="file" id="appsInstructionsFile" accept=".md,.txt,.markdown" style="display:none;" onchange="appsImportInstructionsFile(event)">
     </div>
-    <div class="modal-footer" style="display:flex; gap:8px; justify-content:flex-end; align-items:center; flex-wrap:wrap;">
+    <div class="modal-footer" style="display:flex; gap:8px; justify-content:flex-end; align-items:center; flex-wrap:wrap; margin-top:14px; padding-top:12px; border-top:1px solid var(--surface1);">
       <span id="appsInstructionsStatus" style="margin-right:auto; font:11px var(--font-ui); color:var(--subtext0);"></span>
       <button class="modal-btn" onclick="appsClearInstructions()" style="color:var(--red);border-color:var(--red);">Clear all</button>
       <button class="modal-btn" onclick="appsExportInstructions()">Export .md</button>
@@ -13827,7 +13827,13 @@ function appsExportInstructions() {
 async function appsClearInstructions() {
   const app = _appsInstructionsKey();
   if (!app) return;
-  if (!confirm('Wipe all memory for "' + app + '"?\n\nKeeps the frontmatter but removes every learning and failure-mode note the agent wrote. Useful when old sessions poisoned the file with duplicates.')) return;
+  const ok = await confirmDialog(
+    'Wipe all memory for "' + app + '"?\n\n' +
+    'This removes every learning, DO, DON\'T, and note the agent has saved for this app. ' +
+    'Useful when old sessions poisoned the file with duplicates. User-written Instructions are also cleared.',
+    { confirmText: 'Yes, clear', cancelText: 'Cancel', danger: true }
+  );
+  if (!ok) return;
   const statusEl = document.getElementById('appsInstructionsStatus');
   if (statusEl) statusEl.textContent = 'Clearing...';
   try {
@@ -13838,9 +13844,11 @@ async function appsClearInstructions() {
     const data = await r.json();
     if (!r.ok || data.error) throw new Error(data.error || 'clear failed');
     if (statusEl) statusEl.textContent = 'Cleared.';
+    if (typeof toast === 'function') toast('Instructions cleared for ' + app, 'success', { duration: 2000 });
     setTimeout(() => appsOpenInstructions(), 150);
   } catch (e) {
     if (statusEl) statusEl.textContent = 'Clear failed: ' + e.message;
+    if (typeof toast === 'function') toast('Clear failed: ' + e.message, 'error');
   }
 }
 
