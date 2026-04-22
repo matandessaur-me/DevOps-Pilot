@@ -422,11 +422,14 @@
     /* ── Center panel ─────────────────────────────────────────────────────── */
     .center {
       display: grid;
-      grid-template-rows: var(--term-bar-h) 1fr;
+      grid-template-rows: var(--term-bar-h) auto 1fr;
       overflow: hidden;
       min-width: 0;
       position: relative;
     }
+    .center > .tab-bar { grid-row: 1; }
+    .center > .automation-subtabs { grid-row: 2; }
+    .center > .tab-panel { grid-row: 3; grid-column: 1; }
 
     /* ── Tab bar ───────────────────────────────────────────────────────────── */
     .tab-bar {
