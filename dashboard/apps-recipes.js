@@ -215,6 +215,85 @@ function listHistory(app) {
   return _loadHist(app);
 }
 
+// ─── Tests ─────────────────────────────────────────────────────────────
+// A test references a recipe (macro), supplies inputs, and names the
+// post-run assertions. Stored per-app in a second JSON file.
+const TEST_DIR = path.join(__dirname, 'app-recipe-tests');
+
+function _testsPath(app) {
+  return path.join(TEST_DIR, normalizeApp(app) + '.json');
+}
+
+function _loadTests(app) {
+  try { fs.mkdirSync(TEST_DIR, { recursive: true }); } catch (_) {}
+  const p = _testsPath(app);
+  if (!fs.existsSync(p)) return { app: normalizeApp(app), tests: [] };
+  try {
+    const data = JSON.parse(fs.readFileSync(p, 'utf8') || '{}');
+    if (!Array.isArray(data.tests)) data.tests = [];
+    return { app: normalizeApp(app), tests: data.tests };
+  } catch (_) {
+    return { app: normalizeApp(app), tests: [] };
+  }
+}
+
+function _writeTests(app, data) {
+  try { fs.mkdirSync(TEST_DIR, { recursive: true }); } catch (_) {}
+  fs.writeFileSync(_testsPath(app), JSON.stringify(data, null, 2), 'utf8');
+}
+
+function _validateTest(raw) {
+  if (!raw || typeof raw !== 'object') throw new Error('test must be an object');
+  const name = String(raw.name || '').trim();
+  const macro = String(raw.macro || '').trim();
+  if (!name) throw new Error('test name required');
+  if (!macro) throw new Error('macro (recipe id) required');
+  const inputs = (raw.inputs && typeof raw.inputs === 'object') ? raw.inputs : {};
+  const expected = raw.expected && typeof raw.expected === 'object' ? raw.expected : {};
+  const out = {
+    name: name.slice(0, 120),
+    macro: macro.slice(0, 120),
+    inputs,
+    expected: {
+      outcome: ['ok', 'failed', 'aborted'].includes(expected.outcome) ? expected.outcome : 'ok',
+      elementsPresent: Array.isArray(expected.elementsPresent)
+        ? expected.elementsPresent.map(s => String(s).slice(0, 300)).filter(Boolean) : [],
+      elementsAbsent: Array.isArray(expected.elementsAbsent)
+        ? expected.elementsAbsent.map(s => String(s).slice(0, 300)).filter(Boolean) : [],
+    },
+  };
+  return out;
+}
+
+function listTests(app) { return _loadTests(app); }
+function getTest(app, id) {
+  const { tests } = _loadTests(app);
+  return tests.find(t => t.id === id) || null;
+}
+function saveTest(app, raw) {
+  const v = _validateTest(raw);
+  const data = _loadTests(app);
+  const now = new Date().toISOString();
+  const id = raw.id || ('t_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6));
+  const existing = data.tests.find(t => t.id === id);
+  const record = { id, ...v, createdAt: existing ? existing.createdAt : now, updatedAt: now };
+  if (existing) {
+    data.tests[data.tests.findIndex(t => t.id === id)] = record;
+  } else {
+    data.tests.push(record);
+  }
+  _writeTests(app, data);
+  return { ok: true, test: record };
+}
+function deleteTest(app, id) {
+  const data = _loadTests(app);
+  const idx = data.tests.findIndex(t => t.id === id);
+  if (idx < 0) return { ok: false, error: 'not found' };
+  data.tests.splice(idx, 1);
+  _writeTests(app, data);
+  return { ok: true };
+}
+
 // Convert the action log a chat session collected during a run into a
 // concrete recipe. Clicks with hand-tuned coordinates stay as explicit
 // "x,y" targets so playback is deterministic and doesn't need the vision
@@ -278,4 +357,8 @@ module.exports = {
   recordRun,
   listHistory,
   actionsToSteps,
+  listTests,
+  getTest,
+  saveTest,
+  deleteTest,
 };

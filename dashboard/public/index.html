@@ -5027,7 +5027,14 @@
       </button>
     </div>
     <div class="modal-body" style="flex:1; display:flex; gap:12px; min-height:0; overflow:hidden;">
-      <div id="appsAutomationsList" style="width:240px; min-width:200px; overflow-y:auto; border-right:1px solid var(--surface1); padding-right:10px; display:flex; flex-direction:column; gap:4px;"></div>
+      <div style="width:240px; min-width:200px; display:flex; flex-direction:column; gap:6px; border-right:1px solid var(--surface1); padding-right:10px;">
+        <div style="display:inline-flex;background:var(--surface0);border:1px solid var(--surface2);border-radius:5px;overflow:hidden;">
+          <button type="button" id="appsAutoTabRecipes" onclick="appsAutomationsSetTab('recipes')" style="flex:1;background:var(--surface1);color:var(--text);border:none;padding:5px 10px;font:500 11px var(--font-ui);cursor:pointer;">Recipes</button>
+          <button type="button" id="appsAutoTabTests" onclick="appsAutomationsSetTab('tests')" style="flex:1;background:transparent;color:var(--subtext1);border:none;padding:5px 10px;font:500 11px var(--font-ui);cursor:pointer;">Tests</button>
+        </div>
+        <div id="appsAutomationsList" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:4px;"></div>
+        <div id="appsAutomationsTestsList" style="display:none; flex:1; overflow-y:auto; flex-direction:column; gap:4px;"></div>
+      </div>
       <div id="appsAutomationsEditor" style="flex:1; display:flex; flex-direction:column; gap:10px; min-width:0;">
         <div id="appsAutomationsEmpty" style="color:var(--subtext0); font:12px var(--font-ui); padding:24px 12px; text-align:center;">
           Select an automation on the left or click New to create one.
@@ -5062,6 +5069,23 @@
             Verbs: CLICK, TYPE, PRESS, WAIT, FIND, VERIFY, IF/ELSE/ENDIF, REPEAT/ENDREPEAT. Arrow <code>-&gt;</code> separates a target from typed text (e.g. <code>TYPE input -&gt; hello</code>). Coordinates <code>x,y</code> skip the vision locator.
           </div>
         </div>
+        <div id="appsAutomationsTestForm" style="display:none; flex:1; flex-direction:column; gap:8px; min-width:0;">
+          <input type="text" id="appsTestName" placeholder="Test name (e.g. Export round-trip)" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:8px 10px;font:13px var(--font-ui);outline:none;">
+          <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">Macro (recipe to run)</div>
+          <select id="appsTestMacro" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px var(--font-ui);outline:none;"></select>
+          <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">Inputs <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--overlay1);">- one <code>name = value</code> per line</span></div>
+          <textarea id="appsTestInputs" rows="3" placeholder="filename = regression-report&#10;count = 5" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px/1.4 var(--font-mono);outline:none;resize:vertical;"></textarea>
+          <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">Expected outcome</div>
+          <select id="appsTestOutcome" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px var(--font-ui);outline:none;">
+            <option value="ok">ok - recipe finishes successfully</option>
+            <option value="failed">failed - recipe should fail</option>
+            <option value="aborted">aborted</option>
+          </select>
+          <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">Elements that must be present at end <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--overlay1);">- one description per line</span></div>
+          <textarea id="appsTestPresent" rows="2" placeholder="Success toast&#10;Save button enabled" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px/1.4 var(--font-mono);outline:none;resize:vertical;"></textarea>
+          <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">Elements that must be absent <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--overlay1);">- one per line</span></div>
+          <textarea id="appsTestAbsent" rows="2" placeholder="Error banner&#10;Loading spinner" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px/1.4 var(--font-mono);outline:none;resize:vertical;"></textarea>
+        </div>
         <div id="appsAutomationsHistory" style="display:none; flex:1; flex-direction:column; gap:6px; min-height:0; overflow:hidden;">
           <div style="display:flex;align-items:center;gap:8px;">
             <strong style="font:600 11px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">Recent runs</strong>
@@ -5073,10 +5097,16 @@
     </div>
     <div class="modal-footer" style="display:flex; gap:8px; justify-content:flex-end; align-items:center; margin-top:14px; padding-top:12px; border-top:1px solid var(--surface1);">
       <span id="appsAutomationsStatus" style="margin-right:auto; font:11px var(--font-ui); color:var(--subtext0);"></span>
-      <button class="modal-btn" id="appsAutomationsDeleteBtn" onclick="appsAutomationsDelete()" style="display:none;color:var(--red);border-color:var(--red);">Delete</button>
-      <button class="modal-btn" onclick="appsAutomationsRunSelected()">Use in next run</button>
+      <span id="appsAutomationsRecipesFooter" style="display:contents;">
+        <button class="modal-btn" id="appsAutomationsDeleteBtn" onclick="appsAutomationsDelete()" style="display:none;color:var(--red);border-color:var(--red);">Delete</button>
+        <button class="modal-btn" onclick="appsAutomationsRunSelected()">Use in next run</button>
+      </span>
+      <span id="appsAutomationsTestsFooter" style="display:none;">
+        <button class="modal-btn" id="appsTestDeleteBtn" onclick="appsTestDelete()" style="display:none;color:var(--red);border-color:var(--red);">Delete</button>
+        <button class="modal-btn" onclick="appsTestRunSelected()">Run test</button>
+      </span>
       <button class="modal-btn" onclick="appsCloseAutomations()">Close</button>
-      <button class="modal-btn modal-btn-primary" onclick="appsAutomationsSave()">Save</button>
+      <button class="modal-btn modal-btn-primary" id="appsAutomationsSaveBtn" onclick="appsAutomationsMainSave()">Save</button>
     </div>
   </div>
 </div>
@@ -14057,7 +14087,41 @@ function appsImportInstructionsFile(event) {
 }
 
 // ═══ Automations ═════════════════════════════════════════════════════════
-const _appsAutomations = { current: null, dirty: false };
+const _appsAutomations = { current: null, dirty: false, tab: 'recipes', currentTest: null };
+
+function appsAutomationsSetTab(tab) {
+  _appsAutomations.tab = tab;
+  const tabR = document.getElementById('appsAutoTabRecipes');
+  const tabT = document.getElementById('appsAutoTabTests');
+  const listR = document.getElementById('appsAutomationsList');
+  const listT = document.getElementById('appsAutomationsTestsList');
+  const formR = document.getElementById('appsAutomationsForm');
+  const formT = document.getElementById('appsAutomationsTestForm');
+  const empty = document.getElementById('appsAutomationsEmpty');
+  const hist  = document.getElementById('appsAutomationsHistory');
+  const footR = document.getElementById('appsAutomationsRecipesFooter');
+  const footT = document.getElementById('appsAutomationsTestsFooter');
+  const isRecipes = tab === 'recipes';
+  tabR.style.background = isRecipes ? 'var(--surface1)' : 'transparent';
+  tabR.style.color = isRecipes ? 'var(--text)' : 'var(--subtext1)';
+  tabT.style.background = isRecipes ? 'transparent' : 'var(--surface1)';
+  tabT.style.color = isRecipes ? 'var(--subtext1)' : 'var(--text)';
+  listR.style.display = isRecipes ? 'flex' : 'none';
+  listT.style.display = isRecipes ? 'none' : 'flex';
+  formR.style.display = 'none';
+  formT.style.display = 'none';
+  hist.style.display = 'none';
+  empty.style.display = '';
+  footR.style.display = isRecipes ? 'contents' : 'none';
+  footT.style.display = isRecipes ? 'none' : 'contents';
+  if (isRecipes) _appsAutomationsReload();
+  else _appsRefreshTests();
+}
+
+function appsAutomationsMainSave() {
+  if (_appsAutomations.tab === 'tests') appsTestSave();
+  else appsAutomationsSave();
+}
 
 function _appsAutomationsApp() {
   return _appsInstructionsKey();
@@ -14392,6 +14456,181 @@ function _appsBuilderDrop(ev, i) {
 function _appsBuilderDragEnd() {
   _appsBuilderDragIdx = null;
   document.querySelectorAll('.apps-builder-row').forEach(el => { el.style.opacity = ''; el.style.outline = ''; });
+}
+
+// ───── Tests ────────────────────────────────────────────────────────────
+async function _appsRefreshTests() {
+  const app = _appsAutomationsApp();
+  if (!app) return;
+  try {
+    const r = await fetch('/api/apps/tests?app=' + encodeURIComponent(app));
+    const data = await r.json();
+    _appsState.tests = data.tests || [];
+    _appsRenderTestsList();
+  } catch (e) { if (typeof toast === 'function') toast('Load tests failed: ' + e.message, 'error'); }
+}
+
+function _appsRenderTestsList() {
+  const list = document.getElementById('appsAutomationsTestsList');
+  if (!list) return;
+  const tests = _appsState.tests || [];
+  const recipes = _appsState.recipes || [];
+  const header = `<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;"><button type="button" onclick="appsTestNew()" class="sy-btn sy-btn-outline" style="flex:1;height:26px;padding:0 8px;font-size:11px;display:inline-flex;align-items:center;justify-content:center;gap:4px;"><i data-lucide="plus" style="width:11px;height:11px;"></i> New test</button></div>`;
+  if (!tests.length) {
+    list.innerHTML = header + '<div style="color:var(--overlay1); font:11px var(--font-ui); padding:12px 6px; text-align:center;">No tests yet.</div>';
+    if (typeof lucide !== 'undefined') lucide.createIcons({ el: list });
+    return;
+  }
+  const rows = tests.map(t => {
+    const rec = recipes.find(r => r.id === t.macro);
+    const active = _appsAutomations.currentTest && _appsAutomations.currentTest.id === t.id;
+    return `<div onclick="appsTestSelect('${t.id}')" style="cursor:pointer;padding:7px 9px;border-radius:5px;border:1px solid ${active ? 'var(--accent)' : 'transparent'};background:${active ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'transparent'};display:flex;flex-direction:column;gap:2px;">
+      <div style="font:500 12px var(--font-ui);color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_appsEscape(t.name)}</div>
+      <div style="font:10px var(--font-ui);color:var(--subtext0);">macro: ${_appsEscape(rec ? rec.name : '(missing)')}</div>
+    </div>`;
+  }).join('');
+  list.innerHTML = header + rows;
+  if (typeof lucide !== 'undefined') lucide.createIcons({ el: list });
+}
+
+function _appsPopulateMacroSelect(selectedMacro) {
+  const sel = document.getElementById('appsTestMacro');
+  if (!sel) return;
+  const recipes = _appsState.recipes || [];
+  if (!recipes.length) { sel.innerHTML = '<option value="">No recipes saved yet - create one first</option>'; sel.disabled = true; return; }
+  sel.disabled = false;
+  sel.innerHTML = recipes.map(r => `<option value="${r.id}"${r.id === selectedMacro ? ' selected' : ''}>${_appsEscape(r.name)}</option>`).join('');
+}
+
+function _appsTestShowForm(show) {
+  document.getElementById('appsAutomationsEmpty').style.display = show ? 'none' : '';
+  document.getElementById('appsAutomationsTestForm').style.display = show ? 'flex' : 'none';
+}
+
+function _appsInputsMapToText(m) { return Object.entries(m || {}).map(([k, v]) => `${k} = ${v}`).join('\n'); }
+function _appsInputsTextToMap(text) {
+  const out = {};
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq < 0) throw new Error('input line missing "=": ' + line);
+    out[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+  }
+  return out;
+}
+function _appsLinesToArray(text) {
+  return String(text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+}
+
+function appsTestNew() {
+  // Reload recipes so the macro dropdown is fresh.
+  _appsAutomationsReload().then(() => {
+    _appsAutomations.currentTest = { id: null, name: '', macro: '', inputs: {}, expected: { outcome: 'ok', elementsPresent: [], elementsAbsent: [] } };
+    _appsTestShowForm(true);
+    document.getElementById('appsTestName').value = '';
+    _appsPopulateMacroSelect('');
+    document.getElementById('appsTestInputs').value = '';
+    document.getElementById('appsTestOutcome').value = 'ok';
+    document.getElementById('appsTestPresent').value = '';
+    document.getElementById('appsTestAbsent').value = '';
+    document.getElementById('appsTestDeleteBtn').style.display = 'none';
+    document.getElementById('appsTestName').focus();
+    _appsRenderTestsList();
+  });
+}
+
+function appsTestSelect(id) {
+  const test = (_appsState.tests || []).find(t => t.id === id);
+  if (!test) return;
+  _appsAutomations.currentTest = JSON.parse(JSON.stringify(test));
+  _appsTestShowForm(true);
+  document.getElementById('appsTestName').value = test.name;
+  _appsPopulateMacroSelect(test.macro);
+  document.getElementById('appsTestInputs').value = _appsInputsMapToText(test.inputs || {});
+  document.getElementById('appsTestOutcome').value = (test.expected && test.expected.outcome) || 'ok';
+  document.getElementById('appsTestPresent').value = (test.expected && test.expected.elementsPresent || []).join('\n');
+  document.getElementById('appsTestAbsent').value = (test.expected && test.expected.elementsAbsent || []).join('\n');
+  document.getElementById('appsTestDeleteBtn').style.display = '';
+  _appsRenderTestsList();
+}
+
+async function appsTestSave() {
+  const app = _appsAutomationsApp();
+  if (!app) return;
+  const statusEl = document.getElementById('appsAutomationsStatus');
+  const name = document.getElementById('appsTestName').value.trim();
+  const macro = document.getElementById('appsTestMacro').value;
+  if (!name) { if (statusEl) statusEl.textContent = 'Test name required.'; return; }
+  if (!macro) { if (statusEl) statusEl.textContent = 'Pick a macro to run.'; return; }
+  let inputs;
+  try { inputs = _appsInputsTextToMap(document.getElementById('appsTestInputs').value); }
+  catch (e) { if (statusEl) statusEl.textContent = 'Input error: ' + e.message; return; }
+  const test = {
+    id: _appsAutomations.currentTest && _appsAutomations.currentTest.id || undefined,
+    name, macro, inputs,
+    expected: {
+      outcome: document.getElementById('appsTestOutcome').value || 'ok',
+      elementsPresent: _appsLinesToArray(document.getElementById('appsTestPresent').value),
+      elementsAbsent: _appsLinesToArray(document.getElementById('appsTestAbsent').value),
+    },
+  };
+  try {
+    const r = await fetch('/api/apps/tests', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ app, test }),
+    });
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || 'save failed');
+    _appsAutomations.currentTest = data.test;
+    if (statusEl) statusEl.textContent = 'Test saved.';
+    await _appsRefreshTests();
+    document.getElementById('appsTestDeleteBtn').style.display = '';
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Save failed: ' + e.message;
+  }
+}
+
+async function appsTestDelete() {
+  const app = _appsAutomationsApp();
+  const t = _appsAutomations.currentTest;
+  if (!app || !t || !t.id) return;
+  const ok = await confirmDialog('Delete test "' + t.name + '"?', { confirmText: 'Delete', cancelText: 'Cancel', danger: true });
+  if (!ok) return;
+  await fetch('/api/apps/tests?app=' + encodeURIComponent(app) + '&id=' + encodeURIComponent(t.id), { method: 'DELETE' });
+  _appsAutomations.currentTest = null;
+  _appsTestShowForm(false);
+  await _appsRefreshTests();
+}
+
+async function appsTestRunSelected() {
+  const app = _appsAutomationsApp();
+  const t = _appsAutomations.currentTest;
+  if (!app || !t || !t.id) { if (typeof toast === 'function') toast('Select a saved test first.', 'warning'); return; }
+  if (!_appsState.hwnd) {
+    if (_appsState.pendingLaunchSpec) {
+      const ok = await _appsLaunchIfPending();
+      if (!ok) return;
+    } else {
+      if (typeof toast === 'function') toast('Pick an app first.', 'warning');
+      return;
+    }
+  }
+  try {
+    const r = await fetch('/api/apps/tests/run', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ app, testId: t.id, hwnd: _appsState.hwnd }),
+    });
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || 'test run failed');
+    _appsState.sessionId = data.sessionId;
+    _appsState.running = true;
+    _appsUpdateRunningChrome(true);
+    appsCloseAutomations();
+    if (typeof toast === 'function') toast('Running test "' + t.name + '"...', 'info', { duration: 2000 });
+  } catch (e) {
+    if (typeof toast === 'function') toast('Test run failed: ' + e.message, 'error');
+  }
 }
 
 async function appsSaveCurrentAsAutomation() {
@@ -14943,11 +15182,32 @@ function _appsRenderRecipeChip() {
     chip.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 8px;margin:0 0 6px 0;background:color-mix(in srgb, var(--accent) 14%, transparent);border:1px solid color-mix(in srgb, var(--accent) 40%, transparent);border-radius:5px;font:11px var(--font-ui);color:var(--text);';
     composer.parentNode.insertBefore(chip, composer);
   }
+  const stepThroughChecked = _appsState.stepThrough ? 'checked' : '';
   chip.innerHTML =
     '<i data-lucide="zap" style="width:11px;height:11px;color:var(--accent);"></i>' +
     '<span>Will run automation: <strong>' + _appsEscape(_appsState.selectedRecipeName || '') + '</strong></span>' +
+    '<label style="display:inline-flex;align-items:center;gap:4px;margin-left:10px;color:var(--subtext1);cursor:pointer;">' +
+      '<input type="checkbox" ' + stepThroughChecked + ' onchange="_appsToggleStepThrough(this.checked)" style="accent-color:var(--accent);">' +
+      '<span>Step through</span>' +
+    '</label>' +
     '<button type="button" onclick="appsClearSelectedRecipe()" title="Clear selection" style="margin-left:auto;background:transparent;border:none;color:var(--subtext0);cursor:pointer;padding:2px 6px;font:11px var(--font-ui);">clear</button>';
   if (typeof lucide !== 'undefined') lucide.createIcons({ el: chip });
+}
+
+function _appsToggleStepThrough(on) {
+  _appsState.stepThrough = !!on;
+}
+
+async function appsResumeStep() {
+  if (!_appsState.sessionId) return;
+  try {
+    await fetch('/api/apps/session/debug', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: _appsState.sessionId, action: 'resume' }),
+    });
+  } catch (e) {
+    if (typeof toast === 'function') toast('Resume failed: ' + e.message, 'error');
+  }
 }
 
 function _appsAutoresizeChatInput() {
@@ -15118,6 +15378,7 @@ async function _appsStartWithGoal(goal) {
         goal: recipeId ? undefined : goal,
         recipeId,
         inputs: runInputs || undefined,
+        stepThrough: recipeId ? !!_appsState.stepThrough : undefined,
         hwnd: _appsState.hwnd,
         app: appKey,
         provider: _appsState.providerKey || undefined,
@@ -15408,6 +15669,35 @@ function handleAppsAgentStep(msg) {
   }
   if (kind === 'step_done') {
     // Silent success marker; the screenshot broadcast right after carries the state visual.
+    return;
+  }
+  if (kind === 'step_paused') {
+    const entry = _appsAppendLog({ kind: 'paused', text: 'Paused at step ' + ((msg.index || 0) + 1) + '. Click Resume to continue.', klass: 'memory' });
+    if (entry) {
+      const btn = document.createElement('button');
+      btn.className = 'sy-btn sy-btn-outline';
+      btn.style.cssText = 'margin-left:8px;height:22px;padding:0 10px;font-size:11px;';
+      btn.textContent = 'Resume';
+      btn.onclick = () => { appsResumeStep(); btn.disabled = true; btn.textContent = 'Resuming...'; };
+      entry.appendChild(btn);
+    }
+    return;
+  }
+  if (kind === 'step_resumed') {
+    // Clean up any stale resume button rendered in an earlier paused row.
+    const list = document.getElementById('appsLogList');
+    if (list) list.querySelectorAll('.apps-log-entry.memory button.sy-btn').forEach(b => { if (b.textContent === 'Resuming...' || b.textContent === 'Resume') b.remove(); });
+    return;
+  }
+  if (kind === 'test_pass') {
+    _appsAppendLog({ kind: 'done', text: 'Test passed: ' + (msg.testName || '') + ' (' + (msg.durationMs || 0) + 'ms)', klass: 'done' });
+    if (typeof _appsRefreshTests === 'function') _appsRefreshTests();
+    return;
+  }
+  if (kind === 'test_fail') {
+    const reasons = (msg.failures || []).map(f => '- ' + f).join('\n');
+    _appsAppendLog({ kind: 'fail', text: 'Test failed: ' + (msg.testName || ''), klass: 'observation err', pre: reasons });
+    if (typeof _appsRefreshTests === 'function') _appsRefreshTests();
     return;
   }
   if (kind === 'memory_loaded') {

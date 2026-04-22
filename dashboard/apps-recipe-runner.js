@@ -338,6 +338,14 @@ async function runNode({ session, driver, node, variables, emit, ctx }) {
       emit({ kind: 'screenshot', base64: shot.base64, mimeType: shot.mimeType || 'image/jpeg', width: shot.width, height: shot.height, rect: shot.rect });
     }
   } catch (_) {}
+  // Step-through: if enabled, pause after each completed step until the UI
+  // releases the gate via /api/apps/session/debug.
+  if (session._stepThrough) {
+    emit({ kind: 'step_paused', index: ctx.index });
+    await new Promise((resolve) => { session._debugResolver = resolve; });
+    session._debugResolver = null;
+    emit({ kind: 'step_resumed', index: ctx.index });
+  }
 }
 
 function countLeaves(node) {
@@ -348,9 +356,10 @@ function countLeaves(node) {
   return 0;
 }
 
-async function runRecipe({ session, driver, recipe, broadcast, providerEntry, model, inputs }) {
+async function runRecipe({ session, driver, recipe, broadcast, providerEntry, model, inputs, stepThrough }) {
   const emit = emitter(broadcast, session.id);
   session.running = true;
+  session._stepThrough = !!stepThrough;
   // Merge order: static recipe.variables first, then per-run user inputs
   // override. This lets the UI prompt for {{filename}} / {{count}} / ... at
   // Run time while still honoring library-style variables defined on the
@@ -362,7 +371,11 @@ async function runRecipe({ session, driver, recipe, broadcast, providerEntry, mo
   emit({ kind: 'provider', provider: 'recipe-runner', label: 'Recipe Runner', streaming: false, recipe: { id: recipe.id, name: recipe.name } });
   emit({ kind: 'recipe_started', recipeId: recipe.id, name: recipe.name, stepCount: steps.length });
 
-  session._liveStop = () => { session._runnerAborted = true; };
+  session._liveStop = () => {
+    session._runnerAborted = true;
+    // Release any pending step-through gate so the runner can unwind.
+    if (typeof session._debugResolver === 'function') { session._debugResolver(); session._debugResolver = null; }
+  };
 
   const finalize = (outcome, extra) => {
     const durationMs = Date.now() - startedAt;
@@ -413,4 +426,4 @@ async function runRecipe({ session, driver, recipe, broadcast, providerEntry, mo
   }
 }
 
-module.exports = { runRecipe };
+module.exports = { runRecipe, locateTarget };

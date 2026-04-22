@@ -15,10 +15,10 @@ const memory = require('./apps-memory');
 const recipes = require('./apps-recipes');
 const recipeRunner = require('./apps-recipe-runner');
 
-function runSessionForEntry({ entry, session, task, driver, model, broadcast, recipe, inputs }) {
+function runSessionForEntry({ entry, session, task, driver, model, broadcast, recipe, inputs, stepThrough }) {
   if (recipe) {
     // Deterministic path: execute recipe steps directly against the driver.
-    return recipeRunner.runRecipe({ session, driver, recipe, broadcast, providerEntry: entry, model, inputs });
+    return recipeRunner.runRecipe({ session, driver, recipe, broadcast, providerEntry: entry, model, inputs, stepThrough });
   }
   return chat.runSession({ session, task, driver, providerEntry: entry, model, broadcast });
 }
@@ -168,7 +168,8 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
 
     session._providerRegistry = registry;
     const runInputs = (body.inputs && typeof body.inputs === 'object') ? body.inputs : null;
-    runSessionForEntry({ entry, session, task, driver, model, broadcast, recipe, inputs: runInputs })
+    const stepThrough = !!body.stepThrough;
+    runSessionForEntry({ entry, session, task, driver, model, broadcast, recipe, inputs: runInputs, stepThrough })
       .catch(e => {
         if (typeof broadcast === 'function') {
           broadcast({ type: 'apps-agent-step', sessionId: session.id, kind: 'error', message: e.message, at: Date.now() });
@@ -373,6 +374,120 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
   // "Save current session as a recipe". Takes the actions the chat loop
   // recorded on the session and turns them into a DSL step list the user
   // can rerun deterministically.
+  addRoute('GET', '/api/apps/tests', async (req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const app = url.searchParams.get('app');
+    if (!app) return json(res, { error: 'app required' }, 400);
+    json(res, { ok: true, ...recipes.listTests(app) });
+  });
+
+  addRoute('POST', '/api/apps/tests', async (req, res) => {
+    let body;
+    try { body = await readBody(req); } catch (e) { return json(res, { error: 'Bad JSON: ' + e.message }, 400); }
+    const app = String(body.app || '').trim();
+    if (!app) return json(res, { error: 'app required' }, 400);
+    try { json(res, recipes.saveTest(app, body.test || body)); }
+    catch (e) { json(res, { error: e.message }, 400); }
+  });
+
+  addRoute('DELETE', '/api/apps/tests', async (req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const app = url.searchParams.get('app');
+    const id = url.searchParams.get('id');
+    if (!app || !id) return json(res, { error: 'app and id required' }, 400);
+    json(res, recipes.deleteTest(app, id));
+  });
+
+  // Run a test: execute the referenced recipe with the test's inputs, then
+  // verify post-run assertions via the vision locator. Returns pass/fail
+  // with per-assertion detail.
+  addRoute('POST', '/api/apps/tests/run', async (req, res) => {
+    if (isIncognito()) return json(res, { error: 'Blocked by Incognito Mode.' }, 403);
+    let body;
+    try { body = await readBody(req); } catch (e) { return json(res, { error: 'Bad JSON: ' + e.message }, 400); }
+    const app = String(body.app || '').trim();
+    const testId = String(body.testId || '').trim();
+    const hwnd = Number(body.hwnd);
+    if (!app || !testId) return json(res, { error: 'app and testId required' }, 400);
+    if (!Number.isFinite(hwnd) || hwnd <= 0) return json(res, { error: 'hwnd required (pick an app first)' }, 400);
+    const test = recipes.getTest(app, testId);
+    if (!test) return json(res, { error: 'test not found' }, 404);
+    const recipe = recipes.getRecipe(app, test.macro);
+    if (!recipe) return json(res, { error: 'test references missing recipe ' + test.macro }, 400);
+
+    const sessionId = body.sessionId || ('test-' + Date.now().toString(36));
+    const session = chat.getSession(sessionId);
+    if (session.running) return json(res, { error: 'Session already running. Stop it first.' }, 409);
+
+    try { await driver.focusWindow(hwnd); }
+    catch (e) { return json(res, { error: 'focus failed: ' + e.message }, 400); }
+    session.hwnd = hwnd; session.app = app; session.goal = 'test:' + test.name;
+    session.stopped = false; driver.resetStopped();
+
+    const registry = buildRegistry();
+    const entry = chat.pickProvider(registry, 'anthropic') || chat.pickProvider(registry);
+    if (!entry) return json(res, { error: 'No AI provider configured (tests need Anthropic for the vision locator).' }, 400);
+    session._providerRegistry = registry;
+    session._providerEntry = entry;
+    session._model = entry.adapter.defaultModel;
+
+    json(res, { ok: true, sessionId, testId, starting: true });
+
+    // Run the recipe, then verify expectations.
+    const startedAt = Date.now();
+    const runRes = await require('./apps-recipe-runner').runRecipe({
+      session, driver, recipe, broadcast,
+      providerEntry: entry, model: entry.adapter.defaultModel,
+      inputs: test.inputs,
+    });
+    const actualOutcome = runRes.ok ? 'ok' : (runRes.aborted ? 'aborted' : 'failed');
+    const failures = [];
+    const checks = [];
+    if (test.expected.outcome && test.expected.outcome !== actualOutcome) {
+      failures.push(`outcome expected "${test.expected.outcome}" but got "${actualOutcome}"`);
+    }
+    checks.push({ kind: 'outcome', expected: test.expected.outcome, actual: actualOutcome });
+
+    const runner = require('./apps-recipe-runner');
+    for (const target of test.expected.elementsPresent || []) {
+      try { await runner.locateTarget({ session, driver, description: target }); checks.push({ kind: 'present', target, ok: true }); }
+      catch (e) { failures.push(`missing element: "${target}"`); checks.push({ kind: 'present', target, ok: false, reason: e.message }); }
+    }
+    for (const target of test.expected.elementsAbsent || []) {
+      try { await runner.locateTarget({ session, driver, description: target }); failures.push(`element should be absent but is visible: "${target}"`); checks.push({ kind: 'absent', target, ok: false }); }
+      catch (e) { if (e.code === 'locator_miss') checks.push({ kind: 'absent', target, ok: true }); else checks.push({ kind: 'absent', target, ok: false, reason: e.message }); }
+    }
+
+    const passed = failures.length === 0;
+    const durationMs = Date.now() - startedAt;
+    if (typeof broadcast === 'function') {
+      broadcast({ type: 'apps-agent-step', sessionId, kind: passed ? 'test_pass' : 'test_fail', testId, testName: test.name, failures, checks, durationMs, at: Date.now() });
+    }
+    // Record as a run too so the history view reflects test outcomes.
+    try { recipes.recordRun(app, { recipeId: recipe.id, recipeName: `[test] ${test.name}`, outcome: passed ? 'ok' : 'failed', iterations: runRes.iterations || 0, durationMs, error: passed ? null : failures.join('; ') }); } catch (_) {}
+  });
+
+  // Pause / resume control for step-through debugging.
+  addRoute('POST', '/api/apps/session/debug', async (req, res) => {
+    let body;
+    try { body = await readBody(req); } catch (e) { return json(res, { error: 'Bad JSON: ' + e.message }, 400); }
+    const sessionId = String(body.sessionId || '');
+    const action = String(body.action || '').trim();
+    if (!sessionId || !action) return json(res, { error: 'sessionId and action required' }, 400);
+    const session = chat.sessions.get(sessionId);
+    if (!session) return json(res, { error: 'unknown session' }, 404);
+    if (action === 'resume') {
+      if (typeof session._debugResolver === 'function') { session._debugResolver(); session._debugResolver = null; }
+      return json(res, { ok: true });
+    }
+    if (action === 'disable-step-through') {
+      session._stepThrough = false;
+      if (typeof session._debugResolver === 'function') { session._debugResolver(); session._debugResolver = null; }
+      return json(res, { ok: true });
+    }
+    return json(res, { error: 'unknown action' }, 400);
+  });
+
   addRoute('POST', '/api/apps/recipes/from-session', async (req, res) => {
     let body;
     try { body = await readBody(req); } catch (e) { return json(res, { error: 'Bad JSON: ' + e.message }, 400); }
