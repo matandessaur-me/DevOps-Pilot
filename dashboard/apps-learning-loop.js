@@ -214,15 +214,20 @@ async function runResearch({ session, providerEntry, model, goal, reason, lastSc
   // 2. A Gemini entry (google_search tool).
   // 3. An OpenAI entry (web_search_preview tool).
   // Fall back to the caller-supplied providerEntry only if none are present.
+  // NOTE: the caller's `model` param is the live-session model and does NOT
+  // match the research provider's API (e.g. passing gpt-realtime to
+  // api.anthropic.com -> 404). Always use the research provider's own
+  // defaultModel for the research call.
   const registry = session && session._providerRegistry;
   const chosen = pickResearchProvider(registry, providerEntry);
   const adapter = chosen.entry.adapter;
+  const researchModel = adapter.defaultModel;
   const query = `How to "${goal}" in ${session.app || 'the target Windows application'}: the agent is stuck because "${reason}". Focus on keyboard shortcuts and menu paths that would move it past this point.`;
   const prompt = `Research question: ${query}\n\nReturn a <= 350-word markdown summary of what you find. Do NOT write long intros; bullet points with concrete steps/shortcuts only.`;
   try {
-    if (chosen.kind === 'anthropic') return await researchAnthropic(chosen.entry, chosen.model || model || adapter.defaultModel, prompt);
-    if (chosen.kind === 'gemini')    return await researchGemini(chosen.entry, chosen.model || model || adapter.defaultModel, prompt);
-    if (chosen.kind === 'openai')    return await researchOpenAI(chosen.entry, chosen.model || model || adapter.defaultModel, prompt);
+    if (chosen.kind === 'anthropic') return await researchAnthropic(chosen.entry, researchModel, prompt);
+    if (chosen.kind === 'gemini')    return await researchGemini(chosen.entry, researchModel, prompt);
+    if (chosen.kind === 'openai')    return await researchOpenAI(chosen.entry, researchModel, prompt);
     return {
       provider: adapter.kind,
       summary: 'No research-capable provider configured. Set ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY in Settings -> AI Keys to enable web_research.',

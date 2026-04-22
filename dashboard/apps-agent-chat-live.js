@@ -18,7 +18,10 @@ const { DESKTOP_TOOLS, BASE_SYSTEM_PROMPT, executeTool } = require('./apps-agent
 
 const GEMINI_LIVE_ENDPOINT = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 const DEFAULT_GEMINI_LIVE_MODEL = 'gemini-2.0-flash-exp';
-const DEFAULT_OPENAI_REALTIME_MODEL = 'gpt-4o-realtime-preview';
+// gpt-4o-realtime-preview does NOT accept image_input. The vision-capable
+// Realtime model is gpt-realtime (GA September 2025). If this changes again,
+// users can override via body.model.
+const DEFAULT_OPENAI_REALTIME_MODEL = 'gpt-realtime';
 
 // web_research now resolves its own provider from session._providerRegistry
 // (see apps-learning-loop.pickResearchProvider), so the live runners don't
@@ -103,14 +106,16 @@ async function runGeminiLive({ session, task, driver, providerEntry, model, broa
 
     ws.on('open', () => {
       emit({ kind: 'live_connected' });
-      send({
+      const setupMsg = {
         setup: {
           model: modelRef,
           generationConfig: { responseModalities: ['TEXT'] },
           systemInstruction: { parts: [{ text: LIVE_SYSTEM_PROMPT }] },
           tools: [{ functionDeclarations: buildGeminiFunctionDeclarations() }],
         },
-      });
+      };
+      emit({ kind: 'live_debug', direction: 'send', what: 'setup', model: modelRef, toolCount: buildGeminiFunctionDeclarations().length });
+      send(setupMsg);
     });
 
     ws.on('message', async (raw) => {
@@ -118,8 +123,17 @@ async function runGeminiLive({ session, task, driver, providerEntry, model, broa
       let msg;
       try { msg = JSON.parse(raw.toString('utf8')); } catch (_) { return; }
 
+      // Chatty log so we can see the full sequence when the session stalls.
+      emit({ kind: 'live_debug', direction: 'recv', keys: Object.keys(msg || {}) });
+
       if (msg.setupComplete !== undefined) {
         emit({ kind: 'live_setup_complete' });
+        // Send the user task FIRST so the server commits a turn to respond
+        // to; frames arriving before any turn may be silently dropped on
+        // some model variants.
+        emit({ kind: 'live_debug', direction: 'send', what: 'clientContent', taskPreview: task.slice(0, 120) });
+        send({ clientContent: { turns: [{ role: 'user', parts: [{ text: task }] }], turnComplete: true } });
+        let frameCount = 0;
         pump = driver.startCapturePump(session.hwnd, (shot) => {
           if (done || !shot || !shot.base64) return;
           if (ws.readyState !== WebSocket.OPEN) return;
@@ -130,6 +144,8 @@ async function runGeminiLive({ session, task, driver, providerEntry, model, broa
               video: { mimeType: shot.mimeType || 'image/jpeg', data: shot.base64 },
             },
           });
+          if (frameCount === 0) emit({ kind: 'live_debug', direction: 'send', what: 'first_frame', mimeType: shot.mimeType || 'image/jpeg', bytes: (shot.base64 || '').length });
+          frameCount++;
           emit({
             kind: 'screenshot',
             base64: shot.base64,
@@ -140,8 +156,6 @@ async function runGeminiLive({ session, task, driver, providerEntry, model, broa
             streaming: true,
           });
         }, { intervalMs: DEFAULT_FRAME_INTERVAL_MS, quality: DEFAULT_FRAME_QUALITY });
-        // First user turn: the goal text.
-        send({ clientContent: { turns: [{ role: 'user', parts: [{ text: task }] }], turnComplete: true } });
         return;
       }
 

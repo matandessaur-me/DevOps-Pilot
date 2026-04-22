@@ -655,7 +655,7 @@ function buildProviderRegistry(aiKeys) {
   if (aiKeys.OPENAI_API_KEY) {
     registry.openai = { adapter: makeOpenAIAdapter({ baseHost: 'api.openai.com', label: 'OpenAI', defaultModel: 'gpt-4o' }), keyEnv: 'OPENAI_API_KEY', apiKey: aiKeys.OPENAI_API_KEY };
     registry['openai-realtime'] = {
-      adapter: { kind: 'openai-realtime', label: 'OpenAI Realtime', defaultModel: 'gpt-4o-realtime-preview', streaming: true },
+      adapter: { kind: 'openai-realtime', label: 'OpenAI Realtime', defaultModel: 'gpt-realtime', streaming: true },
       keyEnv: 'OPENAI_API_KEY',
       apiKey: aiKeys.OPENAI_API_KEY,
     };
