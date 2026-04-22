@@ -157,6 +157,7 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
       'The window is already focused. Start with a screenshot and work toward the goal.',
     ].join('\n');
 
+    session._providerRegistry = registry;
     runSessionForEntry({ entry, session, task, driver, model, broadcast })
       .catch(e => {
         if (typeof broadcast === 'function') {
@@ -252,6 +253,7 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     if (adapter.kind === 'gemini') session.messages.push({ role: 'user', parts: [{ text: followUp }] });
     else session.messages.push({ role: 'user', content: followUp });
 
+    session._providerRegistry = registry;
     runSessionForEntry({ entry, session, task: followUp, driver, model, broadcast })
       .catch(e => {
         if (typeof broadcast === 'function') {

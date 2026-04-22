@@ -17,8 +17,30 @@ const WebSocket = require('ws');
 const { DESKTOP_TOOLS, BASE_SYSTEM_PROMPT, executeTool } = require('./apps-agent-chat');
 
 const GEMINI_LIVE_ENDPOINT = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
-const DEFAULT_GEMINI_LIVE_MODEL = 'gemini-3.1-flash-live-preview';
-const DEFAULT_OPENAI_REALTIME_MODEL = 'gpt-realtime';
+const DEFAULT_GEMINI_LIVE_MODEL = 'gemini-2.0-flash-exp';
+const DEFAULT_OPENAI_REALTIME_MODEL = 'gpt-4o-realtime-preview';
+
+// Batch-text provider to use inside a live session when a tool needs a
+// regular request/response call (e.g. web_research). Maps a live provider
+// kind to the classic counterpart key in the registry.
+const CLASSIC_COUNTERPART = {
+  'gemini-live': 'gemini',
+  'openai-realtime': 'openai',
+};
+
+function stashResearchProvider(session, providerEntry) {
+  // The live adapter is a stub that can't do a regular text turn. Swap in
+  // the matching classic provider so web_research / ask_user internals work.
+  const classicKey = CLASSIC_COUNTERPART[providerEntry && providerEntry.adapter && providerEntry.adapter.kind];
+  const registry = session._providerRegistry;
+  if (classicKey && registry && registry[classicKey]) {
+    session._researchProviderEntry = registry[classicKey];
+    session._researchModel = registry[classicKey].adapter.defaultModel;
+  } else if (registry && registry.anthropic) {
+    session._researchProviderEntry = registry.anthropic;
+    session._researchModel = registry.anthropic.adapter.defaultModel;
+  }
+}
 const DEFAULT_FRAME_INTERVAL_MS = 500;
 const DEFAULT_FRAME_QUALITY = 45;
 
@@ -65,6 +87,7 @@ async function runGeminiLive({ session, task, driver, providerEntry, model, broa
   session._model = chosenModel;
   session.running = true;
   session.messages = session.messages || [];
+  stashResearchProvider(session, providerEntry);
 
   emit({ kind: 'provider', provider: 'gemini-live', label: 'Gemini Live', streaming: true });
 
@@ -119,9 +142,11 @@ async function runGeminiLive({ session, task, driver, providerEntry, model, broa
         pump = driver.startCapturePump(session.hwnd, (shot) => {
           if (done || !shot || !shot.base64) return;
           if (ws.readyState !== WebSocket.OPEN) return;
+          // Live API video input: single Blob under realtimeInput.video.
+          // The old mediaChunks[] shape is deprecated.
           send({
             realtimeInput: {
-              mediaChunks: [{ mimeType: shot.mimeType || 'image/jpeg', data: shot.base64 }],
+              video: { mimeType: shot.mimeType || 'image/jpeg', data: shot.base64 },
             },
           });
           emit({
@@ -249,6 +274,7 @@ async function runOpenAIRealtime({ session, task, driver, providerEntry, model, 
   session._model = chosenModel;
   session.running = true;
   session.messages = session.messages || [];
+  stashResearchProvider(session, providerEntry);
 
   emit({ kind: 'provider', provider: 'openai-realtime', label: 'OpenAI Realtime', streaming: true });
 
@@ -258,6 +284,7 @@ async function runOpenAIRealtime({ session, task, driver, providerEntry, model, 
     let latestFrame = null;
     let awaitingResponse = false;
     let pendingCall = null; // { call_id, name, argsText }
+    let currentResponseHadToolCall = false;
 
     const ws = new WebSocket(url, {
       headers: {
@@ -366,12 +393,17 @@ async function runOpenAIRealtime({ session, task, driver, providerEntry, model, 
           emit({ kind: 'live_setup_complete' });
           return;
 
+        case 'response.created':
+          currentResponseHadToolCall = false;
+          return;
+
         case 'response.text.delta':
           if (evt.delta) emit({ kind: 'assistant_text', text: evt.delta });
           return;
 
         case 'response.output_item.added':
           if (evt.item && evt.item.type === 'function_call') {
+            currentResponseHadToolCall = true;
             pendingCall = { call_id: evt.item.call_id, name: evt.item.name, argsText: '' };
           }
           return;
@@ -425,10 +457,11 @@ async function runOpenAIRealtime({ session, task, driver, providerEntry, model, 
 
         case 'response.done':
           awaitingResponse = false;
-          // If the model emitted tool calls, we've already posted their
-          // outputs. Immediately attach the freshest frame and ask for the
-          // next response so it can react visually.
-          if (!done) {
+          // Only re-fire if the response included a tool call. Pure text
+          // responses mean the model finished reasoning for this turn; we
+          // wait rather than immediately re-prompt (which would loop
+          // forever and burn screenshots for nothing).
+          if (!done && currentResponseHadToolCall) {
             setTimeout(() => sendFrameItemAndRespond(), 50);
           }
           return;

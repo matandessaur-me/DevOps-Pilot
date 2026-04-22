@@ -14554,6 +14554,10 @@ function handleAppsAgentStep(msg) {
       if (empty) empty.style.display = 'none';
     }
     if (msg.rect) _appsLastRect = msg.rect;
+    // Streaming frames (Gemini Live / OpenAI Realtime capture pump) update the
+    // viewport only. Without this guard, a 2 fps pump floods the log with
+    // thumbnail entries forever.
+    if (msg.streaming) return;
     const entry = _appsAppendLog({ kind: 'shot', klass: 'screenshot' });
     if (entry && img && img.src) {
       const thumb = document.createElement('img');
@@ -14832,6 +14836,51 @@ function _appendAgentLog(kind, text, extra) {
   return row;
 }
 
+function _appendBrowserAgentWaitingRow(message) {
+  const log = document.getElementById('inappAgentLog');
+  if (!log) return null;
+  // Replace any prior waiting row so a second wait_for_user doesn't pile up.
+  const prior = log.querySelector('.agent-msg.waiting');
+  if (prior) prior.remove();
+  const row = document.createElement('div');
+  row.className = 'agent-msg waiting';
+  row.style.cssText = 'display:flex; flex-direction:column; gap:8px; padding:10px 12px; border:1px solid var(--border, #444); border-radius:6px; background:rgba(255,180,0,0.08); margin:6px 0;';
+  const body = document.createElement('div');
+  body.className = 'agent-msg-body';
+  body.style.cssText = 'font-size:13px; line-height:1.4;';
+  body.textContent = message;
+  row.appendChild(body);
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex; gap:8px; align-items:center;';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = 'Resume';
+  btn.style.cssText = 'padding:4px 12px; border:1px solid var(--border, #555); background:var(--accent, #2a7); color:#fff; border-radius:4px; cursor:pointer; font-size:12px;';
+  btn.onclick = async function() {
+    btn.disabled = true;
+    btn.textContent = 'Resuming...';
+    try {
+      await fetch('/api/browser/agent/resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threadId: _browserAgentState.threadId }),
+      });
+      row.remove();
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Resume';
+      _appendAgentLog('error', 'Failed to resume: ' + (e && e.message ? e.message : String(e)));
+    }
+  };
+  actions.appendChild(btn);
+  row.appendChild(actions);
+  const startHint = log.querySelector('.inapp-agent-hint');
+  if (startHint) startHint.remove();
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
+  return row;
+}
+
 function handleBrowserAgentStep(msg) {
   if (!msg || msg.threadId !== _browserAgentState.threadId) return;
   switch (msg.kind) {
@@ -14858,6 +14907,10 @@ function handleBrowserAgentStep(msg) {
       break;
     case 'observation':
       if (msg.ok === false) _appendAgentLog('action', (msg.tool || 'tool') + ' failed: ' + (msg.error || ''), { fail: true });
+      break;
+    case 'waiting':
+      _browserAgentState._thinkingRow && (_browserAgentState._thinkingRow.remove(), _browserAgentState._thinkingRow = null);
+      _appendBrowserAgentWaitingRow(msg.message || 'User action required.');
       break;
     case 'done':
       _browserAgentState._thinkingRow && (_browserAgentState._thinkingRow.remove(), _browserAgentState._thinkingRow = null);

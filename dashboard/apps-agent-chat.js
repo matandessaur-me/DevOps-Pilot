@@ -777,9 +777,12 @@ async function executeTool(driver, session, name, args) {
       const query = String(args.query || '').trim();
       if (!query) throw new Error('web_research requires a query');
       // Delegate to the same research helper used by the stuck-handler, but
-      // scope the question to whatever the agent is asking right now.
-      const providerEntry = session._providerEntry;
-      const model = session._model;
+      // scope the question to whatever the agent is asking right now. Live
+      // providers (Gemini Live, OpenAI Realtime) use a stub adapter that
+      // can't run a classic text turn, so live runners stash a batch-mode
+      // counterpart on the session for research to use.
+      const providerEntry = session._researchProviderEntry || session._providerEntry;
+      const model = session._researchModel || session._model;
       if (!providerEntry) return { ok: false, error: 'No provider bound to session for research.' };
       const research = await require('./apps-learning-loop').runResearch({
         session, providerEntry, model,
