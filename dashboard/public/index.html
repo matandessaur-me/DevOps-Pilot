@@ -2108,7 +2108,13 @@
       border-color: var(--accent);
       box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
     }
-    .orch-task-reply-actions { display: flex; gap: 6px; justify-content: flex-end; }
+    .orch-task-reply-actions {
+      display: flex; gap: 12px; align-items: center;
+      justify-content: space-between;
+    }
+    .orch-task-reply-actions .orch-task-reply-hint {
+      flex: 1; min-width: 0; text-align: left;
+    }
     .orch-task-reply-send {
       padding: 6px 14px; border-radius: 3px; border: none;
       background: var(--accent); color: #fff;
