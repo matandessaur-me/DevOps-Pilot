@@ -5040,6 +5040,11 @@
             <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--overlay1);">- one per line: <code>name = description</code>. Use <code>{{name}}</code> in steps.</span>
           </div>
           <textarea id="appsAutomationsVars" spellcheck="false" placeholder="regression = the Regression tab in the top bar&#10;save_btn = the Save button in the footer" rows="3" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px/1.4 var(--font-mono);outline:none;resize:vertical;"></textarea>
+          <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">
+            Inputs
+            <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--overlay1);">- prompted per run, one per line: <code>name | label | placeholder</code> (last two optional). Referenced as <code>{{name}}</code> in steps.</span>
+          </div>
+          <textarea id="appsAutomationsInputs" spellcheck="false" placeholder="filename | File name | e.g. my-design&#10;count | How many times" rows="2" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px/1.4 var(--font-mono);outline:none;resize:vertical;"></textarea>
           <div style="display:flex;align-items:center;gap:8px;">
             <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">Steps</div>
             <span style="flex:1;"></span>
@@ -14118,6 +14123,7 @@ function appsAutomationsSelect(id) {
   document.getElementById('appsAutomationsName').value = recipe.name || '';
   document.getElementById('appsAutomationsDesc').value = recipe.description || '';
   document.getElementById('appsAutomationsVars').value = _appsVarsToText(recipe.variables || {});
+  document.getElementById('appsAutomationsInputs').value = _appsInputsToText(recipe.inputs || []);
   document.getElementById('appsAutomationsSteps').value = _appsStepsToText(recipe.steps || []);
   document.getElementById('appsAutomationsDeleteBtn').style.display = '';
   _appsBuilderSteps = JSON.parse(JSON.stringify(recipe.steps || []));
@@ -14132,6 +14138,7 @@ function appsAutomationsNew() {
   document.getElementById('appsAutomationsName').value = '';
   document.getElementById('appsAutomationsDesc').value = '';
   document.getElementById('appsAutomationsVars').value = '';
+  document.getElementById('appsAutomationsInputs').value = '';
   document.getElementById('appsAutomationsSteps').value = '';
   document.getElementById('appsAutomationsDeleteBtn').style.display = 'none';
   _appsBuilderSteps = [];
@@ -14242,8 +14249,8 @@ async function appsAutomationsExportAll() {
 }
 
 // ───── Visual step builder ──────────────────────────────────────────────
-const _APPS_VERBS = ['CLICK', 'TYPE', 'PRESS', 'WAIT', 'FIND', 'VERIFY', 'IF', 'ELSE', 'ENDIF', 'REPEAT', 'ENDREPEAT'];
-const _APPS_VERBS_WITH_TEXT = new Set(['TYPE']);
+const _APPS_VERBS = ['CLICK', 'TYPE', 'PRESS', 'WAIT', 'WAIT_UNTIL', 'FIND', 'VERIFY', 'SCROLL', 'DRAG', 'IF', 'ELSE', 'ENDIF', 'REPEAT', 'ENDREPEAT'];
+const _APPS_VERBS_WITH_TEXT = new Set(['TYPE', 'WAIT_UNTIL', 'DRAG']);
 const _APPS_VERBS_BARE = new Set(['ELSE', 'ENDIF', 'ENDREPEAT']);
 let _appsBuilderView = 'visual';
 let _appsBuilderSteps = [];
@@ -14349,8 +14356,11 @@ function _appsTargetPlaceholder(verb) {
     case 'TYPE':  return 'optional: element to focus first';
     case 'PRESS': return 'key combo (Enter, Ctrl+S, ...)';
     case 'WAIT':  return 'milliseconds (e.g. 500)';
+    case 'WAIT_UNTIL': return 'element to wait for';
     case 'FIND':
     case 'VERIFY': return 'element description';
+    case 'SCROLL': return 'dx,dy ticks (e.g. 0,5)';
+    case 'DRAG':  return 'fromX,fromY (e.g. 100,200)';
     case 'IF':    return 'condition: element exists?';
     case 'REPEAT': return 'number of times (e.g. 5)';
     default:      return '';
@@ -14416,6 +14426,77 @@ function _appsVarsToText(vars) {
   return entries.map(([k, v]) => `${k} = ${v}`).join('\n');
 }
 
+function _appsInputsToText(inputs) {
+  return (inputs || []).map(i => {
+    const parts = [i.name];
+    if (i.label && i.label !== i.name) parts.push(i.label);
+    if (i.placeholder) parts.push(i.placeholder);
+    return parts.join(' | ');
+  }).join('\n');
+}
+
+function _appsTextToInputs(text) {
+  const out = [];
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const parts = line.split('|').map(s => s.trim());
+    const name = parts[0];
+    if (!name) throw new Error('input line missing name: ' + line);
+    if (!/^[\w-]+$/.test(name)) throw new Error('input name "' + name + '" must be letters/digits/_ only');
+    out.push({
+      name,
+      label: parts[1] || name,
+      placeholder: parts[2] || undefined,
+    });
+  }
+  return out;
+}
+
+// Modal prompt collecting values for a recipe's inputs. Resolves with a
+// { name: value } map, or null if the user cancelled.
+function _appsCollectInputs(recipe) {
+  const inputs = (recipe && recipe.inputs) || [];
+  if (!inputs.length) return Promise.resolve({});
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);';
+    const fields = inputs.map((f, i) =>
+      '<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px;">' +
+        '<label style="font:600 11px var(--font-ui);color:var(--subtext0);">' + _appsEscape(f.label || f.name) + '</label>' +
+        '<input type="text" data-idx="' + i + '" placeholder="' + _appsEscape(f.placeholder || '') + '" value="' + _appsEscape(f.default || '') + '" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:4px;padding:7px 10px;font:12px var(--font-ui);outline:none;">' +
+      '</div>').join('');
+    overlay.innerHTML =
+      '<div style="background:var(--base);border:1px solid var(--surface1);border-radius:var(--radius-lg);padding:0;width:440px;max-width:92vw;overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,0.6);">' +
+        '<div style="padding:16px 20px 8px;font:600 13px var(--font-ui);color:var(--text);">Run "' + _appsEscape(recipe.name || '') + '"</div>' +
+        '<div style="padding:4px 20px 10px;font:11px var(--font-ui);color:var(--subtext0);">Fill in the inputs, then Run.</div>' +
+        '<div id="appsInputsFieldWrap" style="padding:4px 20px 8px;">' + fields + '</div>' +
+        '<div style="padding:10px 20px 16px;display:flex;gap:8px;justify-content:flex-end;">' +
+          '<button id="_appsInputsCancel" style="padding:7px 14px;background:var(--surface1);color:var(--text);border:none;border-radius:var(--radius);font:12px var(--font-ui);cursor:pointer;">Cancel</button>' +
+          '<button id="_appsInputsRun" style="padding:7px 14px;background:var(--accent);color:var(--crust);border:none;border-radius:var(--radius);font:12px var(--font-ui);font-weight:600;cursor:pointer;">Run</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    const run = () => {
+      const values = {};
+      const els = overlay.querySelectorAll('input[data-idx]');
+      els.forEach(el => {
+        const i = parseInt(el.getAttribute('data-idx'), 10);
+        const def = inputs[i];
+        values[def.name] = (el.value || '').trim() || (def.default || '');
+      });
+      overlay.remove();
+      resolve(values);
+    };
+    overlay.querySelector('#_appsInputsRun').onclick = run;
+    overlay.querySelector('#_appsInputsCancel').onclick = () => { overlay.remove(); resolve(null); };
+    overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.remove(); resolve(null); } });
+    overlay.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); run(); } });
+    const first = overlay.querySelector('input[data-idx]');
+    if (first) first.focus();
+  });
+}
+
 function _appsTextToVars(text) {
   const out = {};
   for (const raw of String(text || '').split(/\r?\n/)) {
@@ -14435,7 +14516,7 @@ function _appsTextToVars(text) {
 
 function _appsTextToSteps(text) {
   const out = [];
-  const verbs = new Set(['CLICK', 'TYPE', 'PRESS', 'WAIT', 'FIND', 'VERIFY', 'IF', 'ELSE', 'ENDIF', 'REPEAT', 'ENDREPEAT']);
+  const verbs = new Set(['CLICK', 'TYPE', 'PRESS', 'WAIT', 'WAIT_UNTIL', 'FIND', 'VERIFY', 'SCROLL', 'DRAG', 'IF', 'ELSE', 'ENDIF', 'REPEAT', 'ENDREPEAT']);
   for (const raw of String(text || '').split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
@@ -14471,11 +14552,16 @@ async function appsAutomationsSave() {
   const stepsEl = document.getElementById('appsAutomationsSteps');
   const statusEl = document.getElementById('appsAutomationsStatus');
   const varsEl = document.getElementById('appsAutomationsVars');
+  const inputsEl = document.getElementById('appsAutomationsInputs');
   const name = (nameEl.value || '').trim();
   if (!name) { if (statusEl) statusEl.textContent = 'Name is required.'; return; }
   let variables;
   try { variables = _appsTextToVars(varsEl.value); } catch (e) {
     if (statusEl) statusEl.textContent = 'Variable error: ' + e.message; return;
+  }
+  let inputs;
+  try { inputs = _appsTextToInputs(inputsEl.value); } catch (e) {
+    if (statusEl) statusEl.textContent = 'Input error: ' + e.message; return;
   }
   let steps;
   try { steps = _appsTextToSteps(stepsEl.value); } catch (e) {
@@ -14486,6 +14572,7 @@ async function appsAutomationsSave() {
     id: _appsAutomations.current && _appsAutomations.current.id || undefined,
     name, description: (descEl.value || '').trim(),
     variables: Object.keys(variables).length ? variables : undefined,
+    inputs: inputs.length ? inputs : undefined,
     steps,
   };
   if (statusEl) statusEl.textContent = 'Saving...';
@@ -14527,11 +14614,13 @@ async function appsAutomationsDelete() {
   }
 }
 
-function appsAutomationsRunSelected() {
+async function appsAutomationsRunSelected() {
   const cur = _appsAutomations.current;
   if (!cur || !cur.id) { if (typeof toast === 'function') toast('Save the automation first, then select it.', 'warning'); return; }
   _appsState.selectedRecipeId = cur.id;
   _appsState.selectedRecipeName = cur.name;
+  _appsState.selectedRecipeInputs = null; // cleared; collected on Start below
+  _appsState.selectedRecipeInputDefs = Array.isArray(cur.inputs) ? cur.inputs : [];
   _appsSyncComposerMode();
   _appsRenderAutomationsList();
   appsCloseAutomations();
@@ -15015,16 +15104,20 @@ async function _appsStartWithGoal(goal) {
   const recipeId = _appsState.selectedRecipeId || undefined;
   const appKey = _appsInstructionsKey() || _appsState.app;
 
+  let runInputs = null;
+  if (recipeId && Array.isArray(_appsState.selectedRecipeInputDefs) && _appsState.selectedRecipeInputDefs.length) {
+    runInputs = await _appsCollectInputs({ name: _appsState.selectedRecipeName, inputs: _appsState.selectedRecipeInputDefs });
+    if (runInputs == null) { if (typeof toast === 'function') toast('Cancelled.', 'info'); return; }
+  }
+
   try {
     const r = await fetch('/api/apps/session/start', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        // When a recipe is selected the backend builds the goal from its
-        // steps and ignores free-form text. Otherwise we send the user's
-        // chat message as the goal.
         goal: recipeId ? undefined : goal,
         recipeId,
+        inputs: runInputs || undefined,
         hwnd: _appsState.hwnd,
         app: appKey,
         provider: _appsState.providerKey || undefined,

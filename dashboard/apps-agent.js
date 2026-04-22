@@ -15,10 +15,10 @@ const memory = require('./apps-memory');
 const recipes = require('./apps-recipes');
 const recipeRunner = require('./apps-recipe-runner');
 
-function runSessionForEntry({ entry, session, task, driver, model, broadcast, recipe }) {
+function runSessionForEntry({ entry, session, task, driver, model, broadcast, recipe, inputs }) {
   if (recipe) {
     // Deterministic path: execute recipe steps directly against the driver.
-    return recipeRunner.runRecipe({ session, driver, recipe, broadcast, providerEntry: entry, model });
+    return recipeRunner.runRecipe({ session, driver, recipe, broadcast, providerEntry: entry, model, inputs });
   }
   return chat.runSession({ session, task, driver, providerEntry: entry, model, broadcast });
 }
@@ -167,7 +167,8 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     ].join('\n');
 
     session._providerRegistry = registry;
-    runSessionForEntry({ entry, session, task, driver, model, broadcast, recipe })
+    const runInputs = (body.inputs && typeof body.inputs === 'object') ? body.inputs : null;
+    runSessionForEntry({ entry, session, task, driver, model, broadcast, recipe, inputs: runInputs })
       .catch(e => {
         if (typeof broadcast === 'function') {
           broadcast({ type: 'apps-agent-step', sessionId: session.id, kind: 'error', message: e.message, at: Date.now() });

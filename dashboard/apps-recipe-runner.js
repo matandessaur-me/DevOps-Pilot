@@ -154,6 +154,40 @@ async function runStep({ session, driver, step, variables, emit, providerEntry, 
       else await new Promise(r => setTimeout(r, ms));
       return;
     }
+    case 'WAIT_UNTIL': {
+      // Poll the vision locator until the target appears or we hit the
+      // timeout. Huge readability win over guessing fixed WAIT durations.
+      const timeoutMs = Math.min(60000, Math.max(500, parseInt((step.text || '').trim(), 10) || 10000));
+      const pollMs = 800;
+      if (!target) throw new Error('WAIT_UNTIL requires a target (e.g. "WAIT_UNTIL Save button -> 5000")');
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (session._runnerAborted || session.stopped) throw Object.assign(new Error('stopped'), { code: 'stopped' });
+        try { await locateTarget({ session, driver, description: target }); return; }
+        catch (e) { if (e.code !== 'locator_miss') throw e; }
+        await new Promise(r => setTimeout(r, pollMs));
+      }
+      const err = new Error('WAIT_UNTIL timed out waiting for "' + target + '" (' + timeoutMs + 'ms)');
+      err.code = 'wait_timeout';
+      throw err;
+    }
+    case 'SCROLL': {
+      // target is "dx,dy" (e.g. "0,5" for 5 ticks down). Either component
+      // may be 0. Bare "5" is treated as positive dy.
+      const parts = String(target || '0,0').split(',').map(s => parseInt(s.trim(), 10) || 0);
+      const dx = parts.length >= 2 ? parts[0] : 0;
+      const dy = parts.length >= 2 ? parts[1] : parts[0];
+      await driver.scroll({ dx, dy });
+      return;
+    }
+    case 'DRAG': {
+      // target is "fromX,fromY" and text is "toX,toY".
+      const from = parseCoord(target);
+      const to = parseCoord(text);
+      if (!from || !to) throw new Error('DRAG requires coordinates: target "fromX,fromY" and text "toX,toY" (e.g. DRAG 100,200 -> 400,500)');
+      await driver.drag({ fromX: from.x, fromY: from.y, toX: to.x, toY: to.y });
+      return;
+    }
     case 'PRESS': {
       if (!target) throw new Error('PRESS requires a key or combo (e.g. "Ctrl+S", "Enter").');
       await driver.key({ combo: target });
@@ -314,10 +348,14 @@ function countLeaves(node) {
   return 0;
 }
 
-async function runRecipe({ session, driver, recipe, broadcast, providerEntry, model }) {
+async function runRecipe({ session, driver, recipe, broadcast, providerEntry, model, inputs }) {
   const emit = emitter(broadcast, session.id);
   session.running = true;
-  const variables = (recipe && recipe.variables) || {};
+  // Merge order: static recipe.variables first, then per-run user inputs
+  // override. This lets the UI prompt for {{filename}} / {{count}} / ... at
+  // Run time while still honoring library-style variables defined on the
+  // recipe itself.
+  const variables = Object.assign({}, (recipe && recipe.variables) || {}, inputs || {});
   const steps = (recipe && recipe.steps) || [];
   const startedAt = Date.now();
 

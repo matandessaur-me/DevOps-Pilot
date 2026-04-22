@@ -52,7 +52,8 @@ function _write(app, data) {
 }
 
 const ALLOWED_VERBS = new Set([
-  'CLICK', 'TYPE', 'PRESS', 'WAIT', 'FIND', 'VERIFY',
+  'CLICK', 'TYPE', 'PRESS', 'WAIT', 'WAIT_UNTIL', 'FIND', 'VERIFY',
+  'SCROLL', 'DRAG',
   // Control flow (Phase E):
   'IF', 'ELSE', 'ENDIF',
   'REPEAT', 'ENDREPEAT',
@@ -87,9 +88,28 @@ function getRecipe(app, id) {
   return r || null;
 }
 
+function _validateInputs(raw) {
+  if (!Array.isArray(raw)) return undefined;
+  const out = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const name = String(item.name || '').trim();
+    if (!name || !/^[\w-]+$/.test(name)) continue;
+    out.push({
+      name,
+      label: String(item.label || '').trim().slice(0, 120) || name,
+      placeholder: String(item.placeholder || '').trim().slice(0, 200) || undefined,
+      default: item.default != null ? String(item.default).slice(0, 500) : undefined,
+      required: !!item.required,
+    });
+  }
+  return out.length ? out : undefined;
+}
+
 function saveRecipe(app, recipe) {
   if (!recipe || !String(recipe.name || '').trim()) throw new Error('recipe name required');
   const steps = Array.isArray(recipe.steps) ? recipe.steps.map(_validateStep) : [];
+  const inputs = _validateInputs(recipe.inputs);
   const now = new Date().toISOString();
   const data = _load(app);
   const id = recipe.id || _recipeId();
@@ -99,6 +119,7 @@ function saveRecipe(app, recipe) {
     name: String(recipe.name).trim().slice(0, 120),
     description: String(recipe.description || '').trim().slice(0, 1000) || undefined,
     variables: (recipe.variables && typeof recipe.variables === 'object') ? recipe.variables : undefined,
+    inputs,
     steps,
     createdAt: existing ? existing.createdAt : now,
     updatedAt: now,
@@ -214,9 +235,9 @@ function actionsToSteps(actions) {
     } else if (name === 'scroll') {
       const dy = Number.isFinite(args.dy) ? args.dy : 0;
       const dx = Number.isFinite(args.dx) ? args.dx : 0;
-      out.push({ verb: 'WAIT', target: '100', notes: `scroll dx=${dx} dy=${dy} (rewrite manually)` });
+      out.push({ verb: 'SCROLL', target: `${dx},${dy}` });
     } else if (name === 'drag') {
-      out.push({ verb: 'CLICK', target: `${args.fromX},${args.fromY}`, notes: `drag from (${args.fromX},${args.fromY}) to (${args.toX},${args.toY}) - replay manually` });
+      out.push({ verb: 'DRAG', target: `${args.fromX},${args.fromY}`, text: `${args.toX},${args.toY}` });
     }
   }
   return out;
