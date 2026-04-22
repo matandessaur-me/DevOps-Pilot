@@ -176,7 +176,7 @@ Details in the API reference. Behavioral:
 
 ## Desktop App Automation (Apps tab)
 
-The Apps tab exposes a deterministic automation platform over REST so a terminal AI (Claude Code, Codex, Copilot, etc) can drive desktop applications the same way a human would through the UI. Every endpoint below is Windows-specific. Mutating endpoints go through permGate (ask in edit/review, auto-approve in trusted/bypass); `recipes/generate`, `tests/run`, `session/start`, and `session/inject` are blocked in Incognito. Read endpoints are ungated.
+The Apps tab exposes a deterministic automation platform over REST so a terminal AI (Claude Code, Codex, Copilot, etc) can drive desktop applications the same way a human would through the UI. Every endpoint below is Windows-specific. Most mutating endpoints go through permGate (ask in edit/review, auto-approve in trusted/bypass); the exceptions are `session/stop` and `panic`, which always run so the user can stop a runaway agent regardless of permission mode. `recipes/generate`, `tests/run`, `session/start`, and `session/inject` are additionally blocked in Incognito. Read endpoints are ungated.
 
 ### Read-only discovery
 - `POST /api/apps/windows` -> { windows: [{hwnd, title, processName, rect, isMinimized}] } - visible top-level windows.
