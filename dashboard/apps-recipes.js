@@ -106,10 +106,21 @@ function _validateInputs(raw) {
   return out.length ? out : undefined;
 }
 
+function _validateVerify(raw) {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const elementsPresent = Array.isArray(raw.elementsPresent)
+    ? raw.elementsPresent.map(s => String(s).slice(0, 300)).filter(Boolean) : [];
+  const elementsAbsent = Array.isArray(raw.elementsAbsent)
+    ? raw.elementsAbsent.map(s => String(s).slice(0, 300)).filter(Boolean) : [];
+  if (!elementsPresent.length && !elementsAbsent.length) return undefined;
+  return { elementsPresent, elementsAbsent };
+}
+
 function saveRecipe(app, recipe) {
   if (!recipe || !String(recipe.name || '').trim()) throw new Error('recipe name required');
   const steps = Array.isArray(recipe.steps) ? recipe.steps.map(_validateStep) : [];
   const inputs = _validateInputs(recipe.inputs);
+  const verify = _validateVerify(recipe.verify);
   const now = new Date().toISOString();
   const data = _load(app);
   const id = recipe.id || _recipeId();
@@ -120,6 +131,7 @@ function saveRecipe(app, recipe) {
     description: String(recipe.description || '').trim().slice(0, 1000) || undefined,
     variables: (recipe.variables && typeof recipe.variables === 'object') ? recipe.variables : undefined,
     inputs,
+    verify,
     steps,
     createdAt: existing ? existing.createdAt : now,
     updatedAt: now,

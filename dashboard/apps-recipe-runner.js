@@ -408,6 +408,23 @@ async function runRecipe({ session, driver, recipe, broadcast, providerEntry, mo
 
   try {
     await runNode({ session, driver, node: tree, variables, emit, ctx });
+    // Optional post-run verifications folded into the recipe itself. These
+    // are best-effort: failures surface as a verify_fail event but don't
+    // overwrite the recipe's happy-path completion.
+    const verify = recipe && recipe.verify;
+    if (verify && (Array.isArray(verify.elementsPresent) || Array.isArray(verify.elementsAbsent))) {
+      const failures = [];
+      for (const target of verify.elementsPresent || []) {
+        try { await locateTarget({ session, driver, description: target }); emit({ kind: 'verify_check', target, ok: true }); }
+        catch (e) { failures.push(`missing: "${target}"`); emit({ kind: 'verify_check', target, ok: false, reason: e.message }); }
+      }
+      for (const target of verify.elementsAbsent || []) {
+        try { await locateTarget({ session, driver, description: target }); failures.push(`should be absent: "${target}"`); emit({ kind: 'verify_check', target, ok: false, expectedAbsent: true }); }
+        catch (e) { if (e.code === 'locator_miss') emit({ kind: 'verify_check', target, ok: true, expectedAbsent: true }); else emit({ kind: 'verify_check', target, ok: false, expectedAbsent: true, reason: e.message }); }
+      }
+      if (failures.length) emit({ kind: 'verify_fail', failures });
+      else emit({ kind: 'verify_pass' });
+    }
     emit({ kind: 'done', summary: `Recipe "${recipe.name}" completed (${ctx.index + 1} actions).` });
     finalize('ok', { iterations: ctx.index + 1 });
     return { ok: true, iterations: ctx.index + 1 };

@@ -5040,19 +5040,33 @@
       </button>
     </div>
     <div class="modal-body" style="flex:1; display:flex; gap:12px; min-height:0; overflow:hidden;">
-      <div style="width:240px; min-width:200px; display:flex; flex-direction:column; gap:6px; border-right:1px solid var(--surface1); padding-right:10px;">
-        <div style="display:inline-flex;background:var(--surface0);border:1px solid var(--surface2);border-radius:5px;overflow:hidden;">
-          <button type="button" id="appsAutoTabRecipes" onclick="appsAutomationsSetTab('recipes')" style="flex:1;background:var(--surface1);color:var(--text);border:none;padding:5px 10px;font:500 11px var(--font-ui);cursor:pointer;">Recipes</button>
-          <button type="button" id="appsAutoTabTests" onclick="appsAutomationsSetTab('tests')" style="flex:1;background:transparent;color:var(--subtext1);border:none;padding:5px 10px;font:500 11px var(--font-ui);cursor:pointer;">Tests</button>
-        </div>
-        <div id="appsAutomationsList" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:4px;"></div>
-        <div id="appsAutomationsTestsList" style="display:none; flex:1; overflow-y:auto; flex-direction:column; gap:4px;"></div>
+      <div style="width:220px; min-width:200px; display:flex; flex-direction:column; gap:6px; border-right:1px solid var(--surface1); padding-right:10px;">
+        <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px; padding:2px 4px;">Your automations</div>
+        <div id="appsAutomationsList" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:4px; min-height:0;"></div>
+        <div id="appsAutomationsTestsList" style="display:none;"></div>
+        <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px; padding:6px 4px 2px; border-top:1px solid var(--surface1);">Drag to insert</div>
+        <div id="appsStepPalette" style="display:flex;flex-direction:column;gap:2px;"></div>
       </div>
       <div id="appsAutomationsEditor" style="flex:1; display:flex; flex-direction:column; gap:10px; min-width:0;">
         <div id="appsAutomationsEmpty" style="color:var(--subtext0); font:12px var(--font-ui); padding:24px 12px; text-align:center;">
           Select an automation on the left or click New to create one.
         </div>
-        <div id="appsAutomationsForm" style="display:none; flex:1; flex-direction:column; gap:8px; min-height:0;">
+        <div id="appsAutomationsForm" style="display:none; flex:1; flex-direction:column; gap:8px; min-height:0; overflow-y:auto; padding-right:4px;">
+          <div style="border:1px solid color-mix(in srgb, var(--accent) 35%, transparent); background:color-mix(in srgb, var(--accent) 8%, transparent); border-radius:6px; padding:8px 10px; display:flex; flex-direction:column; gap:6px;">
+            <div style="display:flex; align-items:center; gap:6px; font:600 10px var(--font-ui); color:var(--accent); text-transform:uppercase; letter-spacing:0.6px;">
+              <i data-lucide="sparkles" style="width:12px;height:12px;"></i> Describe it, AI writes the steps
+            </div>
+            <textarea id="appsAutomationsGenInput" rows="2" placeholder="e.g. Open the File menu, click Export, type my-design, hit Enter" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:5px;padding:7px 10px;font:12px var(--font-ui);outline:none;resize:vertical;min-height:48px;"></textarea>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <label style="display:inline-flex;align-items:center;gap:4px;font:11px var(--font-ui);color:var(--subtext1);cursor:pointer;">
+                <input type="checkbox" id="appsAutomationsGenUseShot" style="accent-color:var(--accent);"> use current window screenshot
+              </label>
+              <span style="flex:1;"></span>
+              <button type="button" class="sy-btn sy-btn-primary" onclick="appsAutomationsGenerate()" id="appsAutomationsGenBtn" style="height:26px;padding:0 12px;font-size:11px;display:inline-flex;align-items:center;gap:4px;">
+                <i data-lucide="wand-2" style="width:11px;height:11px;"></i> Generate steps
+              </button>
+            </div>
+          </div>
           <input type="text" id="appsAutomationsName" placeholder="Automation name (e.g. Export as PNG)" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:8px 10px;font:13px var(--font-ui);outline:none;">
           <textarea id="appsAutomationsDesc" placeholder="Optional description - what this automation does." rows="2" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px var(--font-ui);outline:none;resize:none;"></textarea>
           <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">
@@ -5076,11 +5090,22 @@
               <i data-lucide="plus" style="width:11px;height:11px;"></i> Add step
             </button>
           </div>
-          <div id="appsAutomationsVisual" style="flex:1; min-height:160px; max-height:360px; overflow-y:auto; border:1px solid var(--surface2); border-radius:6px; padding:6px; background:var(--bg); display:flex; flex-direction:column; gap:4px;"></div>
+          <div id="appsAutomationsVisual" ondragover="event.preventDefault();" ondrop="_appsPaletteAreaDrop(event)" style="flex:1; min-height:160px; max-height:360px; overflow-y:auto; border:1px solid var(--surface2); border-radius:6px; padding:6px; background:var(--bg); display:flex; flex-direction:column; gap:4px;"></div>
           <textarea id="appsAutomationsSteps" spellcheck="false" placeholder="CLICK {{regression}}&#10;CLICK File menu&#10;TYPE filename -> my-design&#10;PRESS Enter" style="display:none;flex:1;min-height:160px;background:var(--bg);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:10px 12px;font:12px/1.5 var(--font-mono);resize:vertical;outline:none;"></textarea>
           <div style="font:11px var(--font-ui); color:var(--subtext0);">
             Verbs: CLICK, TYPE, PRESS, WAIT, FIND, VERIFY, IF/ELSE/ENDIF, REPEAT/ENDREPEAT. Arrow <code>-&gt;</code> separates a target from typed text (e.g. <code>TYPE input -&gt; hello</code>). Coordinates <code>x,y</code> skip the vision locator.
           </div>
+          <details style="border:1px solid var(--surface2); border-radius:6px; padding:4px 10px; background:var(--surface0);">
+            <summary style="cursor:pointer; font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px; padding:4px 0;">
+              Verify after run (optional)
+            </summary>
+            <div style="display:flex; flex-direction:column; gap:6px; padding:4px 0 8px;">
+              <div style="font:11px var(--font-ui); color:var(--subtext0);">Elements that MUST appear at the end</div>
+              <textarea id="appsAutomationsVerifyPresent" rows="2" placeholder="Success toast&#10;Save button enabled" style="background:var(--bg);color:var(--text);border:1px solid var(--surface2);border-radius:5px;padding:6px 10px;font:12px/1.4 var(--font-mono);outline:none;resize:vertical;"></textarea>
+              <div style="font:11px var(--font-ui); color:var(--subtext0);">Elements that must NOT appear</div>
+              <textarea id="appsAutomationsVerifyAbsent" rows="2" placeholder="Error banner&#10;Loading spinner" style="background:var(--bg);color:var(--text);border:1px solid var(--surface2);border-radius:5px;padding:6px 10px;font:12px/1.4 var(--font-mono);outline:none;resize:vertical;"></textarea>
+            </div>
+          </details>
         </div>
         <div id="appsAutomationsTestForm" style="display:none; flex:1; flex-direction:column; gap:8px; min-width:0;">
           <input type="text" id="appsTestName" placeholder="Test name (e.g. Export round-trip)" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:8px 10px;font:13px var(--font-ui);outline:none;">
@@ -14147,33 +14172,87 @@ function appsImportInstructionsFile(event) {
 // ═══ Automations ═════════════════════════════════════════════════════════
 const _appsAutomations = { current: null, dirty: false, tab: 'recipes', currentTest: null };
 
-function appsAutomationsSetTab(tab) {
-  _appsAutomations.tab = tab;
-  const tabR = document.getElementById('appsAutoTabRecipes');
-  const tabT = document.getElementById('appsAutoTabTests');
-  const listR = document.getElementById('appsAutomationsList');
-  const listT = document.getElementById('appsAutomationsTestsList');
-  const formR = document.getElementById('appsAutomationsForm');
-  const formT = document.getElementById('appsAutomationsTestForm');
-  const empty = document.getElementById('appsAutomationsEmpty');
-  const hist  = document.getElementById('appsAutomationsHistory');
-  const footR = document.getElementById('appsAutomationsRecipesFooter');
-  const footT = document.getElementById('appsAutomationsTestsFooter');
-  const isRecipes = tab === 'recipes';
-  tabR.style.background = isRecipes ? 'var(--surface1)' : 'transparent';
-  tabR.style.color = isRecipes ? 'var(--text)' : 'var(--subtext1)';
-  tabT.style.background = isRecipes ? 'transparent' : 'var(--surface1)';
-  tabT.style.color = isRecipes ? 'var(--subtext1)' : 'var(--text)';
-  listR.style.display = isRecipes ? 'flex' : 'none';
-  listT.style.display = isRecipes ? 'none' : 'flex';
-  formR.style.display = 'none';
-  formT.style.display = 'none';
-  hist.style.display = 'none';
-  empty.style.display = '';
-  footR.style.display = isRecipes ? 'contents' : 'none';
-  footT.style.display = isRecipes ? 'none' : 'contents';
-  if (isRecipes) _appsAutomationsReload();
-  else _appsRefreshTests();
+function appsAutomationsSetTab(_tab) {
+  // Tests tab was folded into recipes. Keep the function for backwards-compat
+  // callers but it's now a no-op.
+}
+
+async function appsAutomationsGenerate() {
+  const desc = (document.getElementById('appsAutomationsGenInput').value || '').trim();
+  const statusEl = document.getElementById('appsAutomationsStatus');
+  if (!desc) { if (statusEl) statusEl.textContent = 'Describe what you want first.'; return; }
+  const btn = document.getElementById('appsAutomationsGenBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Generating...'; }
+  if (statusEl) statusEl.textContent = 'Asking AI...';
+  try {
+    const payload = { description: desc };
+    if (document.getElementById('appsAutomationsGenUseShot').checked && _appsState.hwnd) {
+      // Grab a fresh screenshot so AI can ground step descriptions in the
+      // actual UI. Uses the apps screenshot route.
+      const sr = await fetch('/api/apps/screenshot?hwnd=' + encodeURIComponent(_appsState.hwnd)).catch(() => null);
+      if (sr && sr.ok) {
+        const sd = await sr.json().catch(() => null);
+        if (sd && sd.base64) { payload.screenshotBase64 = sd.base64; payload.mimeType = sd.mimeType || 'image/jpeg'; }
+      }
+    }
+    const r = await fetch('/api/apps/recipes/generate', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || 'generate failed');
+    const draft = data.draft || {};
+    const nameEl = document.getElementById('appsAutomationsName');
+    const descEl = document.getElementById('appsAutomationsDesc');
+    if (nameEl && !nameEl.value && draft.name) nameEl.value = draft.name;
+    if (descEl && !descEl.value && draft.description) descEl.value = draft.description;
+    _appsBuilderSteps = Array.isArray(draft.steps) ? draft.steps : [];
+    // Surface the generated steps in both views.
+    document.getElementById('appsAutomationsSteps').value = _appsStepsToText(_appsBuilderSteps);
+    if (typeof _appsRenderBuilderRows === 'function') _appsRenderBuilderRows();
+    if (statusEl) statusEl.textContent = 'Generated ' + _appsBuilderSteps.length + ' step' + (_appsBuilderSteps.length === 1 ? '' : 's') + '. Review and Save.';
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Generate failed: ' + e.message;
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="wand-2" style="width:11px;height:11px;"></i> Generate steps'; if (typeof lucide !== 'undefined') lucide.createIcons({ el: btn }); }
+  }
+}
+
+const _APPS_PALETTE = [
+  { label: 'Click element', step: { verb: 'CLICK', target: '' } },
+  { label: 'Type text', step: { verb: 'TYPE', target: '', text: '' } },
+  { label: 'Press key', step: { verb: 'PRESS', target: 'Enter' } },
+  { label: 'Wait 500ms', step: { verb: 'WAIT', target: '500' } },
+  { label: 'Wait until visible', step: { verb: 'WAIT_UNTIL', target: '', text: '10000' } },
+  { label: 'Verify visible', step: { verb: 'VERIFY', target: '' } },
+  { label: 'Scroll down', step: { verb: 'SCROLL', target: '0,5' } },
+  { label: 'If ... / else / endif', multi: [{ verb: 'IF', target: '' }, { verb: 'ELSE' }, { verb: 'ENDIF' }] },
+  { label: 'Repeat N times', multi: [{ verb: 'REPEAT', target: '3' }, { verb: 'ENDREPEAT' }] },
+];
+
+function _appsRenderStepPalette() {
+  const wrap = document.getElementById('appsStepPalette');
+  if (!wrap) return;
+  wrap.innerHTML = _APPS_PALETTE.map((item, i) =>
+    `<div draggable="true" ondragstart="_appsPaletteDragStart(event, ${i})" onclick="_appsPaletteAppend(${i})" title="Click or drag into the step list" style="cursor:grab;padding:5px 7px;border-radius:4px;background:var(--surface0);border:1px solid var(--surface2);font:11px var(--font-ui);color:var(--text);">${_appsEscape(item.label)}</div>`
+  ).join('');
+}
+
+function _appsPaletteDragStart(ev, i) {
+  _appsBuilderDragIdx = null;
+  try {
+    ev.dataTransfer.setData('application/x-apps-palette', String(i));
+    ev.dataTransfer.effectAllowed = 'copy';
+  } catch (_) {}
+}
+
+function _appsPaletteAppend(i) {
+  const item = _APPS_PALETTE[i];
+  if (!item) return;
+  if (item.multi) _appsBuilderSteps.push(...item.multi.map(s => ({ ...s })));
+  else _appsBuilderSteps.push({ ...item.step });
+  if (typeof _appsRenderBuilderRows === 'function') _appsRenderBuilderRows();
+  if (typeof _appsSyncBuilderToText === 'function') _appsSyncBuilderToText();
 }
 
 function appsAutomationsMainSave() {
@@ -14192,6 +14271,8 @@ async function appsOpenAutomations() {
   const nameEl = document.getElementById('appsAutomationsAppName');
   if (nameEl) nameEl.textContent = app;
   if (overlay) overlay.classList.add('open');
+  _appsRenderStepPalette();
+  if (typeof lucide !== 'undefined') lucide.createIcons({ el: overlay });
   await _appsAutomationsReload();
 }
 
@@ -14247,6 +14328,10 @@ function appsAutomationsSelect(id) {
   document.getElementById('appsAutomationsVars').value = _appsVarsToText(recipe.variables || {});
   document.getElementById('appsAutomationsInputs').value = _appsInputsToText(recipe.inputs || []);
   document.getElementById('appsAutomationsSteps').value = _appsStepsToText(recipe.steps || []);
+  const vp = document.getElementById('appsAutomationsVerifyPresent');
+  const va = document.getElementById('appsAutomationsVerifyAbsent');
+  if (vp) vp.value = ((recipe.verify && recipe.verify.elementsPresent) || []).join('\n');
+  if (va) va.value = ((recipe.verify && recipe.verify.elementsAbsent) || []).join('\n');
   document.getElementById('appsAutomationsDeleteBtn').style.display = '';
   _appsBuilderSteps = JSON.parse(JSON.stringify(recipe.steps || []));
   appsAutomationsSetView('visual');
@@ -14262,6 +14347,9 @@ function appsAutomationsNew() {
   document.getElementById('appsAutomationsVars').value = '';
   document.getElementById('appsAutomationsInputs').value = '';
   document.getElementById('appsAutomationsSteps').value = '';
+  const vpN = document.getElementById('appsAutomationsVerifyPresent'); if (vpN) vpN.value = '';
+  const vaN = document.getElementById('appsAutomationsVerifyAbsent'); if (vaN) vaN.value = '';
+  const genI = document.getElementById('appsAutomationsGenInput'); if (genI) genI.value = '';
   document.getElementById('appsAutomationsDeleteBtn').style.display = 'none';
   _appsBuilderSteps = [];
   appsAutomationsSetView('visual');
@@ -14504,10 +14592,38 @@ function _appsBuilderDragLeave(ev) {
 function _appsBuilderDrop(ev, i) {
   ev.preventDefault();
   ev.currentTarget.style.outline = '';
+  // Palette drop: insert new step(s) at position i.
+  let paletteIdx = null;
+  try { paletteIdx = ev.dataTransfer && ev.dataTransfer.getData('application/x-apps-palette'); } catch (_) {}
+  if (paletteIdx !== null && paletteIdx !== '') {
+    const item = _APPS_PALETTE[parseInt(paletteIdx, 10)];
+    if (item) {
+      const inserts = item.multi ? item.multi.map(s => ({ ...s })) : [{ ...item.step }];
+      _appsBuilderSteps.splice(i, 0, ...inserts);
+      _appsRenderBuilderRows();
+      _appsSyncBuilderToText();
+      return;
+    }
+  }
+  // Existing-row drop: reorder.
   const from = _appsBuilderDragIdx;
   if (from == null || from === i) return;
   const [moved] = _appsBuilderSteps.splice(from, 1);
   _appsBuilderSteps.splice(i, 0, moved);
+  _appsRenderBuilderRows();
+  _appsSyncBuilderToText();
+}
+
+// Accept palette drops into an empty visual area too.
+function _appsPaletteAreaDrop(ev) {
+  ev.preventDefault();
+  let paletteIdx = null;
+  try { paletteIdx = ev.dataTransfer && ev.dataTransfer.getData('application/x-apps-palette'); } catch (_) {}
+  if (paletteIdx === null || paletteIdx === '') return;
+  const item = _APPS_PALETTE[parseInt(paletteIdx, 10)];
+  if (!item) return;
+  if (item.multi) _appsBuilderSteps.push(...item.multi.map(s => ({ ...s })));
+  else _appsBuilderSteps.push({ ...item.step });
   _appsRenderBuilderRows();
   _appsSyncBuilderToText();
 }
@@ -14865,11 +14981,15 @@ async function appsAutomationsSave() {
     if (statusEl) statusEl.textContent = 'Step error: ' + e.message; return;
   }
   if (!steps.length) { if (statusEl) statusEl.textContent = 'Add at least one step.'; return; }
+  const vPresent = _appsLinesToArray((document.getElementById('appsAutomationsVerifyPresent') || {}).value || '');
+  const vAbsent = _appsLinesToArray((document.getElementById('appsAutomationsVerifyAbsent') || {}).value || '');
+  const verify = (vPresent.length || vAbsent.length) ? { elementsPresent: vPresent, elementsAbsent: vAbsent } : undefined;
   const recipe = {
     id: _appsAutomations.current && _appsAutomations.current.id || undefined,
     name, description: (descEl.value || '').trim(),
     variables: Object.keys(variables).length ? variables : undefined,
     inputs: inputs.length ? inputs : undefined,
+    verify,
     steps,
   };
   if (statusEl) statusEl.textContent = 'Saving...';

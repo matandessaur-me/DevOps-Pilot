@@ -81,6 +81,21 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     }
   });
 
+  // One-off screenshot for a window. Used by the AI recipe generator so it
+  // can ground DSL steps in the actual UI currently on screen.
+  addRoute('GET', '/api/apps/screenshot', async (req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const hwnd = Number(url.searchParams.get('hwnd'));
+    if (!Number.isFinite(hwnd) || hwnd <= 0) return json(res, { error: 'hwnd required' }, 400);
+    try {
+      const shot = await driver.screenshotWindow(hwnd, { format: 'jpeg', quality: 55 });
+      if (!shot || !shot.base64) return json(res, { error: 'screenshot failed' }, 500);
+      json(res, { ok: true, base64: shot.base64, mimeType: shot.mimeType || 'image/jpeg', width: shot.width, height: shot.height });
+    } catch (e) {
+      json(res, { error: e.message }, 500);
+    }
+  });
+
   addRoute('GET', '/api/apps/icon', async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const idOrPath = url.searchParams.get('id') || url.searchParams.get('path');
@@ -486,6 +501,90 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
       return json(res, { ok: true });
     }
     return json(res, { error: 'unknown action' }, 400);
+  });
+
+  // Natural-language recipe generator. Sends a description (and an optional
+  // current screenshot of the target window) to Anthropic and parses the
+  // returned JSON into DSL steps the user can edit in the builder.
+  addRoute('POST', '/api/apps/recipes/generate', async (req, res) => {
+    let body;
+    try { body = await readBody(req); } catch (e) { return json(res, { error: 'Bad JSON: ' + e.message }, 400); }
+    const description = String(body.description || '').trim();
+    if (!description) return json(res, { error: 'description required' }, 400);
+    const registry = buildRegistry();
+    const entry = chat.pickProvider(registry, 'anthropic');
+    if (!entry) return json(res, { error: 'ANTHROPIC_API_KEY required to generate recipes. Set it in Settings -> AI Keys.' }, 400);
+
+    const system = [
+      'You convert a plain-English description of a Windows desktop task into a JSON recipe that Symphonee can replay.',
+      'OUTPUT ONLY valid JSON, no prose or code fences. The shape is:',
+      '{ "name": "string", "description": "string", "steps": [ {"verb":"CLICK","target":"..."} ] }',
+      '',
+      'Allowed verbs:',
+      '- CLICK target   (target: element description or "x,y")',
+      '- TYPE target -> text   (target optional; target is what to click first, text is what to type)',
+      '- PRESS target   (target: key or combo, e.g. "Enter", "Ctrl+S")',
+      '- WAIT target    (target: milliseconds, e.g. "500")',
+      '- WAIT_UNTIL target -> timeoutMs  (poll until the target element appears)',
+      '- FIND target    (locate without clicking)',
+      '- VERIFY target  (assert visible; fails if missing)',
+      '- SCROLL "dx,dy" (ticks, e.g. "0,5")',
+      '- DRAG "fromX,fromY" -> "toX,toY"',
+      '- IF target / ELSE / ENDIF    (conditional on element existence)',
+      '- REPEAT target / ENDREPEAT   (loop N times)',
+      '',
+      'In JSON, step rows look like {"verb":"CLICK","target":"File menu"}. For TYPE use {"verb":"TYPE","target":"Filename input","text":"hello"}.',
+      'Prefer keyboard shortcuts (PRESS) over menu traversal when both are possible.',
+      'Do not output explanation. Do not wrap the JSON in markdown.',
+    ].join('\n');
+
+    const userContent = [{ type: 'text', text: description }];
+    if (body.screenshotBase64) {
+      userContent.unshift({ type: 'image', source: { type: 'base64', media_type: body.mimeType || 'image/jpeg', data: body.screenshotBase64 } });
+    }
+
+    const payload = JSON.stringify({
+      model: entry.adapter.defaultModel,
+      max_tokens: 2048,
+      system,
+      messages: [{ role: 'user', content: userContent }],
+    });
+    const https = require('https');
+    const result = await new Promise((resolve, reject) => {
+      const r = https.request({
+        method: 'POST', hostname: 'api.anthropic.com', path: '/v1/messages',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload),
+          'x-api-key': entry.apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        timeout: 60000,
+      }, (response) => {
+        let d = '';
+        response.on('data', c => d += c);
+        response.on('end', () => {
+          if (response.statusCode < 200 || response.statusCode >= 300) return reject(new Error('anthropic ' + response.statusCode + ': ' + d.slice(0, 300)));
+          try { resolve(JSON.parse(d)); } catch (e) { reject(e); }
+        });
+      });
+      r.on('error', reject);
+      r.on('timeout', () => r.destroy(new Error('generate timed out')));
+      r.write(payload); r.end();
+    }).catch(e => ({ _err: e }));
+    if (result._err) return json(res, { error: result._err.message }, 500);
+
+    const text = (result.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return json(res, { error: 'AI returned non-JSON output', raw: text.slice(0, 400) }, 500);
+    try {
+      const draft = JSON.parse(m[0]);
+      // Validate by round-tripping through saveRecipe's shape checks without persisting.
+      if (!Array.isArray(draft.steps) || !draft.steps.length) throw new Error('AI returned no steps');
+      json(res, { ok: true, draft });
+    } catch (e) {
+      json(res, { error: e.message, raw: text.slice(0, 400) }, 500);
+    }
   });
 
   addRoute('POST', '/api/apps/recipes/from-session', async (req, res) => {
