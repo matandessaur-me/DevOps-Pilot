@@ -41,6 +41,48 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     }
   });
 
+  addRoute('POST', '/api/apps/installed', async (req, res) => {
+    try {
+      const apps = await driver.listInstalledApps();
+      json(res, { ok: true, apps });
+    } catch (e) {
+      json(res, { ok: false, error: e.message }, 500);
+    }
+  });
+
+  addRoute('POST', '/api/apps/launch', async (req, res) => {
+    if (isIncognito()) return json(res, { error: 'Blocked by Incognito Mode.' }, 403);
+    let body;
+    try { body = await readBody(req); } catch (e) { return json(res, { error: 'Bad JSON: ' + e.message }, 400); }
+    const id = body.id ? String(body.id) : null;
+    const path = body.path ? String(body.path) : null;
+    const name = body.name ? String(body.name) : null;
+    if (!id && !path) return json(res, { error: 'id or path required' }, 400);
+    if (typeof permGate === 'function') {
+      const label = 'Launch app: ' + (name || id || path);
+      const ok = await permGate(res, 'api', 'POST /api/apps/launch', label);
+      if (!ok) return;
+    }
+    try {
+      const result = await driver.launchApp({ id, path, name });
+      json(res, { ok: true, ...result });
+    } catch (e) {
+      json(res, { ok: false, error: e.message }, 500);
+    }
+  });
+
+  addRoute('GET', '/api/apps/icon', async (req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const idOrPath = url.searchParams.get('id') || url.searchParams.get('path');
+    if (!idOrPath) return json(res, { error: 'id or path required' }, 400);
+    try {
+      const icon = await driver.extractAppIcon(idOrPath);
+      json(res, { ok: true, ...icon });
+    } catch (e) {
+      json(res, { ok: false, error: e.message }, 500);
+    }
+  });
+
   addRoute('POST', '/api/apps/session/start', async (req, res) => {
     if (isIncognito()) return json(res, { error: 'Blocked by Incognito Mode.' }, 403);
     let body;
@@ -125,6 +167,80 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     json(res, { ok: true });
   });
 
+  // Resume a paused ask_user tool-call with the user's answer.
+  addRoute('POST', '/api/apps/session/answer', async (req, res) => {
+    let body;
+    try { body = await readBody(req); } catch (e) { return json(res, { error: 'Bad JSON: ' + e.message }, 400); }
+    const sessionId = String(body.sessionId || '');
+    const answer = String(body.answer || '').trim();
+    if (!sessionId) return json(res, { error: 'sessionId required' }, 400);
+    if (!answer) return json(res, { error: 'answer required' }, 400);
+    const session = chat.sessions.get(sessionId);
+    if (!session) return json(res, { error: 'unknown session' }, 404);
+    if (!session._pendingAsk) return json(res, { error: 'session is not waiting for an answer' }, 409);
+    session._pendingAsk.resolve(answer);
+    if (typeof broadcast === 'function') {
+      broadcast({ type: 'apps-agent-step', sessionId, kind: 'answer', answer, at: Date.now() });
+    }
+    json(res, { ok: true });
+  });
+
+  // Continue an existing session with a follow-up goal. Keeps the full
+  // message history so the agent retains context from the prior task(s)
+  // instead of re-discovering the app from scratch.
+  addRoute('POST', '/api/apps/session/continue', async (req, res) => {
+    if (isIncognito()) return json(res, { error: 'Blocked by Incognito Mode.' }, 403);
+    let body;
+    try { body = await readBody(req); } catch (e) { return json(res, { error: 'Bad JSON: ' + e.message }, 400); }
+    const sessionId = String(body.sessionId || '');
+    const goal = String(body.goal || '').trim();
+    if (!sessionId) return json(res, { error: 'sessionId required' }, 400);
+    if (!goal) return json(res, { error: 'goal required' }, 400);
+    const session = chat.sessions.get(sessionId);
+    if (!session) return json(res, { error: 'unknown session' }, 404);
+    if (session.running) return json(res, { error: 'Session already running.' }, 409);
+    if (typeof permGate === 'function') {
+      const ok = await permGate(res, 'api', 'POST /api/apps/session/continue', 'Follow-up: ' + goal.slice(0, 80));
+      if (!ok) return;
+    }
+    // Refocus in case the user alt-tabbed away since the last task ended.
+    try { await driver.focusWindow(session.hwnd); } catch (_) {}
+    driver.resetStopped();
+    session.stopped = false;
+    session.goal = goal;
+    // Reset stuck / research budgets so the new task gets a fresh chance.
+    session._stuckCount = 0;
+    session._researchCount = 0;
+    session._autoStuckFired = false;
+    session._dontRetryNoted = null;
+
+    const registry = buildRegistry();
+    const entry = chat.pickProvider(registry, body.provider);
+    if (!entry) return json(res, { error: 'No AI provider configured.' }, 400);
+    const model = body.model || entry.adapter.defaultModel;
+
+    json(res, { ok: true, sessionId, provider: entry.adapter.kind, label: entry.adapter.label, model, title: session.title });
+
+    const followUp = [
+      `Follow-up task: ${goal}`,
+      '',
+      'Continue in the same window you were already driving. You do NOT need to relist windows or refocus — the user is keeping you on the same app. Start with a screenshot to see the current state, then work toward this new goal.',
+    ].join('\n');
+
+    // Append the new goal as a user turn on the existing message history so
+    // prior context (what worked, what didn't) carries over.
+    const adapter = entry.adapter;
+    if (adapter.kind === 'gemini') session.messages.push({ role: 'user', parts: [{ text: followUp }] });
+    else session.messages.push({ role: 'user', content: followUp });
+
+    chat.runSession({ session, task: followUp, driver, providerEntry: entry, model, broadcast })
+      .catch(e => {
+        if (typeof broadcast === 'function') {
+          broadcast({ type: 'apps-agent-step', sessionId: session.id, kind: 'error', message: e.message, at: Date.now() });
+        }
+      });
+  });
+
   addRoute('POST', '/api/apps/panic', async (req, res) => {
     for (const s of chat.sessions.values()) {
       s.stopped = true;
@@ -148,11 +264,19 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     let body;
     try { body = await readBody(req); } catch (e) { return json(res, { error: 'Bad JSON: ' + e.message }, 400); }
     const app = String(body.app || '').trim();
-    const section = String(body.section || '').trim();
-    const bodyText = String(body.body || '').trim();
-    const mode = body.mode === 'replace' ? 'replace' : 'append';
-    if (!app || !section || !bodyText) return json(res, { error: 'app, section, body required' }, 400);
+    const mode = body.mode || 'append';
+    if (!app) return json(res, { error: 'app required' }, 400);
+    // mode: 'append' | 'replace' | 'replace-all' | 'clear'
     try {
+      if (mode === 'replace-all') {
+        return json(res, memory.replaceMemory(app, String(body.body || '')));
+      }
+      if (mode === 'clear') {
+        return json(res, memory.clearMemory(app));
+      }
+      const section = String(body.section || '').trim();
+      const bodyText = String(body.body || '').trim();
+      if (!section || !bodyText) return json(res, { error: 'section and body required for append/replace' }, 400);
       const r = mode === 'replace'
         ? memory.replaceSection(app, section, bodyText)
         : memory.appendSection(app, section, bodyText);

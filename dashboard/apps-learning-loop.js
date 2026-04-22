@@ -23,7 +23,8 @@ const memory = require('./apps-memory');
 
 const OBSERVER_EVERY_N = 5;
 const STUCK_PIXEL_THRESHOLD = 0.98;     // >= this means "no pixels changed"
-const STUCK_ACTION_STREAK = 5;          // actions without a completeSubgoal-ish signal
+const STUCK_ACTION_STREAK = 4;          // actions without a completeSubgoal-ish signal (tightened)
+const LOOP_SAME_TOOL_THRESHOLD = 3;     // same-tool-in-a-row count that counts as "looping"
 
 // ---- Retry-with-variation ---------------------------------------------------
 
@@ -103,12 +104,18 @@ function noteScreenshot(session, shot) {
 
 function noteAction(session, tool) {
   if (!session._actionStreak) session._actionStreak = 0;
+  if (!session._sameToolStreak) session._sameToolStreak = { tool: null, n: 0 };
   // Reset on terminal-ish calls (finish, declare_stuck, write_memory).
   if (tool === 'finish' || tool === 'declare_stuck') {
     session._actionStreak = 0;
+    session._sameToolStreak = { tool: null, n: 0 };
     return;
   }
   session._actionStreak++;
+  // Track consecutive identical tool calls (any args) — a classic loop is
+  // "click, click, click" against the same thing without progress.
+  if (session._sameToolStreak.tool === tool) session._sameToolStreak.n++;
+  else session._sameToolStreak = { tool, n: 1 };
 }
 
 function isStuck(session) {
@@ -128,6 +135,13 @@ function isStuck(session) {
   // Heuristic 2: too many actions since last screenshot change or finish.
   if ((session._actionStreak || 0) >= STUCK_ACTION_STREAK + 5) {
     return { stuck: true, reason: `${session._actionStreak} actions without meaningful progress` };
+  }
+  // Heuristic 3: same tool N times in a row (click, click, click...) — this
+  // is the classic loop pattern we want to break before the agent burns more
+  // tokens on a dead end.
+  const st = session._sameToolStreak;
+  if (st && st.tool && st.n >= LOOP_SAME_TOOL_THRESHOLD && st.tool !== 'screenshot' && st.tool !== 'wait_ms') {
+    return { stuck: true, reason: `looping on "${st.tool}" (${st.n} times in a row) — try a different tool or keyboard shortcut` };
   }
   return { stuck: false };
 }
@@ -155,8 +169,15 @@ async function runObserver({ session, providerEntry, model, lastActions }) {
     `The agent has just performed these recent actions:`,
     summary,
     ``,
-    `Quickly: did you learn anything about this app that a future session on the same app would benefit from knowing? If yes, answer with ONE line of the form:`,
-    `SECTION: <section name> :: <short bullet, <= 160 chars>`,
+    `Look for anything a FUTURE session would benefit from. Canonical categories:`,
+    `- "Keybindings": a shortcut that actually worked on the first try`,
+    `- "Nice to know": where a named element lives / app quirk`,
+    `- "DOs": the minimal sequence of steps that produced a result`,
+    `- "DON'T DOs": an approach that failed predictably — future sessions should skip it`,
+    ``,
+    `Do NOT write session narration (things like "reached N attempts", "unable to", "after N tries"). Only reusable facts.`,
+    `If you spot one, answer with ONE line (bullet <= 160 chars):`,
+    `SECTION: <one of the categories above> :: <short bullet>`,
     `If there is nothing new or notable, answer exactly:`,
     `NOTHING`,
   ].join('\n');

@@ -15,7 +15,23 @@ const memory = require('./apps-memory');
 const learning = require('./apps-learning-loop');
 const planner = require('./apps-goal-planner');
 
-const MAX_ITERATIONS = 40;
+// Shared keep-alive agent. agent:false opens a fresh TCP+TLS handshake per
+// request, which on Windows occasionally surfaces a spurious
+// SSLV3_ALERT_BAD_RECORD_MAC when a handshake races a pending socket close.
+// Reusing sockets removes that window and cuts per-step latency too.
+const SHARED_HTTPS_AGENT = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30000,
+  maxSockets: 4,
+  maxFreeSockets: 2,
+  timeout: 120000,
+});
+
+// Hard cap so a runaway loop can't burn unlimited tokens, but high enough
+// that a multi-stage real task (search -> scroll -> pick -> confirm -> verify)
+// never trips it. Stuck detection via the learning loop catches earlier
+// repeats; this is just a safety net.
+const MAX_ITERATIONS = 500;
 const DEFAULT_MAX_TOKENS = 1024;
 const MAX_HISTORY_MESSAGES = 14;
 
@@ -51,9 +67,15 @@ const DESKTOP_TOOLS = [
       toX: { type: 'number' }, toY: { type: 'number' }
     }, required: ['fromX', 'fromY', 'toX', 'toY'] } },
   { name: 'scroll',
-    description: 'Scroll inside the current window. Positive dy scrolls down, positive dx scrolls right. Units are mouse-wheel ticks.',
+    description: 'Scroll inside the current window using mouse-wheel ticks. Pick the axis carefully:\n' +
+      '  - dy is VERTICAL: positive dy scrolls DOWN the page (reveals content below), negative dy scrolls UP.\n' +
+      '  - dx is HORIZONTAL: positive dx scrolls RIGHT (reveals content to the right), negative dx scrolls LEFT.\n' +
+      'NEVER set both dx and dy at once. Choose a single axis per call.\n' +
+      'Typical magnitudes: 3 ticks = small nudge, 6 = one "page" on most apps, 15 = long jump. ' +
+      'If a horizontal scrollbar is visible and you need to see content hidden on the right, use positive dx, NOT positive dy.',
     parameters: { type: 'object', properties: {
-      dx: { type: 'number' }, dy: { type: 'number' }
+      dx: { type: 'number', description: 'Horizontal ticks. Positive = right, negative = left. Leave out for vertical scrolls.' },
+      dy: { type: 'number', description: 'Vertical ticks. Positive = down, negative = up. Leave out for horizontal scrolls.' }
     } } },
   { name: 'type_text',
     description: 'Type a literal string of characters into the focused window. Does NOT interpret special keys like Enter or Tab; use key for those.',
@@ -68,8 +90,18 @@ const DESKTOP_TOOLS = [
     description: 'For 3D / FPS games: move the mouse by a known pixel delta and screenshot before and after, so you can figure out how many pixels per camera degree this game uses.',
     parameters: { type: 'object', properties: { testDeltaPx: { type: 'number', description: 'How far to move the mouse in x. Default 200.' } } } },
   { name: 'declare_stuck',
-    description: 'Call this if you have tried several approaches without progress and need to pause for research or user input. Include a short reason.',
+    description: 'END the session and hand off to the user. Call this exactly once, only after you have genuinely exhausted your options. Give a specific reason (what you tried, what is blocking you, and what the user should do next). After this call the session stops — you will NOT get another turn, so make the reason actionable.',
     parameters: { type: 'object', properties: { reason: { type: 'string' } }, required: ['reason'] } },
+  { name: 'ask_user',
+    description: 'Ask the human user a question when you truly cannot decide what to do next — e.g. credentials, an ambiguous choice, or domain knowledge only they have. Use sparingly: only as a last resort after trying at least two different approaches. Returns their answer as the tool result.',
+    parameters: { type: 'object', properties: {
+      question: { type: 'string', description: 'The specific question the user needs to answer. Be concrete.' }
+    }, required: ['question'] } },
+  { name: 'web_research',
+    description: 'Search the web for ground-truth information about the target application — keyboard shortcuts, menu paths, concrete setup steps, version-specific quirks. Use this BEFORE you get stuck, not only after. Good queries: "How to add a uniform to vertex shader in KodeLife", "Figma keyboard shortcut for frame". The result is a short summary you can act on.',
+    parameters: { type: 'object', properties: {
+      query: { type: 'string', description: 'Specific question. Include the app name and the exact feature you need.' }
+    }, required: ['query'] } },
   { name: 'write_memory',
     description: 'Append a short, durable note (<= 2000 bytes) about the current app under a named section (e.g. "UI map", "Keybindings that work", "Known failure modes", "Successful workflows", "Calibration"). Use this to persist anything future sessions on this app would benefit from knowing. Do not dump the screen here; write in terse, decision-useful bullets.',
     parameters: { type: 'object', properties: {
@@ -108,18 +140,58 @@ const BASE_SYSTEM_PROMPT = `You drive a Windows desktop application on the user'
 3. After any action that could change the screen (click, type_text, key, scroll, drag), call screenshot again before deciding the next step. Do not issue multiple clicks without screenshotting between them.
 4. Use key for named keys (Enter, Tab, Escape, Ctrl+S, Alt+F4). Use type_text only for literal characters. Passing "\\n" to type_text will NOT press Enter; use key("Enter").
 5. If the window closes, minimizes, or moves, the driver will tell you in the error. Re-list windows and refocus before continuing.
+6. Scrolling: use ONE axis per call. If you need to reveal content BELOW, use scroll({ dy: 5 }). If you need content to the RIGHT, use scroll({ dx: 5 }). Never set dx and dy in the same call. If vertical scrolling doesn't change the page but a horizontal scrollbar is visible, you need dx, not dy.
 
 ## Being honest about limits
 
+- You drive a desktop by clicking pixels and typing keys. You CANNOT reason about arbitrary code, shader math, spreadsheet formulas, or domain content just by looking at a screenshot. If the task is "write a shader / essay / SQL query / formula", you cannot invent the content — the user has to supply it, or you type what they dictated. Do not try to generate it yourself by flailing at the keyboard.
 - You cannot play fast-twitch games. If the user asks you to, try gently and call finish with an honest assessment.
 - If nothing changes after 3 attempts at the same action, stop and try something different. Repeating the same failing action is worse than calling declare_stuck.
 - If a dialog appears that requires the user (payment confirmation, unsaved work prompt, credentials), call declare_stuck with a clear reason.
+- declare_stuck ENDS the session. Don't use it as a breadcrumb or status update — use it only when you're done trying.
+
+## Grounding: use web_research proactively
+
+You are NOT expected to know every app by heart. Before you start flailing:
+- Call web_research at the start of an unfamiliar task with a concrete query ("How to <thing> in <app>").
+- Call web_research whenever a screenshot shows a UI element whose label / purpose you don't recognize.
+- Call web_research BEFORE attempting shader / formula / SQL / DSL content — the research tool will surface the exact syntax and bindings the app expects.
+- Results are short actionable summaries with source URLs. Trust them over your own guesses about keyboard shortcuts and menu paths.
+- web_research is cheap. Spending one research call to avoid 20 failed clicks is always the right trade.
+
+## Escalation ladder when you can't make progress
+
+1. First, try a completely different approach (different tool, keyboard shortcut, menu path). The system will reject exact-duplicate tool calls that just failed — that's a signal to change tactic.
+2. Call web_research with a focused query about the specific blocker.
+3. If you need information only the user has (credentials, a preference, which of two buttons to click, what the target should look like), call ask_user with a SPECIFIC question. Do not call ask_user for things you could verify yourself with a screenshot or research.
+4. Only call declare_stuck as a last resort, after at least one web_research and one ask_user attempt.
 
 ## Deliverables
 
 - When the goal is achieved, call finish with a one-paragraph summary of what you did.
 - If you cannot achieve the goal, call finish anyway and explain what blocked you.
-- Keep intermediate reasoning brief; every message you produce is shown to the user live.`;
+- Keep intermediate reasoning brief; every message you produce is shown to the user live.
+
+## Writing to memory — ACTIVELY DURING AND AFTER THE SESSION
+
+Use write_memory ONLY with these five canonical section names (they map to the memory file's headings). Anything else is remapped automatically:
+- "Instructions"  — user-written guidance; you generally do NOT write here
+- "DOs"           — a sequence of steps that actually produced a result
+- "DON'T DOs"     — an approach that failed predictably; a future session should skip it
+- "Nice to know"  — UI map, where things live, app-specific quirks
+- "Keybindings"   — shortcuts you VERIFIED work
+
+Call write_memory at these moments:
+1. Right after a NEW shortcut or menu path works first try → section "Keybindings" (shortcut) or "Nice to know" (menu path / location).
+2. Right after an approach fails AND you found a workaround → section "DON'T DOs" with the failed path, plus a line in "DOs" with the workaround.
+3. Before finish on a successful goal → section "DOs" with the minimal sequence of steps.
+4. NEVER write session narration like "Reached N stuck declarations", "I was unable to", "after N attempts". Those are session-local and actively poison future sessions. The system will drop them anyway.
+
+Rules:
+- Be TERSE. One decision-useful line per bullet.
+- Only write things you verified on screen. No speculation.
+- Do NOT repeat what's already in "Prior notes for this app" — only correct or extend it.
+- Prefer keyboard shortcuts over click paths; they survive UI changes better.`;
 
 function buildSystemPrompt({ targetApp, targetTitle, plan } = {}) {
   let p = BASE_SYSTEM_PROMPT;
@@ -158,7 +230,7 @@ function httpJson({ hostname, path, method = 'POST', headers = {}, body, timeout
       method, hostname, path,
       headers: { 'content-type': 'application/json', ...headers, 'content-length': Buffer.byteLength(payload) },
       timeout: timeoutMs,
-      agent: false,
+      agent: SHARED_HTTPS_AGENT,
     }, (res) => {
       let data = '';
       res.on('data', c => { data += c; });
@@ -179,14 +251,15 @@ function httpJson({ hostname, path, method = 'POST', headers = {}, body, timeout
   });
 }
 
-function httpStream({ hostname, path, method = 'POST', headers = {}, body, onChunk, timeoutMs = 180000, signal }) {
+function httpStreamOnce(opts, onStreamStarted) {
+  const { hostname, path, method = 'POST', headers = {}, body, onChunk, timeoutMs = 180000, signal } = opts;
   return new Promise((resolve, reject) => {
     const payload = body ? JSON.stringify(body) : '';
     const req = https.request({
       method, hostname, path,
       headers: { 'content-type': 'application/json', ...headers, 'content-length': Buffer.byteLength(payload) },
       timeout: timeoutMs,
-      agent: false,
+      agent: SHARED_HTTPS_AGENT,
     }, (res) => {
       if (res.statusCode < 200 || res.statusCode >= 300) {
         let err = '';
@@ -196,6 +269,7 @@ function httpStream({ hostname, path, method = 'POST', headers = {}, body, onChu
       }
       let buf = '';
       res.on('data', chunk => {
+        if (onStreamStarted) { try { onStreamStarted(); } catch (_) {} }
         buf += chunk.toString();
         const parts = buf.split('\n');
         buf = parts.pop();
@@ -211,6 +285,28 @@ function httpStream({ hostname, path, method = 'POST', headers = {}, body, onChu
     req.end();
     req.on('close', cleanup);
   });
+}
+
+// Retry transient failures (SSL BAD_RECORD_MAC, ECONNRESET, 429) that happen
+// before any stream data arrives. Once the server has started emitting
+// tokens, restarting would double-emit, so we give up and surface the error.
+async function httpStream(opts, maxRetries = 3) {
+  let lastErr;
+  for (let i = 0; i <= maxRetries; i++) {
+    let started = false;
+    try {
+      return await httpStreamOnce(opts, () => { started = true; });
+    } catch (e) {
+      lastErr = e;
+      if (!started && isTransientError(e) && i < maxRetries) {
+        const wait = e.message && e.message.includes('429') ? (i + 1) * 15000 : (i + 1) * 1500;
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr;
 }
 
 function isTransientError(e) {
@@ -553,9 +649,18 @@ function pickProvider(registry, preferred) {
 
 // ---- Tool dispatch (calls into apps-driver) ----
 
+// Input tools that send mouse / keyboard events to the OS. Before each of
+// these runs, we re-assert that the target window is the foreground one
+// so a stray click that landed outside (or a notification that stole focus)
+// can't redirect subsequent input into an unrelated window.
+const INPUT_TOOLS = new Set(['click', 'mouse_move', 'drag', 'scroll', 'type_text', 'key']);
+
 async function executeTool(driver, session, name, args) {
   args = args || {};
   const hwnd = session.hwnd;
+  if (INPUT_TOOLS.has(name) && hwnd != null && typeof driver.ensureForeground === 'function') {
+    await driver.ensureForeground(hwnd);
+  }
   switch (name) {
     case 'screenshot':
       if (hwnd == null) throw new Error('no target window focused');
@@ -602,8 +707,57 @@ async function executeTool(driver, session, name, args) {
     case 'calibrate_mouse_look':
       if (hwnd == null) throw new Error('no target window focused');
       return await driver.calibrateMouseLook({ hwnd, testDeltaPx: args.testDeltaPx });
-    case 'declare_stuck':
+    case 'declare_stuck': {
+      // DO NOT write the stuck reason to memory. Stuck reasons are almost
+      // always self-narrative noise ("Reached N stuck declarations", "UI did
+      // not respond to clicks") that poisons future sessions by making the
+      // agent preemptively give up. Real don't-do learnings come from the
+      // write_memory tool when the agent explicitly decides something is
+      // worth recording. Keep the file clean.
       return { ok: true, stuck: true, reason: args.reason || '' };
+    }
+    case 'web_research': {
+      const query = String(args.query || '').trim();
+      if (!query) throw new Error('web_research requires a query');
+      // Delegate to the same research helper used by the stuck-handler, but
+      // scope the question to whatever the agent is asking right now.
+      const providerEntry = session._providerEntry;
+      const model = session._model;
+      if (!providerEntry) return { ok: false, error: 'No provider bound to session for research.' };
+      const research = await require('./apps-learning-loop').runResearch({
+        session, providerEntry, model,
+        goal: query,
+        reason: 'proactive web research',
+      });
+      if (typeof session._emit === 'function') {
+        session._emit({ kind: 'research', provider: research.provider, summary: research.summary });
+      }
+      return { ok: true, summary: research.summary, provider: research.provider };
+    }
+    case 'ask_user': {
+      const question = String(args.question || '').trim();
+      if (!question) throw new Error('ask_user requires a question');
+      // Parked promise — resolved when the user POSTs /api/apps/session/answer.
+      // Times out after 5 minutes so a forgotten prompt doesn't hang forever.
+      return await new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          session._pendingAsk = null;
+          resolve({ ok: false, timedOut: true, message: 'No answer in 5 minutes. Continue without user input or call declare_stuck.' });
+        }, 5 * 60 * 1000);
+        session._pendingAsk = {
+          question,
+          resolve: (answer) => {
+            clearTimeout(timer);
+            session._pendingAsk = null;
+            resolve({ ok: true, answer: String(answer || '').trim() });
+          },
+        };
+        // Emit so the UI can render an inline input.
+        if (typeof session._emit === 'function') {
+          session._emit({ kind: 'ask', question });
+        }
+      });
+    }
     case 'write_memory': {
       const app = session.app;
       if (!app) throw new Error('no app identified for this session; writeMemory needs an app');
@@ -628,8 +782,20 @@ async function executeTool(driver, session, name, args) {
       if (!id) throw new Error('no active subgoal to complete');
       return planner.completeSubgoal(session.plan, id, args.evidence);
     }
-    case 'finish':
-      return { ok: true, finished: true, summary: args.summary || '' };
+    case 'finish': {
+      // Only record the final summary to memory when it looks like an
+      // ACTUAL success. Reject summaries that read as failure narration so
+      // the memory file keeps its signal-to-noise ratio.
+      const summary = String(args.summary || '').trim();
+      const looksLikeFailure = !summary || /\b(stuck|unable|cannot|could not|didn't work|did not work|gave up|handed off|reached \d+|failed|blocked|no progress|not respond)\b/i.test(summary);
+      if (session.app && summary && !looksLikeFailure) {
+        try {
+          memory.appendSection(session.app, 'Successful workflows',
+            `"${(session.goal || '').slice(0, 80)}": ${summary.slice(0, 320)}`);
+        } catch (_) {}
+      }
+      return { ok: true, finished: true, summary };
+    }
     default:
       throw new Error('unknown tool: ' + name);
   }
@@ -697,6 +863,9 @@ async function runSession({ session, task, driver, providerEntry, model, broadca
       broadcast({ type: 'apps-agent-step', sessionId: session.id, ...step, at: Date.now() });
     }
   };
+  session._emit = emit; // so executeTool (ask_user) can push UI events too.
+  session._providerEntry = providerEntry;
+  session._model = model;
   emit({ kind: 'provider', provider: providerEntry.adapter.kind, label: providerEntry.adapter.label });
 
   if (session.app) {
@@ -791,6 +960,15 @@ async function runSession({ session, task, driver, providerEntry, model, broadca
           emit({ kind: 'observation', tool: tc.name, ok: false, error: msg, code: 'already_tried' });
           learning.trackTry(session, tc.name, tc.args);
           lastActionsForObserver.push({ tool: tc.name, summary: describeAction(tc.name, tc.args), ok: false, error: 'already_tried' });
+          // Persist the failing call so future sessions skip it without
+          // rediscovering the dead end every time. Only once per unique key.
+          if (session.app && !(session._dontRetryNoted || (session._dontRetryNoted = new Set())).has(dup.key)) {
+            session._dontRetryNoted.add(dup.key);
+            try {
+              memory.appendSection(session.app, "DON'T DOs",
+                `${describeAction(tc.name, tc.args)} — failed identically twice, use a different tool or coordinates.`);
+            } catch (_) {}
+          }
           continue;
         }
         try {
@@ -824,8 +1002,15 @@ async function runSession({ session, task, driver, providerEntry, model, broadca
           emit({ kind: 'observation', tool: tc.name, ok: true, preview: summarizeResultForUi(tc.name, result) });
           if (tc.name === 'finish') { finished = true; finalSummary = (tc.args && tc.args.summary) || 'Done.'; break; }
           if (tc.name === 'declare_stuck') {
-            stuckSignal = (tc.args && tc.args.reason) || 'declared stuck';
-            emit({ kind: 'stuck', reason: stuckSignal });
+            // declare_stuck is terminal. Ending here is what lets the user
+            // actually take over instead of the agent looping on "I am stuck"
+            // while burning tokens. The reason goes into the done summary.
+            const reason = (tc.args && tc.args.reason) || 'declared stuck';
+            stuckSignal = reason;
+            finished = true;
+            finalSummary = `Stopped for user takeover. ${reason}`;
+            emit({ kind: 'stuck', reason });
+            break;
           }
         } catch (e) {
           learning.recordOutcome(session, tc.name, tc.args, false);
@@ -856,23 +1041,52 @@ async function runSession({ session, task, driver, providerEntry, model, broadca
       if (finished) break;
 
       // Stuck detection: either explicit declare_stuck or heuristic.
+      // When declare_stuck fired, we already emitted the 'stuck' frame
+      // inside the tool loop, so don't re-emit here (that was the source of
+      // the duplicate "Stuck: ..." rows in the activity panel).
+      let emittedStuckAlready = !!stuckSignal;
       if (!stuckSignal) {
         const probe = learning.isStuck(session);
         if (probe.stuck) stuckSignal = probe.reason;
       }
-      if (stuckSignal && !session._researchFired) {
-        session._researchFired = true;
-        emit({ kind: 'stuck', reason: stuckSignal });
-        const research = await learning.runResearch({
-          session, providerEntry, model,
-          goal: session.goal || task.slice(0, 200),
-          reason: stuckSignal,
-        });
-        emit({ kind: 'research', provider: research.provider, summary: research.summary });
-        // Inject research as a user turn so the main loop picks it up.
-        const inject = `Research notes (use these to try a different approach):\n\n${research.summary}`;
-        if (providerEntry.adapter.kind === 'gemini') session.messages.push({ role: 'user', parts: [{ text: inject }] });
-        else session.messages.push({ role: 'user', content: inject });
+      if (stuckSignal) {
+        session._stuckCount = (session._stuckCount || 0) + 1;
+        // Cap research calls at 2 per session so we don't spend unbounded
+        // tokens hitting web_search when the agent genuinely can't recover.
+        const researchBudget = 2;
+        session._researchCount = session._researchCount || 0;
+
+        if (!emittedStuckAlready) emit({ kind: 'stuck', reason: stuckSignal });
+
+        // First stuck -> research + strategy reminder.
+        // Second stuck -> fresh research + HARDER switch directive.
+        // Third+ stuck -> skip research (already tried), force declare_stuck.
+        if (session._researchCount < researchBudget) {
+          session._researchCount++;
+          const research = await learning.runResearch({
+            session, providerEntry, model,
+            goal: session.goal || task.slice(0, 200),
+            reason: stuckSignal,
+          });
+          emit({ kind: 'research', provider: research.provider, summary: research.summary });
+          const escalator = session._stuckCount >= 2
+            ? `You are stuck for the ${session._stuckCount}${session._stuckCount === 2 ? 'nd' : 'rd+'} time. Stop repeating what you were doing. Do ALL of the following before your next action:\n` +
+              `1) List the 2-3 approaches you've already tried.\n` +
+              `2) Pick exactly ONE new approach you have NOT tried — prefer keyboard shortcuts, menus, or right-click context menus over more clicking.\n` +
+              `3) If nothing new remains, call declare_stuck with a clear reason and stop.`
+            : `You are stuck. Use the research below to try a DIFFERENT approach (different tool, different coordinates, a keyboard shortcut, or a menu path). Do NOT repeat what you just tried.`;
+          const inject = `${escalator}\n\nResearch notes:\n\n${research.summary}`;
+          if (providerEntry.adapter.kind === 'gemini') session.messages.push({ role: 'user', parts: [{ text: inject }] });
+          else session.messages.push({ role: 'user', content: inject });
+        } else {
+          // Already researched twice and still stuck — hand off rather than loop.
+          const handoff = `You've been stuck ${session._stuckCount} times and research didn't unblock you. Call declare_stuck with a one-sentence reason and stop. The user will take over.`;
+          if (providerEntry.adapter.kind === 'gemini') session.messages.push({ role: 'user', parts: [{ text: handoff }] });
+          else session.messages.push({ role: 'user', content: handoff });
+        }
+        // Reset the same-tool streak so the next stuck-detection pass isn't
+        // triggered by the exact same signal instantly.
+        if (session._sameToolStreak) session._sameToolStreak = { tool: null, n: 0 };
       }
 
       // Observer pass: every N actions, fire-and-forget a side call to
@@ -897,6 +1111,11 @@ async function runSession({ session, task, driver, providerEntry, model, broadca
     return { ok: false, error: e.message };
   } finally {
     session.running = false;
+    // Drop the topmost pin we installed at focus/launch time so the window
+    // behaves normally when the agent is no longer driving it.
+    if (session.hwnd != null && driver && typeof driver.unpinTopmost === 'function') {
+      driver.unpinTopmost(session.hwnd).catch(() => {});
+    }
     pruneSessions();
   }
 }

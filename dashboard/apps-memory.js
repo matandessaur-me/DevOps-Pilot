@@ -55,6 +55,40 @@ function loadMemory(app) {
   try { return fs.readFileSync(p, 'utf8'); } catch (_) { return ''; }
 }
 
+// Canonical sections for the memory file. Anything the agent writes is
+// remapped into one of these so the file stays tidy instead of growing a
+// new ad-hoc heading every session.
+const CANON_SECTIONS = ['Instructions', 'DOs', "DON'T DOs", 'Nice to know', 'Keybindings'];
+
+// Map common alias/legacy names onto the canonical section headings.
+function _canonSection(section) {
+  const s = String(section || '').trim().toLowerCase();
+  if (!s) return 'Nice to know';
+  if (/^(instructions?|user instructions?|user-instructions?)$/.test(s)) return 'Instructions';
+  if (/^(dos?|successful workflows?|what worked|working|successes)$/.test(s)) return 'DOs';
+  if (/^(don'?t ?dos?|known failure modes?|failures?|do not retry|don'?t retry|anti-pattern)$/.test(s)) return "DON'T DOs";
+  if (/^(nice to know|ui map|tips|quirks|notes|summary|misc)$/.test(s)) return 'Nice to know';
+  if (/^(keybindings( that work)?|shortcuts?|hotkeys?)$/.test(s)) return 'Keybindings';
+  return 'Nice to know';
+}
+
+// Reject "noise" bullets that describe the agent's own stuckness rather
+// than app-specific knowledge. Anything matching these reads like session
+// narration, not a reusable note.
+const NOISE_PATTERNS = [
+  /reached\s+\d+\s+(stuck|attempts)/i,
+  /after\s+\d+\s+(attempts?|stuck|iterations)/i,
+  /\b(stuck declarations?|stopping\.?|halting|handed? off|ending session|user takeover|user to take over)\b/i,
+  /\bunable to (successfully|proceed|make progress)/i,
+  /\b(not responding to clicks?|does not respond)/i,
+  /\bi (cannot|could not|was unable|gave up)\b/i,
+];
+function _isNoiseNote(note) {
+  const s = String(note || '').trim();
+  if (!s || s.length < 4) return true;
+  return NOISE_PATTERNS.some(re => re.test(s));
+}
+
 function _ensureFile(app) {
   _ensureDir();
   const p = filePath(app);
@@ -67,16 +101,52 @@ function _ensureFile(app) {
     sessions: '1',
   },
     `# ${normalizeApp(app)}\n\n` +
-    `Short notes an AI agent built up while driving this application.\n\n` +
-    `## Summary\n\n(to be filled in)\n\n` +
-    `## UI map\n\n` +
-    `## Keybindings that work\n\n` +
-    `## Successful workflows\n\n` +
-    `## Known failure modes\n\n` +
-    `## Calibration\n\n`
+    `Concrete, reusable notes built up while an AI agent drove this app. ` +
+    `Only decision-useful bullets live here — no session narration.\n\n` +
+    `## Instructions\n\n(User-written guidance. The AI reads this first on every session.)\n\n` +
+    `## DOs\n\n(Workflows that actually worked — minimal steps only.)\n\n` +
+    `## DON'T DOs\n\n(Approaches that failed predictably. Future sessions should skip these.)\n\n` +
+    `## Nice to know\n\n(UI map, quirks, where things live.)\n\n` +
+    `## Keybindings\n\n(Verified shortcuts. Prefer these over click paths.)\n\n`
   );
   fs.writeFileSync(p, initial, 'utf8');
   return p;
+}
+
+// Replace the entire memory file for an app. Used by the Instructions UI
+// when the user wants to clean up accumulated noise from prior sessions
+// (duplicate failure bullets, outdated notes, etc).
+function replaceMemory(app, body) {
+  _ensureFile(app);
+  const p = filePath(app);
+  const raw = fs.readFileSync(p, 'utf8');
+  const { meta } = _readFrontmatter(raw);
+  meta.lastUpdated = new Date().toISOString();
+  const clean = String(body || '').replace(/^---\r?\n[\s\S]*?\n---\r?\n/, '');
+  fs.writeFileSync(p, _writeFrontmatter(meta, clean.trimStart()), 'utf8');
+  return { ok: true, app: normalizeApp(app), bytes: Buffer.byteLength(clean, 'utf8') };
+}
+
+// Wipe everything except the frontmatter, producing a fresh file. Useful
+// when the agent has polluted its own memory with duplicate dead-end notes.
+function clearMemory(app) {
+  _ensureFile(app);
+  const p = filePath(app);
+  const raw = fs.readFileSync(p, 'utf8');
+  const { meta } = _readFrontmatter(raw);
+  meta.lastUpdated = new Date().toISOString();
+  meta.sessions = '0';
+  const fresh =
+    `# ${normalizeApp(app)}\n\n` +
+    `Concrete, reusable notes built up while an AI agent drove this app. ` +
+    `Only decision-useful bullets live here — no session narration.\n\n` +
+    `## Instructions\n\n(User-written guidance. The AI reads this first on every session.)\n\n` +
+    `## DOs\n\n(Workflows that actually worked — minimal steps only.)\n\n` +
+    `## DON'T DOs\n\n(Approaches that failed predictably. Future sessions should skip these.)\n\n` +
+    `## Nice to know\n\n(UI map, quirks, where things live.)\n\n` +
+    `## Keybindings\n\n(Verified shortcuts. Prefer these over click paths.)\n\n`;
+  fs.writeFileSync(p, _writeFrontmatter(meta, fresh), 'utf8');
+  return { ok: true, app: normalizeApp(app) };
 }
 
 function bumpSession(app) {
@@ -91,26 +161,40 @@ function bumpSession(app) {
 
 function appendSection(app, section, note) {
   if (!section || !note) throw new Error('section and note are required');
-  const bytes = Buffer.byteLength(note, 'utf8');
+  const trimmed = String(note).trim();
+  const bytes = Buffer.byteLength(trimmed, 'utf8');
   if (bytes > MAX_NOTE_BYTES) {
     const e = new Error(`note is ${bytes} bytes; must be <= ${MAX_NOTE_BYTES}`);
     e.code = 'note_too_large';
     throw e;
   }
+  // Silently drop noise bullets instead of polluting the file.
+  if (_isNoiseNote(trimmed)) {
+    return { ok: true, dropped: 'noise', app: normalizeApp(app), section };
+  }
+  const canon = _canonSection(section);
   _ensureFile(app);
   const p = filePath(app);
   const body = fs.readFileSync(p, 'utf8');
   const { meta, rest } = _readFrontmatter(body);
-  const headerRe = new RegExp(`(^|\\n)## ${section.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*\\n`, 'i');
+  const headerRe = new RegExp(`(^|\\n)## ${canon.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*\\n`, 'i');
+  const dateSlug = new Date().toISOString().slice(0, 10);
+  const bullet = `- ${dateSlug}: ${trimmed}`;
+  // Dedupe: if the same bullet text (ignoring date) already exists under
+  // this section, skip. Prevents the "same failure mode 70 times" pattern.
+  const existingRe = new RegExp('^-\\s+\\d{4}-\\d{2}-\\d{2}:\\s+' + trimmed.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&').slice(0, 120), 'im');
+  if (existingRe.test(rest)) {
+    return { ok: true, dedup: true, app: normalizeApp(app), section: canon };
+  }
   let updated;
   if (headerRe.test(rest)) {
-    updated = rest.replace(headerRe, (m) => m + `- ${new Date().toISOString().slice(0, 10)}: ${note.trim()}\n`);
+    updated = rest.replace(headerRe, (m) => m + bullet + '\n');
   } else {
-    updated = rest.trimEnd() + `\n\n## ${section}\n- ${new Date().toISOString().slice(0, 10)}: ${note.trim()}\n`;
+    updated = rest.trimEnd() + `\n\n## ${canon}\n${bullet}\n`;
   }
   meta.lastUpdated = new Date().toISOString();
   fs.writeFileSync(p, _writeFrontmatter(meta, updated), 'utf8');
-  return { ok: true, app: normalizeApp(app), section, bytes };
+  return { ok: true, app: normalizeApp(app), section: canon, bytes };
 }
 
 function replaceSection(app, section, body) {
@@ -162,6 +246,8 @@ module.exports = {
   loadMemory,
   appendSection,
   replaceSection,
+  replaceMemory,
+  clearMemory,
   bumpSession,
   buildSystemPromptAddition,
 };
