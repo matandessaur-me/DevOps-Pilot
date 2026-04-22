@@ -13722,11 +13722,26 @@ async function _appsRefreshProviders() {
     _appsState.providers = providers;
     const sel = document.getElementById('appsProviderSelect');
     if (!sel) return;
+    const existingConfigBtn = document.getElementById('appsConfigureKeysBtn');
     if (!providers.length) {
-      sel.innerHTML = '<option value="">No AI keys set</option>';
-      sel.disabled = true;
+      sel.style.display = 'none';
+      _appsState.providerKey = null;
+      if (!existingConfigBtn) {
+        const btn = document.createElement('button');
+        btn.id = 'appsConfigureKeysBtn';
+        btn.type = 'button';
+        btn.className = 'sy-btn sy-btn-outline';
+        btn.style.height = '32px';
+        btn.title = 'Open AI settings to add an API key';
+        btn.innerHTML = '<i data-lucide="key" style="width:13px;height:13px;"></i> Configure API Keys';
+        btn.onclick = () => { if (typeof openSettings === 'function') openSettings('ai'); };
+        sel.parentNode.insertBefore(btn, sel);
+        if (typeof lucide !== 'undefined') lucide.createIcons({ el: btn });
+      }
       return;
     }
+    if (existingConfigBtn) existingConfigBtn.remove();
+    sel.style.removeProperty('display');
     sel.disabled = false;
     const saved = _appsState.providerKey || _appsLoadSavedProvider();
     const pick = providers.find(p => p.key === saved)
