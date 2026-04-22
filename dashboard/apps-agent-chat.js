@@ -655,7 +655,7 @@ function buildProviderRegistry(aiKeys) {
   if (aiKeys.OPENAI_API_KEY) {
     registry.openai = { adapter: makeOpenAIAdapter({ baseHost: 'api.openai.com', label: 'OpenAI', defaultModel: 'gpt-4o' }), keyEnv: 'OPENAI_API_KEY', apiKey: aiKeys.OPENAI_API_KEY };
     registry['openai-realtime'] = {
-      adapter: { kind: 'openai-realtime', label: 'OpenAI Realtime', defaultModel: 'gpt-realtime', streaming: true },
+      adapter: { kind: 'openai-realtime', label: 'OpenAI Realtime', defaultModel: 'gpt-4o-realtime-preview', streaming: true },
       keyEnv: 'OPENAI_API_KEY',
       apiKey: aiKeys.OPENAI_API_KEY,
     };
@@ -669,7 +669,7 @@ function buildProviderRegistry(aiKeys) {
   if (aiKeys.GEMINI_API_KEY) {
     registry.gemini = { adapter: makeGeminiAdapter(), keyEnv: 'GEMINI_API_KEY', apiKey: aiKeys.GEMINI_API_KEY };
     registry['gemini-live'] = {
-      adapter: { kind: 'gemini-live', label: 'Gemini Live', defaultModel: 'gemini-3.1-flash-live-preview', streaming: true },
+      adapter: { kind: 'gemini-live', label: 'Gemini Live', defaultModel: 'gemini-2.0-flash-exp', streaming: true },
       keyEnv: 'GEMINI_API_KEY',
       apiKey: aiKeys.GEMINI_API_KEY,
     };

@@ -222,7 +222,22 @@ async function runGeminiLive({ session, task, driver, providerEntry, model, broa
         emit({ kind: 'live_goaway', timeLeft: msg.goAway.timeLeft });
         return;
       }
+
+      // Surface anything else so diagnostics aren't opaque.
+      emit({ kind: 'live_debug', message: 'unhandled server message', keys: Object.keys(msg || {}), preview: JSON.stringify(msg).slice(0, 500) });
     });
+
+    // Safety net: if the socket opens but the server never sends anything
+    // recognizable (bad model id, auth problem, closed region), surface an
+    // error after 10s instead of looking hung.
+    const deadHandSoft = setTimeout(() => {
+      if (done) return;
+      emit({ kind: 'error', message: 'Gemini Live: no server response within 10s. Check GEMINI_API_KEY has Live API access and that model id "' + chosenModel + '" is valid. Try a different model via the dropdown refresh.' });
+    }, 10000);
+    const clearDeadHand = () => clearTimeout(deadHandSoft);
+    ws.on('message', clearDeadHand);
+    ws.on('close', clearDeadHand);
+    ws.on('error', clearDeadHand);
 
     ws.on('error', (err) => {
       emit({ kind: 'error', message: 'Live WS error: ' + (err && err.message || String(err)) });
