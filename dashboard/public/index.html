@@ -5064,7 +5064,6 @@
       <div style="width:220px; min-width:200px; display:flex; flex-direction:column; gap:6px; border-right:1px solid var(--surface1); padding-right:10px;">
         <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px; padding:2px 4px;">Your automations</div>
         <div id="appsAutomationsList" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:4px; min-height:0;"></div>
-        <div id="appsAutomationsTestsList" style="display:none;"></div>
         <div id="appsStepPaletteWrap" style="display:none;">
           <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px; padding:6px 4px 2px; border-top:1px solid var(--surface1);">Drag to insert</div>
           <div id="appsStepPalette" style="display:flex;flex-direction:column;gap:2px;"></div>
@@ -5133,23 +5132,6 @@
             </div>
           </details>
         </div>
-        <div id="appsAutomationsTestForm" style="display:none; flex:1; flex-direction:column; gap:8px; min-width:0;">
-          <input type="text" id="appsTestName" placeholder="Test name (e.g. Export round-trip)" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:8px 10px;font:13px var(--font-ui);outline:none;">
-          <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">Macro (recipe to run)</div>
-          <select id="appsTestMacro" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px var(--font-ui);outline:none;"></select>
-          <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">Inputs <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--overlay1);">- one <code>name = value</code> per line</span></div>
-          <textarea id="appsTestInputs" rows="3" placeholder="filename = regression-report&#10;count = 5" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px/1.4 var(--font-mono);outline:none;resize:vertical;"></textarea>
-          <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">Expected outcome</div>
-          <select id="appsTestOutcome" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px var(--font-ui);outline:none;">
-            <option value="ok">ok - recipe finishes successfully</option>
-            <option value="failed">failed - recipe should fail</option>
-            <option value="aborted">aborted</option>
-          </select>
-          <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">Elements that must be present at end <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--overlay1);">- one description per line</span></div>
-          <textarea id="appsTestPresent" rows="2" placeholder="Success toast&#10;Save button enabled" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px/1.4 var(--font-mono);outline:none;resize:vertical;"></textarea>
-          <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">Elements that must be absent <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--overlay1);">- one per line</span></div>
-          <textarea id="appsTestAbsent" rows="2" placeholder="Error banner&#10;Loading spinner" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px/1.4 var(--font-mono);outline:none;resize:vertical;"></textarea>
-        </div>
         <div id="appsAutomationsHistory" style="display:none; flex:1; flex-direction:column; gap:6px; min-height:0; overflow:hidden;">
           <div style="display:flex;align-items:center;gap:8px;">
             <strong style="font:600 11px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">Recent runs</strong>
@@ -5161,16 +5143,10 @@
     </div>
     <div class="modal-footer" style="display:flex; gap:8px; justify-content:flex-end; align-items:center; margin-top:14px; padding-top:12px; border-top:1px solid var(--surface1);">
       <span id="appsAutomationsStatus" style="margin-right:auto; font:11px var(--font-ui); color:var(--subtext0);"></span>
-      <span id="appsAutomationsRecipesFooter" style="display:contents;">
-        <button class="modal-btn" id="appsAutomationsDeleteBtn" onclick="appsAutomationsDelete()" style="display:none;color:var(--red);border-color:var(--red);">Delete</button>
-        <button class="modal-btn" onclick="appsAutomationsRunSelected()">Use in next run</button>
-      </span>
-      <span id="appsAutomationsTestsFooter" style="display:none;">
-        <button class="modal-btn" id="appsTestDeleteBtn" onclick="appsTestDelete()" style="display:none;color:var(--red);border-color:var(--red);">Delete</button>
-        <button class="modal-btn" onclick="appsTestRunSelected()">Run test</button>
-      </span>
+      <button class="modal-btn" id="appsAutomationsDeleteBtn" onclick="appsAutomationsDelete()" style="display:none;color:var(--red);border-color:var(--red);">Delete</button>
+      <button class="modal-btn" onclick="appsAutomationsRunSelected()">Use in next run</button>
       <button class="modal-btn" onclick="appsCloseAutomations()">Close</button>
-      <button class="modal-btn modal-btn-primary" id="appsAutomationsSaveBtn" onclick="appsAutomationsMainSave()">Save</button>
+      <button class="modal-btn modal-btn-primary" id="appsAutomationsSaveBtn" onclick="appsAutomationsSave()">Save</button>
     </div>
   </div>
 </div>
@@ -5885,6 +5861,7 @@
   <div class="notif-panel-head">
     <i data-lucide="bell" style="width:13px;height:13px;color:var(--accent);"></i>
     <span class="notif-panel-title">Notifications</span>
+    <button class="notif-panel-clear" id="notifSoundToggle" onclick="_notifToggleSound()" title="Toggle notification sound" style="margin-right:6px;"></button>
     <button class="notif-panel-clear" onclick="notifClearAll()">Clear all</button>
   </div>
   <div class="notif-list" id="notifList"></div>
@@ -6429,6 +6406,65 @@ function openActivityStats() {
   try { lucide.createIcons({ nodes: [overlay] }); } catch (_) {}
 }
 
+// ── Notification sounds ─────────────────────────────────────────────────
+// Tiny synthesized beeps so the user hears when something finishes or
+// errors without adding audio-file assets. Separate tones per severity
+// keep successes and failures distinguishable from across the room.
+// Muted by default respecting document.visibilityState could be added
+// later; for now we just honor a localStorage toggle.
+const NOTIF_SOUND_KEY = 'symphonee-notif-sound-v1';
+let _notifAudioCtx = null;
+function _notifSoundEnabled() {
+  try { return localStorage.getItem(NOTIF_SOUND_KEY) !== '0'; } catch (_) { return true; }
+}
+function setNotifSoundEnabled(on) {
+  try { localStorage.setItem(NOTIF_SOUND_KEY, on ? '1' : '0'); } catch (_) {}
+}
+function _notifToggleSound() {
+  setNotifSoundEnabled(!_notifSoundEnabled());
+  _renderNotifSoundToggle();
+  if (_notifSoundEnabled()) playNotifSound('info');
+}
+function _renderNotifSoundToggle() {
+  const btn = document.getElementById('notifSoundToggle');
+  if (!btn) return;
+  btn.textContent = _notifSoundEnabled() ? 'Sound on' : 'Sound off';
+}
+function playNotifSound(kind) {
+  if (!_notifSoundEnabled()) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!_notifAudioCtx) _notifAudioCtx = new Ctx();
+    const ctx = _notifAudioCtx;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    const now = ctx.currentTime;
+    // Distinct envelope + tone per kind. Keep max volume quiet (~0.08)
+    // so it is informative, not alarming.
+    const tones = {
+      success: [ [880, 0.00, 0.08], [1320, 0.10, 0.08] ],
+      error:   [ [220, 0.00, 0.14], [160,  0.16, 0.16] ],
+      warning: [ [660, 0.00, 0.10], [660,  0.14, 0.10] ],
+      info:    [ [520, 0.00, 0.09] ],
+    };
+    const seq = tones[kind] || tones.info;
+    for (const [freq, start, dur] of seq) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = kind === 'error' ? 'square' : 'sine';
+      osc.frequency.value = freq;
+      const t0 = now + start;
+      const t1 = t0 + dur;
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.08, t0 + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t1);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t1 + 0.02);
+    }
+  } catch (_) { /* best-effort; never crash on audio issues */ }
+}
+
 // ── Notification center ─────────────────────────────────────────────────
 // Persistent, dismissable messages. Different from toasts (auto-dismiss).
 // Stored in localStorage so they survive reloads. Capped at 50 entries.
@@ -6454,6 +6490,7 @@ function notify(title, body, opts) {
     icon: opts.icon || 'sparkles',
     source: opts.source || null,
     taskId: opts.taskId || null,
+    severity: opts.severity || 'info',
     createdAt: Date.now(),
     read: false,
   });
@@ -6463,6 +6500,9 @@ function notify(title, body, opts) {
   // If the panel is open, re-render to show the new one at top.
   const panel = document.getElementById('notifPanel');
   if (panel && panel.classList.contains('open')) renderNotifList();
+  // Audible cue - silent when opts.silent is truthy so bulk seeders /
+  // restore-from-storage paths don't spam the speaker.
+  if (!opts.silent) playNotifSound(opts.severity || 'info');
 }
 function notifClearAll() {
   _notifs = [];
@@ -6499,6 +6539,7 @@ function _relTime(ts) {
   return Math.floor(s / 86400) + 'd ago';
 }
 function renderNotifList() {
+  _renderNotifSoundToggle();
   const el = document.getElementById('notifList');
   if (!el) return;
   if (!_notifs.length) {
@@ -14213,12 +14254,7 @@ function appsImportInstructionsFile(event) {
 }
 
 // ═══ Automations ═════════════════════════════════════════════════════════
-const _appsAutomations = { current: null, dirty: false, tab: 'recipes', currentTest: null };
-
-function appsAutomationsSetTab(_tab) {
-  // Tests tab was folded into recipes. Keep the function for backwards-compat
-  // callers but it's now a no-op.
-}
+const _appsAutomations = { current: null, dirty: false };
 
 async function appsAutomationsGenerate() {
   const desc = (document.getElementById('appsAutomationsGenInput').value || '').trim();
@@ -14298,10 +14334,6 @@ function _appsPaletteAppend(i) {
   if (typeof _appsSyncBuilderToText === 'function') _appsSyncBuilderToText();
 }
 
-function appsAutomationsMainSave() {
-  if (_appsAutomations.tab === 'tests') appsTestSave();
-  else appsAutomationsSave();
-}
 
 function _appsAutomationsApp() {
   return _appsInstructionsKey();
@@ -14732,181 +14764,6 @@ function _appsPaletteAreaDrop(ev) {
 function _appsBuilderDragEnd() {
   _appsBuilderDragIdx = null;
   document.querySelectorAll('.apps-builder-row').forEach(el => { el.style.opacity = ''; el.style.outline = ''; });
-}
-
-// ───── Tests ────────────────────────────────────────────────────────────
-async function _appsRefreshTests() {
-  const app = _appsAutomationsApp();
-  if (!app) return;
-  try {
-    const r = await fetch('/api/apps/tests?app=' + encodeURIComponent(app));
-    const data = await r.json();
-    _appsState.tests = data.tests || [];
-    _appsRenderTestsList();
-  } catch (e) { if (typeof toast === 'function') toast('Load tests failed: ' + e.message, 'error'); }
-}
-
-function _appsRenderTestsList() {
-  const list = document.getElementById('appsAutomationsTestsList');
-  if (!list) return;
-  const tests = _appsState.tests || [];
-  const recipes = _appsState.recipes || [];
-  const header = `<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;"><button type="button" onclick="appsTestNew()" class="sy-btn sy-btn-outline" style="flex:1;height:26px;padding:0 8px;font-size:11px;display:inline-flex;align-items:center;justify-content:center;gap:4px;"><i data-lucide="plus" style="width:11px;height:11px;"></i> New test</button></div>`;
-  if (!tests.length) {
-    list.innerHTML = header + '<div style="color:var(--overlay1); font:11px var(--font-ui); padding:12px 6px; text-align:center;">No tests yet.</div>';
-    if (typeof lucide !== 'undefined') lucide.createIcons({ el: list });
-    return;
-  }
-  const rows = tests.map(t => {
-    const rec = recipes.find(r => r.id === t.macro);
-    const active = _appsAutomations.currentTest && _appsAutomations.currentTest.id === t.id;
-    return `<div onclick="appsTestSelect('${_appsEscape(t.id)}')" style="cursor:pointer;padding:7px 9px;border-radius:5px;border:1px solid ${active ? 'var(--accent)' : 'transparent'};background:${active ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'transparent'};display:flex;flex-direction:column;gap:2px;">
-      <div style="font:500 12px var(--font-ui);color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_appsEscape(t.name)}</div>
-      <div style="font:10px var(--font-ui);color:var(--subtext0);">macro: ${_appsEscape(rec ? rec.name : '(missing)')}</div>
-    </div>`;
-  }).join('');
-  list.innerHTML = header + rows;
-  if (typeof lucide !== 'undefined') lucide.createIcons({ el: list });
-}
-
-function _appsPopulateMacroSelect(selectedMacro) {
-  const sel = document.getElementById('appsTestMacro');
-  if (!sel) return;
-  const recipes = _appsState.recipes || [];
-  if (!recipes.length) { sel.innerHTML = '<option value="">No recipes saved yet - create one first</option>'; sel.disabled = true; return; }
-  sel.disabled = false;
-  sel.innerHTML = recipes.map(r => `<option value="${r.id}"${r.id === selectedMacro ? ' selected' : ''}>${_appsEscape(r.name)}</option>`).join('');
-}
-
-function _appsTestShowForm(show) {
-  document.getElementById('appsAutomationsEmpty').style.display = show ? 'none' : '';
-  document.getElementById('appsAutomationsTestForm').style.display = show ? 'flex' : 'none';
-}
-
-function _appsInputsMapToText(m) { return Object.entries(m || {}).map(([k, v]) => `${k} = ${v}`).join('\n'); }
-function _appsInputsTextToMap(text) {
-  const out = {};
-  for (const raw of String(text || '').split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const eq = line.indexOf('=');
-    if (eq < 0) throw new Error('input line missing "=": ' + line);
-    out[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
-  }
-  return out;
-}
-function _appsLinesToArray(text) {
-  return String(text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-}
-
-function appsTestNew() {
-  // Reload recipes so the macro dropdown is fresh.
-  _appsAutomationsReload().then(() => {
-    _appsAutomations.currentTest = { id: null, name: '', macro: '', inputs: {}, expected: { outcome: 'ok', elementsPresent: [], elementsAbsent: [] } };
-    _appsTestShowForm(true);
-    document.getElementById('appsTestName').value = '';
-    _appsPopulateMacroSelect('');
-    document.getElementById('appsTestInputs').value = '';
-    document.getElementById('appsTestOutcome').value = 'ok';
-    document.getElementById('appsTestPresent').value = '';
-    document.getElementById('appsTestAbsent').value = '';
-    document.getElementById('appsTestDeleteBtn').style.display = 'none';
-    document.getElementById('appsTestName').focus();
-    _appsRenderTestsList();
-  });
-}
-
-function appsTestSelect(id) {
-  const test = (_appsState.tests || []).find(t => t.id === id);
-  if (!test) return;
-  _appsAutomations.currentTest = JSON.parse(JSON.stringify(test));
-  _appsTestShowForm(true);
-  document.getElementById('appsTestName').value = test.name;
-  _appsPopulateMacroSelect(test.macro);
-  document.getElementById('appsTestInputs').value = _appsInputsMapToText(test.inputs || {});
-  document.getElementById('appsTestOutcome').value = (test.expected && test.expected.outcome) || 'ok';
-  document.getElementById('appsTestPresent').value = (test.expected && test.expected.elementsPresent || []).join('\n');
-  document.getElementById('appsTestAbsent').value = (test.expected && test.expected.elementsAbsent || []).join('\n');
-  document.getElementById('appsTestDeleteBtn').style.display = '';
-  _appsRenderTestsList();
-}
-
-async function appsTestSave() {
-  const app = _appsAutomationsApp();
-  if (!app) return;
-  const statusEl = document.getElementById('appsAutomationsStatus');
-  const name = document.getElementById('appsTestName').value.trim();
-  const macro = document.getElementById('appsTestMacro').value;
-  if (!name) { if (statusEl) statusEl.textContent = 'Test name required.'; return; }
-  if (!macro) { if (statusEl) statusEl.textContent = 'Pick a macro to run.'; return; }
-  let inputs;
-  try { inputs = _appsInputsTextToMap(document.getElementById('appsTestInputs').value); }
-  catch (e) { if (statusEl) statusEl.textContent = 'Input error: ' + e.message; return; }
-  const test = {
-    id: _appsAutomations.currentTest && _appsAutomations.currentTest.id || undefined,
-    name, macro, inputs,
-    expected: {
-      outcome: document.getElementById('appsTestOutcome').value || 'ok',
-      elementsPresent: _appsLinesToArray(document.getElementById('appsTestPresent').value),
-      elementsAbsent: _appsLinesToArray(document.getElementById('appsTestAbsent').value),
-    },
-  };
-  try {
-    const r = await fetch('/api/apps/tests', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ app, test }),
-    });
-    const data = await r.json();
-    if (!data.ok) throw new Error(data.error || 'save failed');
-    _appsAutomations.currentTest = data.test;
-    if (statusEl) statusEl.textContent = 'Test saved.';
-    await _appsRefreshTests();
-    document.getElementById('appsTestDeleteBtn').style.display = '';
-  } catch (e) {
-    if (statusEl) statusEl.textContent = 'Save failed: ' + e.message;
-  }
-}
-
-async function appsTestDelete() {
-  const app = _appsAutomationsApp();
-  const t = _appsAutomations.currentTest;
-  if (!app || !t || !t.id) return;
-  const ok = await confirmDialog('Delete test "' + t.name + '"?', { confirmText: 'Delete', cancelText: 'Cancel', danger: true });
-  if (!ok) return;
-  await fetch('/api/apps/tests?app=' + encodeURIComponent(app) + '&id=' + encodeURIComponent(t.id), { method: 'DELETE' });
-  _appsAutomations.currentTest = null;
-  _appsTestShowForm(false);
-  await _appsRefreshTests();
-}
-
-async function appsTestRunSelected() {
-  const app = _appsAutomationsApp();
-  const t = _appsAutomations.currentTest;
-  if (!app || !t || !t.id) { if (typeof toast === 'function') toast('Select a saved test first.', 'warning'); return; }
-  if (!_appsState.hwnd) {
-    if (_appsState.pendingLaunchSpec) {
-      const ok = await _appsLaunchIfPending();
-      if (!ok) return;
-    } else {
-      if (typeof toast === 'function') toast('Pick an app first.', 'warning');
-      return;
-    }
-  }
-  try {
-    const r = await fetch('/api/apps/tests/run', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ app, testId: t.id, hwnd: _appsState.hwnd }),
-    });
-    const data = await r.json();
-    if (!data.ok) throw new Error(data.error || 'test run failed');
-    _appsState.sessionId = data.sessionId;
-    _appsState.running = true;
-    _appsUpdateRunningChrome(true);
-    appsCloseAutomations();
-    if (typeof toast === 'function') toast('Running test "' + t.name + '"...', 'info', { duration: 2000 });
-  } catch (e) {
-    if (typeof toast === 'function') toast('Test run failed: ' + e.message, 'error');
-  }
 }
 
 async function appsSaveCurrentAsAutomation() {
@@ -16004,13 +15861,11 @@ function handleAppsAgentStep(msg) {
   }
   if (kind === 'test_pass') {
     _appsAppendLog({ kind: 'done', text: 'Test passed: ' + (msg.testName || '') + ' (' + (msg.durationMs || 0) + 'ms)', klass: 'done' });
-    if (typeof _appsRefreshTests === 'function') _appsRefreshTests();
     return;
   }
   if (kind === 'test_fail') {
     const reasons = (msg.failures || []).map(f => '- ' + f).join('\n');
     _appsAppendLog({ kind: 'fail', text: 'Test failed: ' + (msg.testName || ''), klass: 'observation err', pre: reasons });
-    if (typeof _appsRefreshTests === 'function') _appsRefreshTests();
     return;
   }
   if (kind === 'memory_loaded') {
@@ -21370,6 +21225,8 @@ function confirmDialog(message, { confirmText = 'Confirm', cancelText = 'Cancel'
 }
 
 function toast(msg, type = 'info', options) {
+  // Audible cue per severity. Skipped when options.silent is truthy.
+  if (!options || !options.silent) playNotifSound(type);
   // Rich path: when an action or explicit rich flag is supplied, render a
   // full-width card with an optional action button. Otherwise keep the tiny
   // task-pill UX for the high-volume background-status case.
