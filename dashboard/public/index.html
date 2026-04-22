@@ -4528,6 +4528,9 @@
           <button class="sy-btn sy-btn-ghost" type="button" onclick="appsRefreshAll()" title="Refresh apps and windows">
             <i data-lucide="refresh-cw" style="width:13px;height:13px;"></i>
           </button>
+          <select class="sy-btn sy-btn-outline" id="appsProviderSelect" onchange="_appsOnProviderChange()" title="Which AI drives the app" style="height:32px;">
+            <option value="">Loading AI...</option>
+          </select>
           <span style="flex:1;"></span>
           <button class="sy-btn sy-btn-ghost" type="button" onclick="appsReset()" title="Clear session, plan, and activity">Reset</button>
         </div>
@@ -13677,7 +13680,50 @@ var _appsState = {
   windows: [],
   lastRationale: null,     // buffered text from the most recent message/token
   rationaleEl: null,       // DOM node so token deltas can append in place
+  providerKey: null,       // provider REGISTRY KEY (anthropic, gemini-live, ...) sent on session/start
+  providerLabel: null,     // human label displayed in the log header; set from server response
+  providers: [],           // list of { key, label, defaultModel } from /api/apps/status
 };
+
+function _appsProviderStorageKey() { return 'symphonee-apps-provider-v1'; }
+function _appsLoadSavedProvider() {
+  try { return localStorage.getItem(_appsProviderStorageKey()) || null; } catch (_) { return null; }
+}
+function _appsSaveProvider(key) {
+  try { localStorage.setItem(_appsProviderStorageKey(), key || ''); } catch (_) {}
+}
+
+function _appsOnProviderChange() {
+  const sel = document.getElementById('appsProviderSelect');
+  if (!sel) return;
+  _appsState.providerKey = sel.value || null;
+  _appsSaveProvider(_appsState.providerKey);
+}
+
+async function _appsRefreshProviders() {
+  try {
+    const r = await fetch('/api/apps/status');
+    const data = await r.json();
+    const providers = Array.isArray(data.providers) ? data.providers : [];
+    _appsState.providers = providers;
+    const sel = document.getElementById('appsProviderSelect');
+    if (!sel) return;
+    if (!providers.length) {
+      sel.innerHTML = '<option value="">No AI keys set</option>';
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
+    const saved = _appsState.providerKey || _appsLoadSavedProvider();
+    const pick = providers.find(p => p.key === saved)
+      || providers.find(p => p.key === 'anthropic')
+      || providers[0];
+    _appsState.providerKey = pick.key;
+    sel.innerHTML = providers
+      .map(p => `<option value="${p.key}"${p.key === pick.key ? ' selected' : ''}>${p.label}${p.defaultModel ? ' - ' + p.defaultModel : ''}</option>`)
+      .join('');
+  } catch (_) {}
+}
 
 function _appsEscape(s) {
   return String(s == null ? '' : s)
@@ -13703,7 +13749,7 @@ function _appsSaveManual(list) {
 }
 
 async function appsRefreshAll() {
-  await Promise.all([appsRefreshWindows(), appsRefreshInstalled()]);
+  await Promise.all([appsRefreshWindows(), appsRefreshInstalled(), _appsRefreshProviders()]);
   if (!document.getElementById('appsLauncher').hidden) appsRenderLauncher();
 }
 
@@ -14267,7 +14313,7 @@ async function _appsContinueWithGoal(goal) {
   try {
     const r = await fetch('/api/apps/session/continue', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ sessionId: _appsState.sessionId, goal }),
+      body: JSON.stringify({ sessionId: _appsState.sessionId, goal, provider: _appsState.providerKey || undefined }),
     });
     const data = await r.json();
     if (!data.ok) {
@@ -14303,6 +14349,7 @@ async function _appsStartWithGoal(goal) {
         goal,
         hwnd: _appsState.hwnd,
         app: _appsState.app,
+        provider: _appsState.providerKey || undefined,
       }),
     });
     const data = await r.json();

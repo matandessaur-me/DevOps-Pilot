@@ -11,7 +11,23 @@
 
 const driver = require('./apps-driver');
 const chat = require('./apps-agent-chat');
+const live = require('./apps-agent-chat-live');
 const memory = require('./apps-memory');
+
+function isStreamingAdapter(adapter) {
+  return !!(adapter && adapter.streaming);
+}
+
+function runSessionForEntry({ entry, session, task, driver, model, broadcast }) {
+  const kind = entry.adapter && entry.adapter.kind;
+  if (kind === 'gemini-live') {
+    return live.runGeminiLive({ session, task, driver, providerEntry: entry, model, broadcast });
+  }
+  if (kind === 'openai-realtime') {
+    return live.runOpenAIRealtime({ session, task, driver, providerEntry: entry, model, broadcast });
+  }
+  return chat.runSession({ session, task, driver, providerEntry: entry, model, broadcast });
+}
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -141,7 +157,7 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
       'The window is already focused. Start with a screenshot and work toward the goal.',
     ].join('\n');
 
-    chat.runSession({ session, task, driver, providerEntry: entry, model, broadcast })
+    runSessionForEntry({ entry, session, task, driver, model, broadcast })
       .catch(e => {
         if (typeof broadcast === 'function') {
           broadcast({ type: 'apps-agent-step', sessionId: session.id, kind: 'error', message: e.message, at: Date.now() });
@@ -159,6 +175,9 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     session.stopped = true;
     if (session.abortController) {
       try { session.abortController.abort(); } catch (_) {}
+    }
+    if (typeof session._liveStop === 'function') {
+      try { session._liveStop(); } catch (_) {}
     }
     driver.stop();
     if (typeof broadcast === 'function') {
@@ -233,7 +252,7 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     if (adapter.kind === 'gemini') session.messages.push({ role: 'user', parts: [{ text: followUp }] });
     else session.messages.push({ role: 'user', content: followUp });
 
-    chat.runSession({ session, task: followUp, driver, providerEntry: entry, model, broadcast })
+    runSessionForEntry({ entry, session, task: followUp, driver, model, broadcast })
       .catch(e => {
         if (typeof broadcast === 'function') {
           broadcast({ type: 'apps-agent-step', sessionId: session.id, kind: 'error', message: e.message, at: Date.now() });
@@ -245,6 +264,7 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     for (const s of chat.sessions.values()) {
       s.stopped = true;
       if (s.abortController) { try { s.abortController.abort(); } catch (_) {} }
+      if (typeof s._liveStop === 'function') { try { s._liveStop(); } catch (_) {} }
     }
     driver.stop();
     if (typeof broadcast === 'function') {
