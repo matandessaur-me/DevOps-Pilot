@@ -14341,8 +14341,11 @@ async function appsReset() {
       });
     } catch (_) {}
   }
-  const goal = document.getElementById('appsGoalInput');
-  if (goal) goal.value = '';
+  // Clear every composer / picker / legacy input so the tab is truly blank.
+  const goalLegacy = document.getElementById('appsGoalInput');
+  if (goalLegacy) goalLegacy.value = '';
+  const chatInput = document.getElementById('appsChatInput');
+  if (chatInput) { chatInput.value = ''; chatInput.style.height = ''; }
   const log = document.getElementById('appsLogList');
   if (log) log.innerHTML = '';
   const img = document.getElementById('appsViewportImg');
@@ -14350,12 +14353,21 @@ async function appsReset() {
   const empty = document.getElementById('appsViewportEmpty');
   if (empty) empty.style.display = 'block';
   _appsRenderPlan([], null);
+  // Drop the selected app too — the whole tab resets to "pick an app" state.
   _appsState.sessionId = null;
   _appsState.running = false;
   _appsState.provider = null;
   _appsState.model = null;
+  _appsState.hwnd = null;
+  _appsState.title = null;
+  _appsState.app = null;
+  _appsState.pendingAsk = false;
   _appsState.lastRationale = null;
   _appsState.rationaleEl = null;
+  const pickerLabel = document.getElementById('appsPickerLabel');
+  if (pickerLabel) pickerLabel.textContent = 'Pick an app...';
+  const insBtn = document.getElementById('appsInstructionsBtn');
+  if (insBtn) insBtn.style.display = 'none';
   _appsUpdateRunningChrome(false);
   if (typeof _appsUpdateStartButtonForFollowUp === 'function') _appsUpdateStartButtonForFollowUp(false);
 }
