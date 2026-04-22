@@ -712,6 +712,108 @@
     .term-instance.active { display: block; }
     .tab-panel#panel-files.active { display: flex; }
     .tab-panel#panel-notes.active { display: flex; }
+    /* ── Apps tab (desktop control) ───────────────────────────────────── */
+    .tab-panel#panel-apps { flex-direction: column; }
+    .tab-panel#panel-apps.active { display: flex; }
+    .apps-tab-root { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+    .apps-banner {
+      background: color-mix(in srgb, var(--red, #e06c75) 22%, var(--surface0));
+      color: var(--red, #e06c75); border-bottom: 1px solid var(--red, #e06c75);
+      padding: 8px 14px; font: 600 12px var(--font-ui);
+      display: none; align-items: center; gap: 10px;
+    }
+    .apps-banner.on { display: flex; }
+    .apps-banner .apps-banner-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--red, #e06c75);
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--red, #e06c75) 70%, transparent);
+      animation: appsPulse 1.2s ease-out infinite;
+    }
+    @keyframes appsPulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--red, #e06c75) 70%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
+    .apps-banner .apps-banner-panic {
+      margin-left: auto; background: var(--red, #e06c75); color: #fff; border: none;
+      padding: 4px 10px; border-radius: 4px; cursor: pointer; font-weight: 600;
+    }
+    .apps-toolbar {
+      display: flex; gap: 10px; align-items: center; padding: 10px 14px;
+      border-bottom: 1px solid var(--surface1); flex-wrap: wrap;
+    }
+    .apps-toolbar .apps-goal-input {
+      flex: 1; min-width: 260px; background: var(--surface0); color: var(--text);
+      border: 1px solid var(--surface2); border-radius: 6px; padding: 8px 10px;
+      font: 12px var(--font-ui);
+    }
+    .apps-toolbar .apps-window-picker {
+      background: var(--surface0); color: var(--text); border: 1px solid var(--surface2);
+      border-radius: 6px; padding: 7px 10px; font: 12px var(--font-ui); min-width: 280px;
+      cursor: pointer; max-width: 420px;
+    }
+    .apps-toolbar button.sy-btn,
+    .apps-toolbar .sy-btn { height: 32px; }
+    .apps-main {
+      flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 400px;
+      min-height: 0; overflow: hidden; gap: 1px; background: var(--surface1);
+    }
+    .apps-viewport {
+      background: #0a0a0a; display: flex; align-items: center; justify-content: center;
+      position: relative; overflow: hidden;
+    }
+    .apps-viewport img {
+      max-width: 100%; max-height: 100%;
+      object-fit: contain;
+      image-rendering: -webkit-optimize-contrast;
+    }
+    .apps-viewport .apps-viewport-empty {
+      color: var(--subtext0); font: 12px var(--font-ui); text-align: center; padding: 20px;
+    }
+    .apps-viewport .apps-click-dot {
+      position: absolute; width: 18px; height: 18px; border-radius: 50%;
+      border: 2px solid var(--red, #e06c75); background: color-mix(in srgb, var(--red, #e06c75) 40%, transparent);
+      pointer-events: none; transform: translate(-50%, -50%);
+      animation: appsClickFade 0.9s ease-out forwards;
+    }
+    @keyframes appsClickFade {
+      0%   { transform: translate(-50%, -50%) scale(0.3); opacity: 1; }
+      100% { transform: translate(-50%, -50%) scale(1.4); opacity: 0; }
+    }
+    .apps-log {
+      background: var(--bg); display: flex; flex-direction: column; min-height: 0;
+    }
+    .apps-log-head {
+      padding: 8px 12px; border-bottom: 1px solid var(--surface1);
+      font: 600 11px var(--font-ui); color: var(--subtext0); text-transform: uppercase; letter-spacing: 0.6px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .apps-log-head .apps-log-dot {
+      width: 7px; height: 7px; border-radius: 50%; background: var(--overlay1);
+    }
+    .apps-log-head.running .apps-log-dot { background: var(--accent); animation: appsPulse 1.2s ease-out infinite; }
+    .apps-log-list {
+      flex: 1; overflow-y: auto; padding: 6px 8px;
+      font: 12px var(--font-ui); color: var(--subtext1);
+    }
+    .apps-log-entry { padding: 6px 8px; border-radius: 5px; margin-bottom: 3px; }
+    .apps-log-entry .apps-log-kind {
+      font: 600 9px var(--font-ui); text-transform: uppercase; letter-spacing: 0.6px;
+      color: var(--overlay1); margin-right: 6px;
+    }
+    .apps-log-entry.rationale { color: var(--text); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+    .apps-log-entry.action { color: var(--text); }
+    .apps-log-entry.action .apps-log-kind { color: var(--accent); }
+    .apps-log-entry.observation { color: var(--subtext1); padding-left: 24px; font-size: 11px; }
+    .apps-log-entry.observation.err { color: var(--red, #e06c75); }
+    .apps-log-entry.observation .apps-log-kind { color: var(--overlay1); }
+    .apps-log-entry.screenshot {
+      padding: 4px 8px; display: flex; align-items: center; gap: 8px;
+    }
+    .apps-log-entry.screenshot img {
+      width: 80px; height: auto; max-height: 60px; object-fit: cover;
+      border-radius: 3px; border: 1px solid var(--surface2); cursor: pointer;
+    }
+    .apps-log-entry.stuck { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 10%, transparent); }
+    .apps-log-entry.done { color: var(--green, #98c379); background: color-mix(in srgb, var(--green, #98c379) 10%, transparent); font-weight: 600; }
+    .apps-log-entry.error { color: var(--red, #e06c75); background: color-mix(in srgb, var(--red, #e06c75) 10%, transparent); }
+    .apps-log-entry pre { white-space: pre-wrap; margin: 2px 0 0; font-size: 11px; color: var(--subtext0); }
+
     /* ── In-app browser tab ───────────────────────────────────────────── */
     .tab-panel#panel-browser { flex-direction: column; }
     .tab-panel#panel-browser.active { display: flex; }
@@ -3789,6 +3891,7 @@
           <button class="tab-btn active" data-tab="terminal" onclick="switchTab('terminal')">Terminal</button>
           <button class="tab-btn" data-tab="orchestrator" id="orchestratorTabBtn" onclick="switchTab('orchestrator')">Orchestrator</button>
           <button class="tab-btn" data-tab="browser" id="browserTabBtn" onclick="switchTab('browser')">Browser</button>
+          <button class="tab-btn" data-tab="apps" id="appsTabBtn" onclick="switchTab('apps')">Apps</button>
           <button class="tab-btn" data-tab="backlog" data-plugin-id="azure-devops" id="backlogTabBtn" onclick="switchTab('backlog')" style="display:none;">Backlog</button>
           <button class="tab-btn" data-tab="workitem" id="workitemTabBtn" onclick="switchTab('workitem')" style="display:none;">Work Item</button>
           <button class="tab-btn closable" data-tab="recipe-editor" id="recipeEditorTabBtn" onclick="switchTab('recipe-editor')" style="display:none;"><span>Recipe Editor</span><span class="tab-close" onclick="event.stopPropagation();closeRecipeEditor();" title="Close">&times;</span></button>
@@ -4210,6 +4313,44 @@
       </div>
     </div>
     <!-- Browser (in-app webview) -->
+    <!-- Apps (desktop control) -->
+    <div class="tab-panel" id="panel-apps">
+      <div class="apps-tab-root">
+        <div class="apps-banner" id="appsBanner">
+          <span class="apps-banner-dot"></span>
+          <span>RUNNING - AI is controlling your mouse and keyboard. Do not touch.</span>
+          <button class="apps-banner-panic" type="button" onclick="appsPanic()" title="Stop everything (Ctrl+Alt+Shift+X)">Panic stop</button>
+        </div>
+        <div class="apps-toolbar">
+          <select class="apps-window-picker" id="appsWindowPicker" onchange="appsOnPickerChange()">
+            <option value="">Pick an app window...</option>
+          </select>
+          <button class="sy-btn sy-btn-ghost" type="button" onclick="appsRefreshWindows()" title="Refresh window list">
+            <i data-lucide="refresh-cw" style="width:13px;height:13px;"></i>
+          </button>
+          <input type="text" class="apps-goal-input" id="appsGoalInput" placeholder="What should the AI do in that window?" onkeydown="if(event.key==='Enter')appsStart()">
+          <button class="sy-btn sy-btn-primary" type="button" id="appsStartBtn" onclick="appsStart()">Start</button>
+          <button class="sy-btn sy-btn-outline" type="button" id="appsStopBtn" onclick="appsStop()" style="display:none;">Stop</button>
+        </div>
+        <div class="apps-main">
+          <div class="apps-viewport" id="appsViewport">
+            <div class="apps-viewport-empty" id="appsViewportEmpty">
+              Pick a window and start a goal. The AI will show its work here.<br><br>
+              Heads-up: this takes over your real mouse and keyboard. Keep your hands off until it finishes or you stop it.
+            </div>
+            <img id="appsViewportImg" alt="target window" style="display:none;">
+          </div>
+          <div class="apps-log">
+            <div class="apps-log-head" id="appsLogHead">
+              <span class="apps-log-dot"></span>
+              <span id="appsLogTitle">Activity</span>
+            </div>
+            <div class="apps-log-list" id="appsLogList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="tab-panel" id="panel-browser">
       <div class="inapp-browser">
         <div class="inapp-browser-bar">
@@ -5703,6 +5844,9 @@ requestAnimationFrame(fitTerminalNow);
           break;
         case 'browser-agent-step':
           if (typeof handleBrowserAgentStep === 'function') handleBrowserAgentStep(msg);
+          break;
+        case 'apps-agent-step':
+          if (typeof handleAppsAgentStep === 'function') handleAppsAgentStep(msg);
           break;
       }
     };
@@ -10781,6 +10925,7 @@ function switchTab(tab, preserveSearch) {
   if (tab === 'prs') { populatePRsRepoSelect(); loadPRs(); }
   if (tab === 'notes') loadNotesList();
   if (tab === 'orchestrator') orchRefresh();
+  if (tab === 'apps' && typeof appsRefreshWindows === 'function') appsRefreshWindows();
   notifyPluginIframes('tabActivated', { tab: tab });
 }
 
@@ -13188,6 +13333,285 @@ function closeBrowserTab() {
   btn.style.display = 'none';
   if (wasActive) switchTab('terminal');
 }
+// ── Apps tab (desktop control) ────────────────────────────────────────────
+// Talks to /api/apps/* and listens for WS `apps-agent-step` frames so the
+// user sees a live screenshot of the target window in the middle and a
+// rationale-paired action log on the right.
+var _appsState = {
+  sessionId: null,
+  running: false,
+  hwnd: null,
+  title: null,
+  app: null,
+  windows: [],
+  lastRationale: null,     // buffered text from the most recent message/token
+  rationaleEl: null,       // DOM node so token deltas can append in place
+};
+
+function _appsEscape(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+async function appsRefreshWindows() {
+  try {
+    const r = await fetch('/api/apps/windows', { method: 'POST' });
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || 'listWindows failed');
+    _appsState.windows = data.windows || [];
+    const sel = document.getElementById('appsWindowPicker');
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">Pick an app window...</option>' +
+      _appsState.windows
+        .filter(w => w.title && !w.isMinimized)
+        .map(w => '<option value="' + w.hwnd + '">' + _appsEscape(w.processName) + ' - ' + _appsEscape(w.title) + '</option>')
+        .join('');
+    if (prev && _appsState.windows.some(w => String(w.hwnd) === prev)) sel.value = prev;
+  } catch (e) {
+    if (typeof toast === 'function') toast('Apps: ' + e.message, 'error');
+  }
+}
+
+function appsOnPickerChange() {
+  const sel = document.getElementById('appsWindowPicker');
+  const hwnd = parseInt(sel.value, 10);
+  const w = _appsState.windows.find(x => x.hwnd === hwnd);
+  if (!w) { _appsState.hwnd = null; _appsState.title = null; _appsState.app = null; return; }
+  _appsState.hwnd = w.hwnd;
+  _appsState.title = w.title;
+  _appsState.app = w.processName;
+}
+
+async function appsStart() {
+  const goal = (document.getElementById('appsGoalInput').value || '').trim();
+  if (!goal) { if (typeof toast === 'function') toast('Enter a goal first.', 'warning'); return; }
+  if (!_appsState.hwnd) { if (typeof toast === 'function') toast('Pick a window first.', 'warning'); return; }
+  if (_appsState.running) return;
+
+  // Clear previous session visuals.
+  const list = document.getElementById('appsLogList');
+  if (list) list.innerHTML = '';
+  const img = document.getElementById('appsViewportImg');
+  if (img) { img.style.display = 'none'; img.src = ''; }
+  const empty = document.getElementById('appsViewportEmpty');
+  if (empty) empty.style.display = 'block';
+  _appsState.lastRationale = null;
+  _appsState.rationaleEl = null;
+
+  try {
+    const r = await fetch('/api/apps/session/start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        goal,
+        hwnd: _appsState.hwnd,
+        app: _appsState.app,
+      }),
+    });
+    const data = await r.json();
+    if (!data.ok) {
+      if (typeof toast === 'function') toast('Apps: ' + (data.error || 'start failed'), 'error');
+      return;
+    }
+    _appsState.sessionId = data.sessionId;
+    _appsState.running = true;
+    _appsUpdateRunningChrome(true);
+    _appsAppendLog({ kind: 'rationale', text: 'Starting: ' + goal, klass: 'rationale' });
+  } catch (e) {
+    if (typeof toast === 'function') toast('Apps: ' + e.message, 'error');
+  }
+}
+
+async function appsStop() {
+  if (!_appsState.sessionId) return;
+  try {
+    await fetch('/api/apps/session/stop', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: _appsState.sessionId }),
+    });
+  } catch (_) {}
+}
+
+async function appsPanic() {
+  try { await fetch('/api/apps/panic', { method: 'POST' }); } catch (_) {}
+  if (typeof toast === 'function') toast('Apps agent panic stopped.', 'warning');
+}
+
+function _appsUpdateRunningChrome(running) {
+  const banner = document.getElementById('appsBanner');
+  if (banner) banner.classList.toggle('on', !!running);
+  const start = document.getElementById('appsStartBtn');
+  const stop = document.getElementById('appsStopBtn');
+  if (start) start.style.display = running ? 'none' : '';
+  if (stop) stop.style.display = running ? '' : 'none';
+  const head = document.getElementById('appsLogHead');
+  if (head) head.classList.toggle('running', !!running);
+  const title = document.getElementById('appsLogTitle');
+  if (title) title.textContent = running ? 'Activity (live)' : 'Activity';
+}
+
+function _appsAppendLog({ kind, text, klass, pre }) {
+  const list = document.getElementById('appsLogList');
+  if (!list) return null;
+  const el = document.createElement('div');
+  el.className = 'apps-log-entry ' + (klass || kind || '');
+  const kindBadge = kind ? ('<span class="apps-log-kind">' + _appsEscape(kind) + '</span>') : '';
+  const body = text ? _appsEscape(text) : '';
+  const preBlock = pre ? ('<pre>' + _appsEscape(pre) + '</pre>') : '';
+  el.innerHTML = kindBadge + body + preBlock;
+  list.appendChild(el);
+  list.scrollTop = list.scrollHeight;
+  return el;
+}
+
+function _appsShowClickDot(at, rect) {
+  if (!at || !rect || rect.w <= 0 || rect.h <= 0) return;
+  const viewport = document.getElementById('appsViewport');
+  const img = document.getElementById('appsViewportImg');
+  if (!viewport || !img || img.style.display === 'none') return;
+  // Coordinates that come back from click() are absolute-screen. Translate
+  // them back to window-relative using the last known rect, then map to
+  // displayed image pixels.
+  const winX = at.x - rect.x;
+  const winY = at.y - rect.y;
+  if (winX < 0 || winY < 0 || winX > rect.w || winY > rect.h) return;
+  const ir = img.getBoundingClientRect();
+  const vr = viewport.getBoundingClientRect();
+  // object-fit: contain — compute the actual content rect inside the img box.
+  const scale = Math.min(ir.width / rect.w, ir.height / rect.h);
+  const drawnW = rect.w * scale;
+  const drawnH = rect.h * scale;
+  const offX = (ir.width - drawnW) / 2 + (ir.left - vr.left);
+  const offY = (ir.height - drawnH) / 2 + (ir.top - vr.top);
+  const dot = document.createElement('div');
+  dot.className = 'apps-click-dot';
+  dot.style.left = (offX + winX * scale) + 'px';
+  dot.style.top = (offY + winY * scale) + 'px';
+  viewport.appendChild(dot);
+  setTimeout(() => { try { dot.remove(); } catch (_) {} }, 900);
+}
+
+var _appsLastRect = null;
+
+function handleAppsAgentStep(msg) {
+  if (!msg) return;
+  const kind = msg.kind;
+  if (kind === 'token') {
+    // Stream text into the current rationale entry.
+    if (!_appsState.rationaleEl) {
+      _appsState.rationaleEl = _appsAppendLog({ kind: 'thinking', text: '', klass: 'rationale' });
+      _appsState.lastRationale = '';
+    }
+    _appsState.lastRationale = (_appsState.lastRationale || '') + (msg.text || '');
+    _appsState.rationaleEl.innerHTML =
+      '<span class="apps-log-kind">thinking</span>' + _appsEscape(_appsState.lastRationale);
+    const list = document.getElementById('appsLogList');
+    if (list) list.scrollTop = list.scrollHeight;
+    return;
+  }
+  if (kind === 'message') {
+    // Finalize the streamed rationale (or create one if the provider
+    // skipped token events).
+    if (!_appsState.rationaleEl && msg.text) {
+      _appsAppendLog({ kind: 'thinking', text: msg.text, klass: 'rationale' });
+    }
+    _appsState.rationaleEl = null;
+    _appsState.lastRationale = null;
+    return;
+  }
+  if (kind === 'action') {
+    _appsState.rationaleEl = null;
+    _appsState.lastRationale = null;
+    _appsAppendLog({ kind: 'action', text: msg.summary || msg.tool, klass: 'action' });
+    return;
+  }
+  if (kind === 'screenshot') {
+    const img = document.getElementById('appsViewportImg');
+    const empty = document.getElementById('appsViewportEmpty');
+    if (img && msg.base64) {
+      img.src = 'data:' + (msg.mimeType || 'image/jpeg') + ';base64,' + msg.base64;
+      img.style.display = '';
+      if (empty) empty.style.display = 'none';
+    }
+    if (msg.rect) _appsLastRect = msg.rect;
+    const entry = _appsAppendLog({ kind: 'shot', klass: 'screenshot' });
+    if (entry && img && img.src) {
+      const thumb = document.createElement('img');
+      thumb.src = img.src;
+      thumb.title = (msg.width || '?') + 'x' + (msg.height || '?');
+      entry.appendChild(thumb);
+      const caption = document.createElement('span');
+      caption.style.color = 'var(--subtext0)';
+      caption.style.fontSize = '10px';
+      caption.textContent = (msg.width || '?') + 'x' + (msg.height || '?');
+      entry.appendChild(caption);
+    }
+    return;
+  }
+  if (kind === 'observation') {
+    if (msg.ok === false) {
+      _appsAppendLog({ kind: 'err', text: (msg.tool || '?') + ': ' + (msg.error || 'failed') + (msg.code ? ' (' + msg.code + ')' : ''), klass: 'observation err' });
+    } else if (msg.preview) {
+      _appsAppendLog({ kind: 'result', text: msg.preview, klass: 'observation' });
+    }
+    // Draw the click dot overlay right on the live screenshot.
+    if (msg.ok !== false && (msg.tool === 'click' || msg.tool === 'mouse_move')) {
+      // We don't have coordinates on the observation; nothing to draw here.
+      // The dot is drawn from the action event instead (see below).
+    }
+    return;
+  }
+  if (kind === 'stuck') {
+    _appsAppendLog({ kind: 'stuck', text: 'Stuck: ' + (msg.reason || ''), klass: 'stuck' });
+    return;
+  }
+  if (kind === 'done') {
+    _appsAppendLog({ kind: 'done', text: msg.summary || 'Done.', klass: 'done' });
+    _appsState.running = false;
+    _appsState.sessionId = null;
+    _appsUpdateRunningChrome(false);
+    return;
+  }
+  if (kind === 'stopped') {
+    _appsAppendLog({ kind: 'stopped', text: 'Stopped.', klass: 'done' });
+    _appsState.running = false;
+    _appsState.sessionId = null;
+    _appsUpdateRunningChrome(false);
+    return;
+  }
+  if (kind === 'panic') {
+    _appsAppendLog({ kind: 'panic', text: 'Panic stop.', klass: 'error' });
+    _appsState.running = false;
+    _appsState.sessionId = null;
+    _appsUpdateRunningChrome(false);
+    return;
+  }
+  if (kind === 'error') {
+    _appsAppendLog({ kind: 'error', text: msg.message || 'error', klass: 'error' });
+    _appsState.running = false;
+    _appsState.sessionId = null;
+    _appsUpdateRunningChrome(false);
+    return;
+  }
+}
+
+// Draw the click dot when the agent issues a click. We do it on the
+// `action` event where we have the window-relative coords.
+(function wrapClickDot() {
+  var orig = handleAppsAgentStep;
+  handleAppsAgentStep = function (msg) {
+    try {
+      if (msg && msg.kind === 'action' && msg.tool === 'click' && _appsLastRect && msg.args) {
+        var rect = _appsLastRect;
+        var abs = { x: rect.x + (msg.args.x || 0), y: rect.y + (msg.args.y || 0) };
+        _appsShowClickDot(abs, rect);
+      }
+    } catch (_) {}
+    return orig(msg);
+  };
+})();
+
 // ── Browser Agent chat panel ──────────────────────────────────────────────
 // Talks to /api/browser/agent/* and listens for WS `browser-agent-step`
 // frames so the user sees the agent's actions stream in real time.
@@ -20122,6 +20546,7 @@ var CORE_PINNED_CENTER = {
   terminal: 0,
   orchestrator: 1,
   browser: 2,
+  apps: 3,
   files: 900,
   diffview: 901,
   notes: 902,
