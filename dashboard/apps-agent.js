@@ -12,6 +12,7 @@
 const driver = require('./apps-driver');
 const chat = require('./apps-agent-chat');
 const memory = require('./apps-memory');
+const recipes = require('./apps-recipes');
 
 function runSessionForEntry({ entry, session, task, driver, model, broadcast }) {
   return chat.runSession({ session, task, driver, providerEntry: entry, model, broadcast });
@@ -92,8 +93,19 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     let body;
     try { body = await readBody(req); } catch (e) { return json(res, { error: 'Bad JSON: ' + e.message }, 400); }
 
-    const goal = String(body.goal || '').trim();
-    if (!goal) return json(res, { error: 'goal required' }, 400);
+    // Either `goal` (free-form chat) or `recipeId` (saved automation) is
+    // required. When recipeId is supplied we resolve the recipe against the
+    // app's recipes file and render it into a goal that seeds the agent.
+    let goal = String(body.goal || '').trim();
+    let recipe = null;
+    const appForLookup = String(body.app || '').trim();
+    if (body.recipeId) {
+      if (!appForLookup) return json(res, { error: 'app required when using recipeId' }, 400);
+      recipe = recipes.getRecipe(appForLookup, String(body.recipeId));
+      if (!recipe) return json(res, { error: 'recipe not found' }, 404);
+      goal = recipes.renderRecipeAsGoal(recipe);
+    }
+    if (!goal) return json(res, { error: 'goal or recipeId required' }, 400);
     const hwnd = Number(body.hwnd);
     if (!Number.isFinite(hwnd) || hwnd <= 0) return json(res, { error: 'hwnd required (see /api/apps/windows)' }, 400);
 
@@ -133,7 +145,11 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     }
     const model = body.model || entry.adapter.defaultModel;
 
-    json(res, { ok: true, sessionId, provider: entry.adapter.kind, label: entry.adapter.label, model, title: session.title });
+    json(res, { ok: true, sessionId, provider: entry.adapter.kind, label: entry.adapter.label, model, title: session.title, recipe: recipe ? { id: recipe.id, name: recipe.name } : null });
+
+    if (recipe && typeof broadcast === 'function') {
+      broadcast({ type: 'apps-agent-step', sessionId, kind: 'recipe_started', recipeId: recipe.id, name: recipe.name, stepCount: recipe.steps.length, at: Date.now() });
+    }
 
     // Build the initial task the model sees: the user's goal plus the
     // window identity so the agent knows what it is driving without us
@@ -290,6 +306,33 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     } catch (e) {
       json(res, { error: e.message, code: e.code || null }, 400);
     }
+  });
+
+  addRoute('GET', '/api/apps/recipes', async (req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const app = url.searchParams.get('app');
+    if (!app) return json(res, { error: 'app query param required' }, 400);
+    json(res, { ok: true, ...recipes.listRecipes(app) });
+  });
+
+  addRoute('POST', '/api/apps/recipes', async (req, res) => {
+    let body;
+    try { body = await readBody(req); } catch (e) { return json(res, { error: 'Bad JSON: ' + e.message }, 400); }
+    const app = String(body.app || '').trim();
+    if (!app) return json(res, { error: 'app required' }, 400);
+    try {
+      json(res, recipes.saveRecipe(app, body.recipe || body));
+    } catch (e) {
+      json(res, { error: e.message }, 400);
+    }
+  });
+
+  addRoute('DELETE', '/api/apps/recipes', async (req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const app = url.searchParams.get('app');
+    const id = url.searchParams.get('id');
+    if (!app || !id) return json(res, { error: 'app and id required' }, 400);
+    json(res, recipes.deleteRecipe(app, id));
   });
 
   addRoute('GET', '/api/apps/status', async (req, res) => {

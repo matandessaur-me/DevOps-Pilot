@@ -4591,6 +4591,9 @@
                 <span id="appsLogTitle">Chat</span>
                 <span id="appsLogModel" class="apps-log-model" style="display:none;"></span>
                 <div class="apps-log-head-actions">
+                  <button class="sy-btn sy-btn-ghost apps-log-head-btn" type="button" id="appsAutomationsBtn" onclick="appsOpenAutomations()" title="Saved automations for this app" style="display:none;">
+                    <i data-lucide="zap" style="width:12px;height:12px;"></i> Automations
+                  </button>
                   <button class="sy-btn sy-btn-ghost apps-log-head-btn" type="button" id="appsInstructionsBtn" onclick="appsOpenInstructions()" title="View or edit what the AI has learned about this app" style="display:none;">
                     <i data-lucide="book-open" style="width:12px;height:12px;"></i> Instructions
                   </button>
@@ -4995,6 +4998,47 @@
       <button class="modal-btn" onclick="appsClearInstructions()" style="color:var(--red);border-color:var(--red);">Clear all</button>
       <button class="modal-btn" onclick="appsCloseInstructions()">Close</button>
       <button class="modal-btn modal-btn-primary" onclick="appsSaveInstructions()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Apps Automations Modal ═════════════════════════════════════════════ -->
+<div class="modal-overlay" id="appsAutomationsModal" style="z-index:250;">
+  <div class="modal" style="max-width:820px; width:94vw; max-height:86vh; display:flex; flex-direction:column;">
+    <div class="modal-title" style="display:flex; align-items:center; gap:10px;">
+      <i data-lucide="zap" style="width:16px;height:16px;"></i>
+      <span>Automations for <span id="appsAutomationsAppName" style="color:var(--accent);">-</span></span>
+      <span style="flex:1;"></span>
+      <button class="sy-btn sy-btn-outline" type="button" onclick="appsAutomationsNew()" style="height:26px;padding:0 10px;display:inline-flex;align-items:center;gap:6px;">
+        <i data-lucide="plus" style="width:13px;height:13px;"></i> New
+      </button>
+    </div>
+    <div class="modal-body" style="flex:1; display:flex; gap:12px; min-height:0; overflow:hidden;">
+      <div id="appsAutomationsList" style="width:240px; min-width:200px; overflow-y:auto; border-right:1px solid var(--surface1); padding-right:10px; display:flex; flex-direction:column; gap:4px;"></div>
+      <div id="appsAutomationsEditor" style="flex:1; display:flex; flex-direction:column; gap:10px; min-width:0;">
+        <div id="appsAutomationsEmpty" style="color:var(--subtext0); font:12px var(--font-ui); padding:24px 12px; text-align:center;">
+          Select an automation on the left or click New to create one.
+        </div>
+        <div id="appsAutomationsForm" style="display:none; flex:1; flex-direction:column; gap:8px; min-height:0;">
+          <input type="text" id="appsAutomationsName" placeholder="Automation name (e.g. Export as PNG)" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:8px 10px;font:13px var(--font-ui);outline:none;">
+          <textarea id="appsAutomationsDesc" placeholder="Optional description - what this automation does." rows="2" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px var(--font-ui);outline:none;resize:none;"></textarea>
+          <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">
+            Steps
+            <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--overlay1);">- one per line: <code>VERB target</code> or <code>VERB target -> text</code></span>
+          </div>
+          <textarea id="appsAutomationsSteps" spellcheck="false" placeholder="CLICK File menu&#10;CLICK Export&#10;TYPE filename -> my-design&#10;PRESS Enter" style="flex:1;min-height:180px;background:var(--bg);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:10px 12px;font:12px/1.5 var(--font-mono);resize:vertical;outline:none;"></textarea>
+          <div style="font:11px var(--font-ui); color:var(--subtext0);">
+            Verbs: CLICK, TYPE, PRESS, WAIT, FIND, VERIFY. Arrow <code>-&gt;</code> separates a target from typed text (e.g. <code>TYPE input -&gt; hello</code>).
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer" style="display:flex; gap:8px; justify-content:flex-end; align-items:center; margin-top:14px; padding-top:12px; border-top:1px solid var(--surface1);">
+      <span id="appsAutomationsStatus" style="margin-right:auto; font:11px var(--font-ui); color:var(--subtext0);"></span>
+      <button class="modal-btn" id="appsAutomationsDeleteBtn" onclick="appsAutomationsDelete()" style="display:none;color:var(--red);border-color:var(--red);">Delete</button>
+      <button class="modal-btn" onclick="appsAutomationsRunSelected()">Use in next run</button>
+      <button class="modal-btn" onclick="appsCloseAutomations()">Close</button>
+      <button class="modal-btn modal-btn-primary" onclick="appsAutomationsSave()">Save</button>
     </div>
   </div>
 </div>
@@ -13702,6 +13746,10 @@ var _appsState = {
   providerKey: null,       // provider REGISTRY KEY (anthropic, gemini-live, ...) sent on session/start
   providerLabel: null,     // human label displayed in the log header; set from server response
   providers: [],           // list of { key, label, defaultModel } from /api/apps/status
+  pendingLaunchSpec: null, // {id, path, name} when user picked an app that isn't running yet
+  selectedRecipeId: null,  // id of an Automation to run instead of a free-form chat goal
+  selectedRecipeName: null,
+  recipes: [],             // cached list for the current app
 };
 
 function _appsProviderStorageKey() { return 'symphonee-apps-provider-v1'; }
@@ -13824,6 +13872,8 @@ function _appsSetSelected({ hwnd, title, app, pendingLaunch }) {
   }
   const insBtn = document.getElementById('appsInstructionsBtn');
   if (insBtn) insBtn.style.display = _appsState.app ? '' : 'none';
+  const autoBtn = document.getElementById('appsAutomationsBtn');
+  if (autoBtn) autoBtn.style.display = _appsState.app ? '' : 'none';
 }
 
 function _appsInstructionsKey() {
@@ -13966,6 +14016,208 @@ function appsImportInstructionsFile(event) {
   };
   reader.readAsText(file);
   event.target.value = '';
+}
+
+// ═══ Automations ═════════════════════════════════════════════════════════
+const _appsAutomations = { current: null, dirty: false };
+
+function _appsAutomationsApp() {
+  return _appsInstructionsKey();
+}
+
+async function appsOpenAutomations() {
+  const app = _appsAutomationsApp();
+  if (!app) { if (typeof toast === 'function') toast('Pick an app first.', 'warning'); return; }
+  const overlay = document.getElementById('appsAutomationsModal');
+  const nameEl = document.getElementById('appsAutomationsAppName');
+  if (nameEl) nameEl.textContent = app;
+  if (overlay) overlay.classList.add('open');
+  await _appsAutomationsReload();
+}
+
+function appsCloseAutomations() {
+  const overlay = document.getElementById('appsAutomationsModal');
+  if (overlay) overlay.classList.remove('open');
+}
+
+async function _appsAutomationsReload() {
+  const app = _appsAutomationsApp();
+  if (!app) return;
+  try {
+    const r = await fetch('/api/apps/recipes?app=' + encodeURIComponent(app));
+    const data = await r.json();
+    _appsState.recipes = data.recipes || [];
+    _appsRenderAutomationsList();
+  } catch (e) {
+    if (typeof toast === 'function') toast('Load failed: ' + e.message, 'error');
+  }
+}
+
+function _appsRenderAutomationsList() {
+  const list = document.getElementById('appsAutomationsList');
+  if (!list) return;
+  const recipes = _appsState.recipes || [];
+  if (!recipes.length) {
+    list.innerHTML = '<div style="color:var(--overlay1); font:11px var(--font-ui); padding:12px 6px; text-align:center;">No automations yet.<br>Click New to create one.</div>';
+    return;
+  }
+  list.innerHTML = recipes.map(r => {
+    const active = _appsAutomations.current && _appsAutomations.current.id === r.id;
+    const selected = _appsState.selectedRecipeId === r.id;
+    const stepCount = (r.steps || []).length;
+    return `<div class="apps-automation-row" data-id="${r.id}" onclick="appsAutomationsSelect('${r.id}')" style="cursor:pointer;padding:7px 9px;border-radius:5px;border:1px solid ${active ? 'var(--accent)' : 'transparent'};background:${active ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'transparent'};display:flex;flex-direction:column;gap:2px;">
+      <div style="display:flex;align-items:center;gap:6px;font:500 12px var(--font-ui);color:var(--text);">
+        ${selected ? '<i data-lucide="check-circle-2" style="width:12px;height:12px;color:var(--accent);"></i>' : ''}
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_appsEscape(r.name)}</span>
+      </div>
+      <div style="font:10px var(--font-ui);color:var(--subtext0);">${stepCount} step${stepCount === 1 ? '' : 's'}</div>
+    </div>`;
+  }).join('');
+  if (typeof lucide !== 'undefined') lucide.createIcons({ el: list });
+}
+
+function appsAutomationsSelect(id) {
+  const recipe = (_appsState.recipes || []).find(r => r.id === id);
+  if (!recipe) return;
+  _appsAutomations.current = JSON.parse(JSON.stringify(recipe));
+  _appsAutomations.dirty = false;
+  _appsAutomationsShowForm(true);
+  document.getElementById('appsAutomationsName').value = recipe.name || '';
+  document.getElementById('appsAutomationsDesc').value = recipe.description || '';
+  document.getElementById('appsAutomationsSteps').value = _appsStepsToText(recipe.steps || []);
+  document.getElementById('appsAutomationsDeleteBtn').style.display = '';
+  _appsRenderAutomationsList();
+}
+
+function appsAutomationsNew() {
+  _appsAutomations.current = { id: null, name: '', description: '', steps: [] };
+  _appsAutomations.dirty = false;
+  _appsAutomationsShowForm(true);
+  document.getElementById('appsAutomationsName').value = '';
+  document.getElementById('appsAutomationsDesc').value = '';
+  document.getElementById('appsAutomationsSteps').value = '';
+  document.getElementById('appsAutomationsDeleteBtn').style.display = 'none';
+  document.getElementById('appsAutomationsName').focus();
+  _appsRenderAutomationsList();
+}
+
+function _appsAutomationsShowForm(show) {
+  document.getElementById('appsAutomationsEmpty').style.display = show ? 'none' : '';
+  document.getElementById('appsAutomationsForm').style.display = show ? 'flex' : 'none';
+}
+
+function _appsStepsToText(steps) {
+  return (steps || []).map(s => {
+    let line = s.verb || '';
+    if (s.target) line += ' ' + s.target;
+    if (s.text) line += ' -> ' + s.text;
+    if (s.notes) line += '   // ' + s.notes;
+    return line;
+  }).join('\n');
+}
+
+function _appsTextToSteps(text) {
+  const out = [];
+  const verbs = new Set(['CLICK', 'TYPE', 'PRESS', 'WAIT', 'FIND', 'VERIFY']);
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const m = line.match(/^(\w+)\s*(.*)$/);
+    if (!m) continue;
+    const verb = m[1].toUpperCase();
+    if (!verbs.has(verb)) throw new Error('Unknown verb "' + m[1] + '". Use CLICK, TYPE, PRESS, WAIT, FIND, or VERIFY.');
+    let rest = m[2] || '';
+    let notes;
+    const noteIdx = rest.indexOf('//');
+    if (noteIdx >= 0) {
+      notes = rest.slice(noteIdx + 2).trim() || undefined;
+      rest = rest.slice(0, noteIdx).trim();
+    }
+    let target, text;
+    const arrow = rest.indexOf('->');
+    if (arrow >= 0) {
+      target = rest.slice(0, arrow).trim() || undefined;
+      text = rest.slice(arrow + 2).trim() || undefined;
+    } else {
+      target = rest || undefined;
+    }
+    out.push({ verb, target, text, notes });
+  }
+  return out;
+}
+
+async function appsAutomationsSave() {
+  const app = _appsAutomationsApp();
+  if (!app) return;
+  const nameEl = document.getElementById('appsAutomationsName');
+  const descEl = document.getElementById('appsAutomationsDesc');
+  const stepsEl = document.getElementById('appsAutomationsSteps');
+  const statusEl = document.getElementById('appsAutomationsStatus');
+  const name = (nameEl.value || '').trim();
+  if (!name) { if (statusEl) statusEl.textContent = 'Name is required.'; return; }
+  let steps;
+  try { steps = _appsTextToSteps(stepsEl.value); } catch (e) {
+    if (statusEl) statusEl.textContent = 'Step error: ' + e.message; return;
+  }
+  if (!steps.length) { if (statusEl) statusEl.textContent = 'Add at least one step.'; return; }
+  const recipe = {
+    id: _appsAutomations.current && _appsAutomations.current.id || undefined,
+    name, description: (descEl.value || '').trim(), steps,
+  };
+  if (statusEl) statusEl.textContent = 'Saving...';
+  try {
+    const r = await fetch('/api/apps/recipes', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ app, recipe }),
+    });
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || 'save failed');
+    if (statusEl) statusEl.textContent = 'Saved.';
+    _appsAutomations.current = data.recipe;
+    await _appsAutomationsReload();
+    _appsAutomationsShowForm(true);
+    document.getElementById('appsAutomationsDeleteBtn').style.display = '';
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Save failed: ' + e.message;
+  }
+}
+
+async function appsAutomationsDelete() {
+  const app = _appsAutomationsApp();
+  const cur = _appsAutomations.current;
+  if (!app || !cur || !cur.id) return;
+  const ok = await confirmDialog('Delete automation "' + cur.name + '"?', { confirmText: 'Delete', cancelText: 'Cancel', danger: true });
+  if (!ok) return;
+  try {
+    await fetch('/api/apps/recipes?app=' + encodeURIComponent(app) + '&id=' + encodeURIComponent(cur.id), { method: 'DELETE' });
+    if (_appsState.selectedRecipeId === cur.id) {
+      _appsState.selectedRecipeId = null;
+      _appsState.selectedRecipeName = null;
+      _appsSyncComposerMode();
+    }
+    _appsAutomations.current = null;
+    _appsAutomationsShowForm(false);
+    await _appsAutomationsReload();
+  } catch (e) {
+    if (typeof toast === 'function') toast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+function appsAutomationsRunSelected() {
+  const cur = _appsAutomations.current;
+  if (!cur || !cur.id) { if (typeof toast === 'function') toast('Save the automation first, then select it.', 'warning'); return; }
+  _appsState.selectedRecipeId = cur.id;
+  _appsState.selectedRecipeName = cur.name;
+  _appsSyncComposerMode();
+  _appsRenderAutomationsList();
+  appsCloseAutomations();
+  if (typeof toast === 'function') toast('Next Start will run "' + cur.name + '".', 'info', { duration: 2500 });
+}
+
+function appsClearSelectedRecipe() {
+  _appsState.selectedRecipeId = null;
+  _appsState.selectedRecipeName = null;
+  _appsSyncComposerMode();
 }
 
 function appsOpenLauncher() {
@@ -14137,8 +14389,7 @@ async function _appsLazyIcon(iconKey) {
 
 async function appsLaunchAndSelect(app) {
   // If the app is already running (a visible window matches its name or
-  // its exe basename), just select that window instead of launching a
-  // second instance.
+  // its exe basename), just select that window - no launch needed.
   await appsRefreshWindows();
   const hay = [app.name, app.path && app.path.split(/[\\/]/).pop()]
     .filter(Boolean).map(s => s.toLowerCase());
@@ -14148,25 +14399,38 @@ async function appsLaunchAndSelect(app) {
     return hay.some(h => blob.includes(h) || h.includes((w.processName || '').toLowerCase()));
   });
   if (match) {
+    _appsState.pendingLaunchSpec = null;
     _appsSetSelected({ hwnd: match.hwnd, title: match.title, app: match.processName });
     appsCloseLauncher();
     return;
   }
 
-  _appsSetSelected({ pendingLaunch: true, app: app.name });
+  // Deferred launch: remember what the user picked but DO NOT open the app
+  // yet. Start / Run automation will do the open + focus + session atomically,
+  // so the user isn't left with a half-opened app when they're still writing
+  // their prompt.
+  _appsState.pendingLaunchSpec = { id: app.id || null, path: app.path || null, name: app.name || null };
+  _appsSetSelected({ app: app.name, title: '(will launch on Start)' });
   appsCloseLauncher();
+}
+
+async function _appsLaunchIfPending() {
+  const spec = _appsState.pendingLaunchSpec;
+  if (!spec) return true;
   try {
     const r = await fetch('/api/apps/launch', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: app.id || null, path: app.path || null, name: app.name || null }),
+      body: JSON.stringify(spec),
     });
     const data = await r.json();
     if (!data.ok) throw new Error(data.error || 'launch failed');
-    _appsSetSelected({ hwnd: data.hwnd, title: data.title, app: data.processName || app.name });
+    _appsState.pendingLaunchSpec = null;
+    _appsSetSelected({ hwnd: data.hwnd, title: data.title, app: data.processName || spec.name });
     await appsRefreshWindows();
+    return true;
   } catch (e) {
-    _appsSetSelected({});
     if (typeof toast === 'function') toast('Launch failed: ' + e.message, 'error');
+    return false;
   }
 }
 
@@ -14240,9 +14504,37 @@ function _appsSyncComposerMode() {
     running:   { label: 'Send',     placeholder: 'Send a note to the running agent (it will read it on the next turn)...' },
     answering: { label: 'Answer',   placeholder: 'Type your answer to the AI...' },
   }[mode];
-  send.textContent = meta.label;
-  input.placeholder = meta.placeholder;
+  let label = meta.label;
+  let placeholder = meta.placeholder;
+  if (_appsState.selectedRecipeId && (mode === 'start' || mode === 'continue')) {
+    label = 'Run automation';
+    placeholder = 'Running "' + (_appsState.selectedRecipeName || 'automation') + '" - type any extra notes or leave blank...';
+  }
+  send.textContent = label;
+  input.placeholder = placeholder;
   if (interrupt) interrupt.style.display = _appsState.running ? '' : 'none';
+  _appsRenderRecipeChip();
+}
+
+function _appsRenderRecipeChip() {
+  const composer = document.getElementById('appsChatComposer');
+  if (!composer) return;
+  let chip = document.getElementById('appsSelectedRecipeChip');
+  if (!_appsState.selectedRecipeId) {
+    if (chip) chip.remove();
+    return;
+  }
+  if (!chip) {
+    chip = document.createElement('div');
+    chip.id = 'appsSelectedRecipeChip';
+    chip.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 8px;margin:0 0 6px 0;background:color-mix(in srgb, var(--accent) 14%, transparent);border:1px solid color-mix(in srgb, var(--accent) 40%, transparent);border-radius:5px;font:11px var(--font-ui);color:var(--text);';
+    composer.parentNode.insertBefore(chip, composer);
+  }
+  chip.innerHTML =
+    '<i data-lucide="zap" style="width:11px;height:11px;color:var(--accent);"></i>' +
+    '<span>Will run automation: <strong>' + _appsEscape(_appsState.selectedRecipeName || '') + '</strong></span>' +
+    '<button type="button" onclick="appsClearSelectedRecipe()" title="Clear selection" style="margin-left:auto;background:transparent;border:none;color:var(--subtext0);cursor:pointer;padding:2px 6px;font:11px var(--font-ui);">clear</button>';
+  if (typeof lucide !== 'undefined') lucide.createIcons({ el: chip });
 }
 
 function _appsAutoresizeChatInput() {
@@ -14265,8 +14557,11 @@ async function appsChatSend() {
   const input = document.getElementById('appsChatInput');
   if (!input) return;
   const text = (input.value || '').trim();
-  if (!text) return;
   const mode = _appsComposerMode();
+  // With an automation armed, an empty message is fine - the recipe IS the
+  // goal. Everywhere else we still require text.
+  const recipeArmed = !!_appsState.selectedRecipeId && (mode === 'start' || mode === 'continue');
+  if (!text && !recipeArmed) return;
   if (mode === 'answering') {
     // Resolve the pending ask_user. Visual feedback comes from the backend.
     try {
@@ -14375,8 +14670,16 @@ async function _appsContinueWithGoal(goal) {
 }
 
 async function _appsStartWithGoal(goal) {
-  // Don't wipe the chat history — the user's latest message was already
-  // appended. Just reset the viewport/plan that belong to the old session.
+  // If the user picked an app from the launcher but we deferred the actual
+  // launch, open it now so the agent has a window to focus on.
+  if (_appsState.pendingLaunchSpec) {
+    const ok = await _appsLaunchIfPending();
+    if (!ok) return;
+  }
+  if (!_appsState.hwnd) {
+    if (typeof toast === 'function') toast('Pick an app first.', 'warning');
+    return;
+  }
   const img = document.getElementById('appsViewportImg');
   if (img) { img.style.display = 'none'; img.src = ''; }
   const empty = document.getElementById('appsViewportEmpty');
@@ -14385,18 +14688,21 @@ async function _appsStartWithGoal(goal) {
   _appsState.lastRationale = null;
   _appsState.rationaleEl = null;
 
+  const recipeId = _appsState.selectedRecipeId || undefined;
+  const appKey = _appsInstructionsKey() || _appsState.app;
+
   try {
     const r = await fetch('/api/apps/session/start', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        goal,
+        // When a recipe is selected the backend builds the goal from its
+        // steps and ignores free-form text. Otherwise we send the user's
+        // chat message as the goal.
+        goal: recipeId ? undefined : goal,
+        recipeId,
         hwnd: _appsState.hwnd,
-        // Use the same key the instructions modal uses so the memory the
-        // user wrote is actually loaded. Raw _appsState.app can be null when
-        // the window classifier didn't tag an app name, even though the
-        // title clearly identifies the app.
-        app: _appsInstructionsKey() || _appsState.app,
+        app: appKey,
         provider: _appsState.providerKey || undefined,
       }),
     });
@@ -14465,10 +14771,17 @@ async function appsReset() {
   _appsState.pendingAsk = false;
   _appsState.lastRationale = null;
   _appsState.rationaleEl = null;
+  _appsState.pendingLaunchSpec = null;
+  _appsState.selectedRecipeId = null;
+  _appsState.selectedRecipeName = null;
+  _appsState.recipes = [];
+  _appsRenderRecipeChip();
   const pickerLabel = document.getElementById('appsPickerLabel');
   if (pickerLabel) pickerLabel.textContent = 'Pick an app...';
   const insBtn = document.getElementById('appsInstructionsBtn');
   if (insBtn) insBtn.style.display = 'none';
+  const autoBtn = document.getElementById('appsAutomationsBtn');
+  if (autoBtn) autoBtn.style.display = 'none';
   _appsUpdateRunningChrome(false);
   if (typeof _appsUpdateStartButtonForFollowUp === 'function') _appsUpdateStartButtonForFollowUp(false);
 }
