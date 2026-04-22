@@ -5023,12 +5023,17 @@
           <input type="text" id="appsAutomationsName" placeholder="Automation name (e.g. Export as PNG)" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:8px 10px;font:13px var(--font-ui);outline:none;">
           <textarea id="appsAutomationsDesc" placeholder="Optional description - what this automation does." rows="2" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px var(--font-ui);outline:none;resize:none;"></textarea>
           <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">
+            Variables
+            <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--overlay1);">- one per line: <code>name = description</code>. Use <code>{{name}}</code> in steps.</span>
+          </div>
+          <textarea id="appsAutomationsVars" spellcheck="false" placeholder="regression = the Regression tab in the top bar&#10;save_btn = the Save button in the footer" rows="3" style="background:var(--surface0);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:7px 10px;font:12px/1.4 var(--font-mono);outline:none;resize:vertical;"></textarea>
+          <div style="font:600 10px var(--font-ui); color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px;">
             Steps
             <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--overlay1);">- one per line: <code>VERB target</code> or <code>VERB target -> text</code></span>
           </div>
-          <textarea id="appsAutomationsSteps" spellcheck="false" placeholder="CLICK File menu&#10;CLICK Export&#10;TYPE filename -> my-design&#10;PRESS Enter" style="flex:1;min-height:180px;background:var(--bg);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:10px 12px;font:12px/1.5 var(--font-mono);resize:vertical;outline:none;"></textarea>
+          <textarea id="appsAutomationsSteps" spellcheck="false" placeholder="CLICK {{regression}}&#10;CLICK File menu&#10;TYPE filename -> my-design&#10;PRESS Enter" style="flex:1;min-height:160px;background:var(--bg);color:var(--text);border:1px solid var(--surface2);border-radius:6px;padding:10px 12px;font:12px/1.5 var(--font-mono);resize:vertical;outline:none;"></textarea>
           <div style="font:11px var(--font-ui); color:var(--subtext0);">
-            Verbs: CLICK, TYPE, PRESS, WAIT, FIND, VERIFY. Arrow <code>-&gt;</code> separates a target from typed text (e.g. <code>TYPE input -&gt; hello</code>).
+            Verbs: CLICK, TYPE, PRESS, WAIT, FIND, VERIFY. Arrow <code>-&gt;</code> separates a target from typed text (e.g. <code>TYPE input -&gt; hello</code>). Coordinates <code>x,y</code> skip the vision locator.
           </div>
         </div>
       </div>
@@ -14084,17 +14089,19 @@ function appsAutomationsSelect(id) {
   _appsAutomationsShowForm(true);
   document.getElementById('appsAutomationsName').value = recipe.name || '';
   document.getElementById('appsAutomationsDesc').value = recipe.description || '';
+  document.getElementById('appsAutomationsVars').value = _appsVarsToText(recipe.variables || {});
   document.getElementById('appsAutomationsSteps').value = _appsStepsToText(recipe.steps || []);
   document.getElementById('appsAutomationsDeleteBtn').style.display = '';
   _appsRenderAutomationsList();
 }
 
 function appsAutomationsNew() {
-  _appsAutomations.current = { id: null, name: '', description: '', steps: [] };
+  _appsAutomations.current = { id: null, name: '', description: '', variables: {}, steps: [] };
   _appsAutomations.dirty = false;
   _appsAutomationsShowForm(true);
   document.getElementById('appsAutomationsName').value = '';
   document.getElementById('appsAutomationsDesc').value = '';
+  document.getElementById('appsAutomationsVars').value = '';
   document.getElementById('appsAutomationsSteps').value = '';
   document.getElementById('appsAutomationsDeleteBtn').style.display = 'none';
   document.getElementById('appsAutomationsName').focus();
@@ -14116,9 +14123,31 @@ function _appsStepsToText(steps) {
   }).join('\n');
 }
 
+function _appsVarsToText(vars) {
+  const entries = Object.entries(vars || {});
+  return entries.map(([k, v]) => `${k} = ${v}`).join('\n');
+}
+
+function _appsTextToVars(text) {
+  const out = {};
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq < 0) throw new Error('Variable line missing "=": ' + line);
+    const name = line.slice(0, eq).trim();
+    const val = line.slice(eq + 1).trim();
+    if (!name) throw new Error('Variable name is empty');
+    if (!/^[\w-]+$/.test(name)) throw new Error('Variable name "' + name + '" must be letters/digits/_ only');
+    if (!val) throw new Error('Variable "' + name + '" has no value');
+    out[name] = val;
+  }
+  return out;
+}
+
 function _appsTextToSteps(text) {
   const out = [];
-  const verbs = new Set(['CLICK', 'TYPE', 'PRESS', 'WAIT', 'FIND', 'VERIFY']);
+  const verbs = new Set(['CLICK', 'TYPE', 'PRESS', 'WAIT', 'FIND', 'VERIFY', 'IF', 'ELSE', 'ENDIF', 'REPEAT', 'ENDREPEAT']);
   for (const raw of String(text || '').split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
@@ -14153,8 +14182,13 @@ async function appsAutomationsSave() {
   const descEl = document.getElementById('appsAutomationsDesc');
   const stepsEl = document.getElementById('appsAutomationsSteps');
   const statusEl = document.getElementById('appsAutomationsStatus');
+  const varsEl = document.getElementById('appsAutomationsVars');
   const name = (nameEl.value || '').trim();
   if (!name) { if (statusEl) statusEl.textContent = 'Name is required.'; return; }
+  let variables;
+  try { variables = _appsTextToVars(varsEl.value); } catch (e) {
+    if (statusEl) statusEl.textContent = 'Variable error: ' + e.message; return;
+  }
   let steps;
   try { steps = _appsTextToSteps(stepsEl.value); } catch (e) {
     if (statusEl) statusEl.textContent = 'Step error: ' + e.message; return;
@@ -14162,7 +14196,9 @@ async function appsAutomationsSave() {
   if (!steps.length) { if (statusEl) statusEl.textContent = 'Add at least one step.'; return; }
   const recipe = {
     id: _appsAutomations.current && _appsAutomations.current.id || undefined,
-    name, description: (descEl.value || '').trim(), steps,
+    name, description: (descEl.value || '').trim(),
+    variables: Object.keys(variables).length ? variables : undefined,
+    steps,
   };
   if (statusEl) statusEl.textContent = 'Saving...';
   try {
@@ -14963,6 +14999,30 @@ function handleAppsAgentStep(msg) {
   }
   if (kind === 'research') {
     _appsAppendLog({ kind: 'research', text: 'Research notes arrived', klass: 'memory', pre: msg.summary || '' });
+    return;
+  }
+  if (kind === 'recipe_started') {
+    _appsAppendLog({ kind: 'recipe', text: 'Automation: ' + (msg.name || '?') + ' (' + (msg.stepCount || 0) + ' steps)', klass: 'memory' });
+    return;
+  }
+  if (kind === 'step_index') {
+    // Don't spam the log with indices; they're just progress markers.
+    return;
+  }
+  if (kind === 'step_info') {
+    _appsAppendLog({ kind: 'info', text: msg.message || '', klass: 'observation' });
+    return;
+  }
+  if (kind === 'step_retry') {
+    _appsAppendLog({ kind: 'retry', text: 'Retrying step ' + ((msg.index || 0) + 1) + ': ' + (msg.reason || ''), klass: 'observation err' });
+    return;
+  }
+  if (kind === 'step_failed') {
+    _appsAppendLog({ kind: 'fail', text: 'Step ' + ((msg.index || 0) + 1) + ' ' + (msg.verb || '') + ' failed: ' + (msg.reason || ''), klass: 'observation err' });
+    return;
+  }
+  if (kind === 'step_done') {
+    // Silent success marker; the screenshot broadcast right after carries the state visual.
     return;
   }
   if (kind === 'memory_loaded') {

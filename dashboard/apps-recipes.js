@@ -51,11 +51,17 @@ function _write(app, data) {
   fs.writeFileSync(filePath(app), JSON.stringify(data, null, 2), 'utf8');
 }
 
+const ALLOWED_VERBS = new Set([
+  'CLICK', 'TYPE', 'PRESS', 'WAIT', 'FIND', 'VERIFY',
+  // Control flow (Phase E):
+  'IF', 'ELSE', 'ENDIF',
+  'REPEAT', 'ENDREPEAT',
+]);
+
 function _validateStep(raw) {
   if (!raw || typeof raw !== 'object') throw new Error('step must be an object');
   const verb = String(raw.verb || '').trim().toUpperCase();
-  const allowed = new Set(['CLICK', 'TYPE', 'PRESS', 'WAIT', 'FIND', 'VERIFY']);
-  if (!allowed.has(verb)) throw new Error(`unknown verb "${raw.verb}". Use CLICK, TYPE, PRESS, WAIT, FIND, or VERIFY.`);
+  if (!ALLOWED_VERBS.has(verb)) throw new Error(`unknown verb "${raw.verb}". Allowed: ${[...ALLOWED_VERBS].join(', ')}.`);
   const step = { id: String(raw.id || _stepId()), verb };
   if (raw.target != null) step.target = String(raw.target).slice(0, 500);
   if (raw.text != null) step.text = String(raw.text).slice(0, 2000);

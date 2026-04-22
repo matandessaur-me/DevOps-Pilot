@@ -13,8 +13,13 @@ const driver = require('./apps-driver');
 const chat = require('./apps-agent-chat');
 const memory = require('./apps-memory');
 const recipes = require('./apps-recipes');
+const recipeRunner = require('./apps-recipe-runner');
 
-function runSessionForEntry({ entry, session, task, driver, model, broadcast }) {
+function runSessionForEntry({ entry, session, task, driver, model, broadcast, recipe }) {
+  if (recipe) {
+    // Deterministic path: execute recipe steps directly against the driver.
+    return recipeRunner.runRecipe({ session, driver, recipe, broadcast, providerEntry: entry, model });
+  }
   return chat.runSession({ session, task, driver, providerEntry: entry, model, broadcast });
 }
 
@@ -162,7 +167,7 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     ].join('\n');
 
     session._providerRegistry = registry;
-    runSessionForEntry({ entry, session, task, driver, model, broadcast })
+    runSessionForEntry({ entry, session, task, driver, model, broadcast, recipe })
       .catch(e => {
         if (typeof broadcast === 'function') {
           broadcast({ type: 'apps-agent-step', sessionId: session.id, kind: 'error', message: e.message, at: Date.now() });
@@ -180,6 +185,9 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     session.stopped = true;
     if (session.abortController) {
       try { session.abortController.abort(); } catch (_) {}
+    }
+    if (typeof session._liveStop === 'function') {
+      try { session._liveStop(); } catch (_) {}
     }
     driver.stop();
     if (typeof broadcast === 'function') {
@@ -267,6 +275,7 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     for (const s of chat.sessions.values()) {
       s.stopped = true;
       if (s.abortController) { try { s.abortController.abort(); } catch (_) {} }
+      if (typeof s._liveStop === 'function') { try { s._liveStop(); } catch (_) {} }
     }
     driver.stop();
     if (typeof broadcast === 'function') {
