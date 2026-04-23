@@ -801,31 +801,44 @@ async function listInstalledApps({ force = false } = {}) {
   if (!force && _installedCache && (now - _installedCacheAt) < INSTALLED_CACHE_MS) {
     return _installedCache;
   }
+  // Start Menu is recursed (shortcuts live under publisher subfolders).
+  // Desktop is NOT recursed: on some locales (e.g. French "Bureau") users
+  // keep their entire dev tree on the Desktop, and -Recurse walks
+  // node_modules/.git/etc. which can take > 20s and blow the PS timeout.
   const script = `
 $ErrorActionPreference = 'SilentlyContinue'
-$paths = @(
+$recurse = @(
   [Environment]::GetFolderPath('CommonStartMenu'),
-  [Environment]::GetFolderPath('StartMenu'),
+  [Environment]::GetFolderPath('StartMenu')
+) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+$flat = @(
   [Environment]::GetFolderPath('Desktop'),
   [Environment]::GetFolderPath('CommonDesktopDirectory')
 ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
 $shell = New-Object -ComObject WScript.Shell
 $lnks = @()
-foreach ($p in $paths) {
-  Get-ChildItem -Path $p -Recurse -Filter *.lnk -ErrorAction SilentlyContinue | ForEach-Object {
-    try {
-      $sc = $shell.CreateShortcut($_.FullName)
-      $t = $sc.TargetPath
-      if ($t -and ($t -like '*.exe') -and (Test-Path $t)) {
-        $lnks += [PSCustomObject]@{
-          Name = [IO.Path]::GetFileNameWithoutExtension($_.Name)
-          Path = $t
-          Arguments = $sc.Arguments
-          Lnk = $_.FullName
-        }
+$process = {
+  param($file)
+  try {
+    $sc = $shell.CreateShortcut($file.FullName)
+    $t = $sc.TargetPath
+    if ($t -and ($t -like '*.exe') -and (Test-Path $t)) {
+      [PSCustomObject]@{
+        Name = [IO.Path]::GetFileNameWithoutExtension($file.Name)
+        Path = $t
+        Arguments = $sc.Arguments
+        Lnk = $file.FullName
       }
-    } catch {}
-  }
+    }
+  } catch {}
+}
+foreach ($p in $recurse) {
+  Get-ChildItem -LiteralPath $p -Recurse -Filter *.lnk -Force -ErrorAction SilentlyContinue |
+    ForEach-Object { $r = & $process $_; if ($r) { $lnks += $r } }
+}
+foreach ($p in $flat) {
+  Get-ChildItem -LiteralPath $p -Filter *.lnk -Force -ErrorAction SilentlyContinue |
+    ForEach-Object { $r = & $process $_; if ($r) { $lnks += $r } }
 }
 $lnks | ConvertTo-Json -Depth 3 -Compress
 `;
