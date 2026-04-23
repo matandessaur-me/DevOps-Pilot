@@ -522,7 +522,7 @@ class Orchestrator extends EventEmitter {
     // Write the raw text without a trailing newline so interactive AI CLIs
     // (which treat the whole thing as a bracketed paste) land it in the
     // input buffer. Then send a SEPARATE carriage return after a short
-    // delay so the CLI submits it as its own keystroke -- a trailing \r
+    // delay so the CLI submits it as its own keystroke - a trailing \r
     // inside the same paste is treated as paste content, not submit.
     const clean = text.replace(/[\r\n]+$/, '');
     t.pty.write(clean);
@@ -829,7 +829,7 @@ class Orchestrator extends EventEmitter {
   spawnVisible({ cli, prompt, cwd, timeout, from, taskId, space }) {
     const cfg = CLI_CONFIG[cli];
     if (!cfg) throw new Error(`Unknown CLI: "${cli}". Use: ${Object.keys(CLI_CONFIG).join(', ')}`);
-    if (!this.createTerminal) throw new Error('createTerminal not available -- cannot spawn visible terminals');
+    if (!this.createTerminal) throw new Error('createTerminal not available - cannot spawn visible terminals');
 
     // Verify CLI exists before spawning
     try {
@@ -908,7 +908,7 @@ class Orchestrator extends EventEmitter {
       { match: /would you like to (update|upgrade|install)/i,respond: 'y\n',  desc: 'update prompt' },
       { match: /continue\? \(Y\/n\)/i,                       respond: 'Y\n',  desc: 'continue prompt' },
       { match: /Are you sure/i,                              respond: 'y\n',  desc: 'confirmation' },
-      // Trust/permission dialogs -- always yes so the agent doesn't bail on
+      // Trust/permission dialogs - always yes so the agent doesn't bail on
       // first launch because Symphonee's CWD isn't yet on the CLI's trusted list.
       { match: /trust.*\(yes\/no\)/i,                        respond: 'yes\n',desc: 'trust prompt' },
       { match: /Do you trust/i,                              respond: 'yes\n',desc: 'trust prompt' },
@@ -1387,7 +1387,7 @@ class Orchestrator extends EventEmitter {
     if (from) tasks = tasks.filter(t => t.from === from);
     if (cli) tasks = tasks.filter(t => t.cli === cli);
     if (space !== undefined && space !== null && space !== '') {
-      // '*' means "ignore space filter" -- lets the UI default be "all tasks"
+      // '*' means "ignore space filter" - lets the UI default be "all tasks"
       // even when a space is active.
       if (space !== '*') tasks = tasks.filter(t => t.space === space);
     }

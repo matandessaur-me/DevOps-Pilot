@@ -42,7 +42,7 @@
           if (m[id]) id = m[id];
           document.documentElement.setAttribute('data-theme', id);
         } else if (s) {
-          // Custom theme -- apply inline vars from localStorage
+          // Custom theme - apply inline vars from localStorage
           var themes = JSON.parse(localStorage.getItem('symphonee-themes') || '[]');
           var t = themes.find(function(x) { return x.name === s; });
           if (t && t.vars) {
@@ -83,7 +83,7 @@
        Sizes:    -sm | (default) | -lg | -icon.
        All buttons get a consistent focus-visible ring that respects the
        current theme's accent color. Existing Symphonee buttons are
-       untouched -- this is an additive primitive for new UI. */
+       untouched - this is an additive primitive for new UI. */
     .sy-btn {
       display: inline-flex; align-items: center; justify-content: center; gap: 6px;
       white-space: nowrap; user-select: none;
@@ -504,9 +504,22 @@
     /* ── Tab bar ───────────────────────────────────────────────────────────── */
     .tab-bar {
       display: flex; align-items: center; gap: 0;
-      height: var(--term-bar-h); padding: 0 4px;
+      height: var(--term-bar-h); padding: 0;
       background: var(--tab-bar-bg); border-bottom: 1px solid var(--surface0); flex-shrink: 0;
       min-width: 0; overflow: visible; position: relative; z-index: 10;
+    }
+    /* Terminal tab is the permanent anchor: always first, always visible,
+       tinted with the accent color. Text stays fully legible (var(--text))
+       regardless of active/inactive state, no dimmed subtext0. */
+    .tab-btn[data-tab="terminal"] {
+      order: -1 !important;
+      background: var(--accent) !important;
+      color: var(--text) !important;
+      opacity: 1 !important;
+    }
+    .tab-btn[data-tab="terminal"]:hover {
+      background: color-mix(in srgb, var(--accent) 88%, #000) !important;
+      color: var(--text) !important;
     }
     .tab-bar-scroll {
       display: flex; align-items: stretch; gap: 2px; flex: 1; min-width: 0;
@@ -6225,7 +6238,7 @@ requestAnimationFrame(fitTerminalNow);
           }
           break;
         case 'term-spawned': {
-          // Orchestrator spawned a visible terminal -- create tab for it
+          // Orchestrator spawned a visible terminal - create tab for it
           const tid = msg.termId;
           if (!termInstances.has(tid)) {
             createTermInstance(tid, msg.label || msg.cli);
@@ -6325,7 +6338,7 @@ requestAnimationFrame(fitTerminalNow);
 
 // ── Activity stats: weekly roll-up of orchestrator runs ─────────────────
 // Inspired by agent-native's usage store. Symphonee doesn't own the LLM
-// billing, so we aggregate task volume + runtime -- the data we actually
+// billing, so we aggregate task volume + runtime - the data we actually
 // have. Gives users a proxy for "how much AI work am I doing this week".
 function openActivityStats() {
   const tasks = Array.isArray(orchTasks) ? orchTasks : [];
@@ -8764,7 +8777,7 @@ async function doGitPush() {
     const data = await res.json();
     if (data.error) {
       if (data.needsPull) {
-        // Behind remote -- prompt user to pull first
+        // Behind remote - prompt user to pull first
         result.innerHTML = `${esc(data.error)}<br><button class="btn btn-sm" style="margin-top:8px;" onclick="switchGitTab('pull');doGitPull();">Pull Now</button>`;
         result.className = 'git-action-result error';
         result.style.display = 'block';
@@ -9616,7 +9629,7 @@ function _maybeOpenNoteSlashMenu() {
   // Look backwards for the start of the current line.
   const lineStart = v.lastIndexOf('\n', caret - 1) + 1;
   const lineSoFar = v.slice(lineStart, caret);
-  // Only fire when the line starts with "/" and has no spaces -- keep the
+  // Only fire when the line starts with "/" and has no spaces - keep the
   // menu pattern predictable instead of surprising.
   if (lineSoFar === '/' || /^\/[a-zA-Z-]*$/.test(lineSoFar)) {
     _openNoteSlashMenu(lineSoFar, lineStart);
@@ -9644,7 +9657,7 @@ function _openNoteSlashMenu(lineSoFar, lineStart) {
     '</div>'
   ).join('');
   try { lucide.createIcons({ nodes: [menu] }); } catch (_) {}
-  // Anchor under the textarea. We don't compute caret coordinates -- pinning
+  // Anchor under the textarea. We don't compute caret coordinates - pinning
   // to the editor's top-left corner is predictable and avoids line-wrap math.
   const ta = document.getElementById('noteTextarea');
   const r = ta.getBoundingClientRect();
@@ -9677,7 +9690,7 @@ function _runNoteSlashAction(key, lineStart) {
   ta.selectionStart = ta.selectionEnd = lineStart;
   _closeNoteSlashMenu();
   const content = ta.value.trim();
-  if (!content) { toast('Note is empty -- nothing to act on', 'warning'); return; }
+  if (!content) { toast('Note is empty - nothing to act on', 'warning'); return; }
   askAIFromPalette(action.build(content));
 }
 
@@ -10337,7 +10350,7 @@ async function orchRefresh() {
 // Keep the orchestrator scope <select> default aligned with the active space.
 // When a space is active, default to 'space'; otherwise 'all'. Preserves the
 // user's choice within a session (only overrides if the current value is no
-// longer sensible -- e.g. they had 'space' selected and then cleared the space).
+// longer sensible - e.g. they had 'space' selected and then cleared the space).
 function syncOrchScopeFilter() {
   const el = document.getElementById('orchScopeFilter');
   if (!el) return;
@@ -10385,7 +10398,7 @@ function renderOrchAgents() {
       '<div class="orch-agent-dot ' + (busyTask ? 'busy' : 'ai') + '"></div>' +
       '<div class="orch-agent-info">' +
         '<div class="orch-agent-name">' + label + '</div>' +
-        '<div class="orch-agent-sub">' + a.termId + (busyTask ? ' -- orchestrating' : '') + '</div>' +
+        '<div class="orch-agent-sub">' + a.termId + (busyTask ? ' - orchestrating' : '') + '</div>' +
       '</div></div>');
   });
   // 2. Headless spawns that are currently running (these have no terminal entry)
@@ -10559,7 +10572,7 @@ function renderOrchTasks() {
           '<div class="orch-task-reply-label">Reply inline</div>' +
           '<textarea id="inlineReply_' + t.id + '" placeholder="Continue the conversation..." onkeydown="if(event.key===\'Enter\'&&(event.metaKey||event.ctrlKey)){event.preventDefault();_inlineReplySend(\'' + t.id + '\');}"></textarea>' +
           '<div class="orch-task-reply-actions">' +
-            '<span class="orch-task-reply-hint">Ctrl/Cmd+Enter to send -- spawns a follow-up task with the prior Q/A as context</span>' +
+            '<span class="orch-task-reply-hint">Ctrl/Cmd+Enter to send - spawns a follow-up task with the prior Q/A as context</span>' +
             '<button class="orch-task-reply-send" id="inlineReplySend_' + t.id + '" onclick="_inlineReplySend(\'' + t.id + '\')">Send reply</button>' +
           '</div>' +
         '</div>')
@@ -10765,7 +10778,7 @@ async function orchShowDispatchDialog() {
     agentCards += '<button class="orch-dispatch-agent" data-value="' + a.termId + '" data-mode="dispatch" onclick="orchSelectDispatchTarget(this)">' +
       '<span class="orch-dispatch-dot" style="background:' + color + '"></span>' +
       '<span class="orch-dispatch-label">' + label + '</span>' +
-      '<span class="orch-dispatch-sub">' + a.termId + ' -- inject into running session</span>' +
+      '<span class="orch-dispatch-sub">' + a.termId + ' - inject into running session</span>' +
     '</button>';
   });
   // Spawn options (visible terminal)
@@ -10840,7 +10853,7 @@ async function orchDoDispatch() {
       const repos = await fetch('/api/repos').then(r => r.json());
       const repoPath = repos[repoName];
       if (repoPath) {
-        prompt = `[REPO CONTEXT] Work on the "${repoName}" repository located at: ${repoPath.replace(/\\/g, '/')}\nAll file reads, searches, and edits should target that directory. Do NOT cd there -- stay in your current directory but use the full path for file operations.\n\n${rawPrompt}`;
+        prompt = `[REPO CONTEXT] Work on the "${repoName}" repository located at: ${repoPath.replace(/\\/g, '/')}\nAll file reads, searches, and edits should target that directory. Do NOT cd there - stay in your current directory but use the full path for file operations.\n\n${rawPrompt}`;
       }
     } catch (_) {}
   }
@@ -11196,7 +11209,7 @@ function syncAiControls() {
 function switchCli(cli) {
   activeCli = cli;
   localStorage.setItem('symphonee-cli', cli);
-  // Theme is independent of AI selection -- no theme change here
+  // Theme is independent of AI selection - no theme change here
 }
 
 function toggleAi() {
@@ -11248,7 +11261,7 @@ async function refreshAiPickerItems(menu) {
     _aiToolsStatus = data.cliTools || {};
     apply(_aiToolsStatus);
   } catch (_) {
-    // On failure, leave all items visible -- degrades gracefully.
+    // On failure, leave all items visible - degrades gracefully.
   }
 }
 
@@ -11775,7 +11788,7 @@ function pushUiContext() {
   }).catch(() => {});
 }
 
-// Current notes namespace -- what /api/notes calls should default to. '_global'
+// Current notes namespace - what /api/notes calls should default to. '_global'
 // when no space is active; the space's slugged name otherwise.
 function currentNotesNs() {
   if (!activeSpace) return '_global';
@@ -12135,7 +12148,7 @@ function renderBoard() {
       const stateFiltersNow = getMultiSelectValues('backlogState');
       if (stateFiltersNow.includes('Closed') || stateFiltersNow.includes('Done')) {
         const closedLabel = totalClosedCapped ? totalClosedCount + '+' : totalClosedCount;
-        html += `<button class="show-more-closed-btn" onclick="event.stopPropagation(); loadMoreClosed();">Showing ${items.length} of ${closedLabel} -- load more...</button>`;
+        html += `<button class="show-more-closed-btn" onclick="event.stopPropagation(); loadMoreClosed();">Showing ${items.length} of ${closedLabel} - load more...</button>`;
       }
     }
 
@@ -12246,7 +12259,7 @@ function renderBacklog() {
     if (showsClosed) {
       const loadedClosed = workItems.filter(wi => wi.state === 'Closed' || wi.state === 'Done').length;
       const closedLabel = totalClosedCapped ? totalClosedCount + '+' : totalClosedCount;
-      html += `<tr class="show-more-closed-row"><td colspan="7"><button class="show-more-closed-btn" onclick="event.stopPropagation(); loadMoreClosed();">Showing ${loadedClosed} of ${closedLabel} closed items -- load more...</button></td></tr>`;
+      html += `<tr class="show-more-closed-row"><td colspan="7"><button class="show-more-closed-btn" onclick="event.stopPropagation(); loadMoreClosed();">Showing ${loadedClosed} of ${closedLabel} closed items - load more...</button></td></tr>`;
     }
   }
 
@@ -12927,7 +12940,7 @@ async function switchTeam(teamName) {
     body: JSON.stringify({ DefaultTeam: teamName }),
   });
   configData.DefaultTeam = teamName;
-  // Reset child filters -- both Area and Iteration depend on the selected team
+  // Reset child filters - both Area and Iteration depend on the selected team
   document.getElementById('areaSelect').value = '';
   document.getElementById('sprintSelect').value = '';
   closedItemsLimit = 10;
@@ -16942,7 +16955,7 @@ function _composeBrowserAgentTask(task) {
   if (!rawTask) return '';
   if (!_browserInspectState.selected) return rawTask;
   return [
-    'Use the current browser page to help the user. You have full control of this browser and can do anything a human user could do here -- navigate, click, type, scroll, fill forms, inspect, modify the DOM, read any content on the page. Act directly; do not ask for permission on routine browser actions.',
+    'Use the current browser page to help the user. You have full control of this browser and can do anything a human user could do here - navigate, click, type, scroll, fill forms, inspect, modify the DOM, read any content on the page. Act directly; do not ask for permission on routine browser actions.',
     '',
     'A page element is currently selected. Treat it as the target element unless the user explicitly overrides that target. If the request says "this", "it", "selected", "remove this", or is otherwise ambiguous, assume it refers to the selected element below.',
     '',
@@ -17481,7 +17494,7 @@ const _SYM_BROWSER_KIT = `(function(){
     // Esc always forwards (lets the host exit inline editor / close panels).
     if (k === 'Escape') {
       console.info('__SYMPHONEE_KEY__' + JSON.stringify({ key: 'Escape' }));
-      return; // do not preventDefault -- let the page also react if it wants
+      return; // do not preventDefault - let the page also react if it wants
     }
     if (isCmd && (k === 'k' || k === 'K')) {
       console.info('__SYMPHONEE_KEY__' + JSON.stringify({ key: 'k', ctrl: true, shift: !!ev.shiftKey }));
@@ -18290,7 +18303,7 @@ let _inspectEditStartHtml = '';
 let _inspectEditingSelector = '';
 let _inspectWasInspectOnBeforeEdit = false;
 async function _inspectToggleEdit() {
-  // While editing, we already have the target -- ignore the live selector
+  // While editing, we already have the target - ignore the live selector
   // (which may have been cleared when we paused inspect mode on entry).
   const sel = _inspectIsEditing ? _inspectEditingSelector : _inspectActiveSelector;
   if (!sel) { toast('Select an element first', 'info', { duration: 1200 }); return; }
@@ -18629,7 +18642,7 @@ async function _runInappPatchesPanel() {
   const list = all[key] || [];
   _inappToolsState.patches = { loaded: key, list };
   if (!list.length) {
-    _setInappToolsBodyHtml(`<div class="inapp-tools-empty"><i data-lucide="history" style="width:24px;height:24px;display:block;margin:0 auto 10px;color:var(--subtext1);"></i>No saved patches for this page yet.<div style="margin-top:8px;font-size:11px;">Use Inspect code to hide, remove, style, or edit elements -- they're recorded here automatically.</div></div>`);
+    _setInappToolsBodyHtml(`<div class="inapp-tools-empty"><i data-lucide="history" style="width:24px;height:24px;display:block;margin:0 auto 10px;color:var(--subtext1);"></i>No saved patches for this page yet.<div style="margin-top:8px;font-size:11px;">Use Inspect code to hide, remove, style, or edit elements - they're recorded here automatically.</div></div>`);
     try { if (window.lucide && lucide.createIcons) lucide.createIcons(); } catch (_) {}
     return;
   }
@@ -18830,7 +18843,7 @@ async function _runInappReaderView() {
     overlay.id = '__symphoneeReaderOverlay';
     overlay.className = 'sym-rv';
     var style = document.createElement('style');
-    // Minimal, classless-style stylesheet -- reads like a Markdown preview.
+    // Minimal, classless-style stylesheet - reads like a Markdown preview.
     // No drop caps, no book/serif typography, no floating buttons.
     style.textContent = [
       '.sym-rv{position:fixed;inset:0;z-index:2147483647;background:#ffffff;overflow:auto;-webkit-font-smoothing:antialiased;}',
@@ -19914,7 +19927,7 @@ async function loadRepoList() {
     const spaceNames = Object.keys(spaces);
 
     // Legacy migration: before dual-state, activeRepo held either a space
-    // name or a repo name. Split them into their proper slots -- but ONLY
+    // name or a repo name. Split them into their proper slots - but ONLY
     // when the name is a space that isn't also a real repo. Without the
     // repoNames guard, a user whose repo and space share a name (e.g. both
     // "Symphonee") would get their repo silently wiped every refresh.
@@ -19931,7 +19944,7 @@ async function loadRepoList() {
 
     // If an activeRepo is set and belongs to a space, snap to that space on
     // very first boot only (i.e. when the user has no stored space preference
-    // at all). After that, spaces and repos are fully independent -- an
+    // at all). After that, spaces and repos are fully independent - an
     // explicit "All spaces" choice (stored as "") must survive reloads.
     if (activeRepo && !loadRepoList._snappedOwnerOnce && localStorage.getItem('symphonee-space') === null) {
       const owner = _findSpaceForRepo(spaces, activeRepo);
@@ -19986,7 +19999,7 @@ async function fetchAndPullOnStartup(repoName) {
     // Only pull if the working tree is clean (don't risk conflicts with uncommitted changes)
     const statusRes = await fetch(`/api/git/status?repo=${encodeURIComponent(repoName)}`);
     const statusData = await statusRes.json();
-    if (statusData.files && statusData.files.length > 0) return; // dirty -- skip pull
+    if (statusData.files && statusData.files.length > 0) return; // dirty - skip pull
 
     const res = await fetch('/api/git/pull', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -20295,7 +20308,7 @@ async function _saveManageSpace(name) {
 // so selectSpace/selectRepo can call them without throwing before they're
 // fully wired up.
 function refreshNotesForSpace() {
-  // Close whatever note was open -- it may belong to a different space now.
+  // Close whatever note was open - it may belong to a different space now.
   try {
     currentNote = null;
     const title = document.getElementById('noteTitle');
@@ -20338,7 +20351,7 @@ async function applyPluginSpaceFilter() {
     el.classList.toggle('plugin-space-hidden', !!hide);
   });
   // Filtering the currently-active tab into hiding would strand the user on a
-  // blank page -- fall back to terminal if that happens.
+  // blank page - fall back to terminal if that happens.
   const active = document.querySelector('.tab-btn.active');
   if (active && active.classList.contains('plugin-space-hidden')) {
     try { switchTab('terminal'); } catch (_) {}
@@ -20967,7 +20980,7 @@ async function factoryResetConfirm() {
 }
 
 async function saveSettings() {
-  // Safe readers -- plugin-contributed settings fields can disappear from the
+  // Safe readers - plugin-contributed settings fields can disappear from the
   // DOM when their owning plugin is uninstalled, and we still want the save +
   // restart flow to complete in that case (the uninstall already ran
   // server-side; we just need the relaunch).
@@ -21575,7 +21588,7 @@ function importThemes() {
 // Restore theme on load (with migration from old CLI-based names)
 function restoreCustomTheme() {
   const stored = localStorage.getItem(ACTIVE_THEME_KEY);
-  // The startup path must NOT restart terminals -- the main shell has
+  // The startup path must NOT restart terminals - the main shell has
   // already spawned (or is about to); a restart here would leave the main
   // shell blank until the user switches tabs.
   const startupOpts = { skipRestart: true };
@@ -21698,7 +21711,7 @@ const OB_STEPS = [
   // 1: Welcome
   () => ({
     title: `Welcome, ${esc(_obData.displayName.split(' ')[0])}!`,
-    subtitle: "Symphonee is an AI terminal with a plugin system. Everything beyond the terminal and recipes is opt-in -- install only the integrations you need.",
+    subtitle: "Symphonee is an AI terminal with a plugin system. Everything beyond the terminal and recipes is opt-in - install only the integrations you need.",
     html: `<div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;">
       <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="terminal" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>AI Terminal</strong><span>Launch Claude, Gemini, Copilot, Codex, Grok, or Qwen inline</span></div></div>
       <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="bot" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>AI Tools</strong><span>Detect and install AI assistants</span></div></div>
@@ -21765,13 +21778,13 @@ const OB_STEPS = [
       <div class="onboarding-hint">Each install clones the plugin repo into <code>dashboard/plugins/</code>. Configure them in Settings after onboarding finishes. Click Next to skip.</div>`,
     onEnter: () => obLoadPluginRegistry(),
   }),
-  // 5: Azure DevOps config form -- shown only when the azure-devops plugin is installed.
+  // 5: Azure DevOps config form - shown only when the azure-devops plugin is installed.
   // A future Jira/Wrike plugin can ship its own onboarding step via a manifest
   // contribution; this step exists only for the first-party ADO plugin.
   () => ({
     _requires: 'azure-devops',
     title: 'Azure DevOps (optional)',
-    subtitle: 'If you use Azure Boards, fill these in to enable the Backlog tab, iterations, and AB# commit linking. Leave blank to skip -- you can install it later from Settings > Plugins.',
+    subtitle: 'If you use Azure Boards, fill these in to enable the Backlog tab, iterations, and AB# commit linking. Leave blank to skip - you can install it later from Settings > Plugins.',
     html: `<div class="onboarding-field"><label>Organization</label><input id="obOrg" type="text" placeholder="e.g. my-org" value="${esc(_obData.org)}" oninput="_obData.org=this.value"></div>
       <div class="onboarding-field"><label>Project</label><input id="obProject" type="text" placeholder="e.g. My Project" value="${esc(_obData.project)}" oninput="_obData.project=this.value"></div>
       <div class="onboarding-field"><label>Personal Access Token</label><input id="obPat" type="password" placeholder="Your PAT" value="${esc(_obData.pat)}" oninput="_obData.pat=this.value"></div>
@@ -21805,7 +21818,7 @@ const OB_STEPS = [
     onEnter: () => { obRenderRepos(); renderCloneSourceButtons('obRepoAddBtns','ob','onboarding-btn onboarding-btn-primary'); },
   }),
   // 7: GitHub PAT + Whisper. GitHub section renders only when the github
-  // plugin is installed -- plugin-absent installs see only Whisper here.
+  // plugin is installed - plugin-absent installs see only Whisper here.
   // Whisper is a core (non-plugin) capability and always shown.
   () => ({
     title: (function(){
@@ -21816,7 +21829,7 @@ const OB_STEPS = [
       const hasGh = !!((window._loadedPluginsRaw || []).some(p => p.id === 'github'));
       return hasGh
         ? 'GitHub unlocks the Pull Requests tab, git log, and clone-from-GitHub. Whisper enables hold-to-talk voice input. Both are optional; skip either by leaving the field blank.'
-        : 'Whisper enables hold-to-talk voice input. Optional -- leave blank to skip.';
+        : 'Whisper enables hold-to-talk voice input. Optional - leave blank to skip.';
     })(),
     html: (function(){
       const hasGh = !!((window._loadedPluginsRaw || []).some(p => p.id === 'github'));
@@ -21844,7 +21857,7 @@ const OB_STEPS = [
       <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="file-code" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>Files & Diffs</strong><span>Browse code, view diffs, commit with AI-generated messages</span></div></div>
       <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="file-text" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>Notes</strong><span>Markdown scratchpad; export individually or bundled</span></div></div>
       <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="book-open" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>Recipes</strong><span>Reusable AI workflows; import, export, and share</span></div></div>
-      <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="puzzle" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>Plugins</strong><span>Azure DevOps, GitHub, Jira, Wrike, Builder.io, Sanity, WordPress -- opt in per project</span></div></div>
+      <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="puzzle" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>Plugins</strong><span>Azure DevOps, GitHub, Jira, Wrike, Builder.io, Sanity, WordPress - opt in per project</span></div></div>
       <div class="onboarding-overview-item"><div class="onboarding-overview-icon"><i data-lucide="search" style="width:16px;height:16px;"></i></div><div class="onboarding-overview-text"><strong>Command Palette</strong><span>Press <code style="background:var(--surface0);padding:1px 4px;border-radius:2px;font-size:10px;">Ctrl+K</code> to jump anywhere</span></div></div>
     </div>
     <div style="margin-top:16px;padding:10px 12px;background:var(--surface0);border-radius:var(--radius);font-size:11px;color:var(--subtext0);border-left:2px solid var(--accent);">
@@ -22032,7 +22045,7 @@ async function obInstallPlugin(id, btn) {
     const data = await r.json();
     if (!r.ok || !data.ok) throw new Error(data.error || 'Install failed');
     if (btn) { btn.textContent = 'Installed'; btn.disabled = true; btn.style.opacity = '0.6'; }
-    toast((entry.name || id) + ' installed -- restart at the end to activate', 'success');
+    toast((entry.name || id) + ' installed - restart at the end to activate', 'success');
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = 'Install'; }
     toast('Install failed: ' + e.message, 'error');
@@ -22127,7 +22140,7 @@ function showInstallFallbackHint(btn, cmd, msg) {
   const hint = document.createElement('div');
   hint.className = 'install-fallback-hint';
   const label = msg || 'Could not install automatically.';
-  hint.innerHTML = `<span style="color:var(--yellow);">${label}</span> You can install it manually -- open a terminal and run:<code class="install-fallback-cmd" onclick="navigator.clipboard.writeText('${cmd}');toast('Copied to clipboard','success');" title="Click to copy">${cmd}</code>`;
+  hint.innerHTML = `<span style="color:var(--yellow);">${label}</span> You can install it manually - open a terminal and run:<code class="install-fallback-cmd" onclick="navigator.clipboard.writeText('${cmd}');toast('Copied to clipboard','success');" title="Click to copy">${cmd}</code>`;
   card.insertAdjacentElement('afterend', hint);
 }
 
@@ -22659,7 +22672,7 @@ function getCmdActions() {
   ];
   // Plugin-contributed quick actions + AI actions. No plugin names hardcoded.
   // The palette reads from each loaded plugin's leftQuickActions and aiActions
-  // contributions -- same surface the sidebar uses. Third-party plugins that
+  // contributions - same surface the sidebar uses. Third-party plugins that
   // ship their own quick actions appear here for free.
   if (_loadedPlugins && _loadedPlugins.length) {
     for (const p of _loadedPlugins) {
@@ -22681,7 +22694,7 @@ function getCmdActions() {
     }
   }
   // Plugin pinned tabs become "Go to <label>" command palette entries.
-  // Popup tabs are intentionally excluded -- they are opened by domain actions
+  // Popup tabs are intentionally excluded - they are opened by domain actions
   // (clicking a work item, "Open Full Timeline"), not from the palette.
   if (_loadedPlugins && _loadedPlugins.length) {
     for (const p of _loadedPlugins) {
@@ -22733,7 +22746,7 @@ function getCmdActions() {
       category: 'Work Item',
     });
   }
-  // (Duplicate plugin contribution pass removed -- leftQuickActions, aiActions,
+  // (Duplicate plugin contribution pass removed - leftQuickActions, aiActions,
   // and centerTabs are already added once above via _loadedPlugins. Looping a
   // second time produced duplicate entries and incorrectly routed claimed/popup
   // tabs through openPluginTab() instead of switchTab(claims.tabBtnId).)
@@ -22939,7 +22952,7 @@ function openAIFocusPalette() {
   }, 60);
 }
 
-// ── Shortcut help modal -- small cheatsheet overlay ─────────────────────
+// ── Shortcut help modal - small cheatsheet overlay ─────────────────────
 function openShortcutHelp() {
   let overlay = document.getElementById('shortcutHelpOverlay');
   if (overlay) { overlay.remove(); return; }
@@ -23081,7 +23094,7 @@ async function askAIFromPalette(query, opts) {
       const body = await r.json().catch(() => ({}));
       const tid = body && (body.taskId || body.id);
       if (tid) _paletteNotifyTasks.add(tid);
-      toast('Reply sent -- you will be notified when it answers', 'success');
+      toast('Reply sent - you will be notified when it answers', 'success');
       try { orchRefreshTasks(); } catch (_) {}
     } catch (err) {
       toast('Follow-up failed: ' + (err.message || err), 'error');
@@ -23105,7 +23118,7 @@ async function askAIFromPalette(query, opts) {
     if (taskId) _paletteNotifyTasks.add(taskId);
     const orchBtn = document.getElementById('orchestratorTabBtn');
     const canShow = orchBtn && orchBtn.style.display !== 'none';
-    toast('Sent to ' + cliLabel + ' -- you will be notified when it answers', 'success', {
+    toast('Sent to ' + cliLabel + ' - you will be notified when it answers', 'success', {
       action: canShow ? { label: 'View', onClick: () => switchTab('orchestrator') } : undefined,
     });
     try { orchRefreshTasks(); } catch (_) {}
@@ -23147,7 +23160,7 @@ function filterCmdPalette() {
     updatePalettePill(cmdMatch ? cmdMatch[1].replace(/^\s+/, '').replace(/^\//, '') : null);
   }
 
-  // In sticky find-mode, treat the entire input as the query -- skip the
+  // In sticky find-mode, treat the entire input as the query - skip the
   // slash-prefix and other routing below. Empty input just shows the empty
   // hint until the user types.
   if (_cmdPaletteMode === 'find') {
@@ -23195,7 +23208,7 @@ function filterCmdPalette() {
     return;
   }
 
-  // Check if user typed a work item ID like #12345 or just 12345 -- only when a work-item plugin is active.
+  // Check if user typed a work item ID like #12345 or just 12345 - only when a work-item plugin is active.
   const _hasAdoQuick = !!((_loadedPlugins || []).some(p => p.id === 'azure-devops')) && configData.IncognitoMode !== true;
   const idMatch = _hasAdoQuick ? q.match(/^#?(\d{3,})$/) : null;
 
@@ -23213,7 +23226,7 @@ function filterCmdPalette() {
 
   // AI fallback: if the user typed a query and nothing useful matched, offer
   // to forward it to the active CLI as a prompt. Shown at the bottom when
-  // there are a few matches, or as the sole option when nothing matches -- so
+  // there are a few matches, or as the sole option when nothing matches - so
   // a question like "what's in my inbox" still resolves to a useful action.
   if (q && q.length >= 2 && !findMatch) {
     const aiLabel = 'Ask AI: ' + raw.trim();
@@ -23674,7 +23687,7 @@ function executeCmdPalette(idx) {
   if (!cmd) return;
   // Record the pick into the recent-commands queue so future palette opens
   // surface it at the top. Skip ephemeral entries (search results, "Ask AI"
-  // prompts) -- those belong in their own history if we ever add one.
+  // prompts) - those belong in their own history if we ever add one.
   try {
     if (cmd.label && cmd.category !== 'Search' && !/^Ask AI:/.test(cmd.label)) {
       const key = 'symphonee-palette-recents-v1';
@@ -24021,11 +24034,11 @@ function injectAiAction(plugin, action) {
 //       {command:'globalFunctionName'}
 //
 // Template variables available in args / analyze / prompt strings:
-//   ${sprint}       -- raw iteration path from the sidebar sprintSelect ('' if none)
-//   ${sprintName}   -- human-readable name of the selected iteration
-//   ${repo}         -- active repo name from /api/ui/context
-//   ${repoPath}     -- active repo path on disk
-//   ${config.X}     -- any top-level key from configData
+//   ${sprint}       - raw iteration path from the sidebar sprintSelect ('' if none)
+//   ${sprintName}   - human-readable name of the selected iteration
+//   ${repo}         - active repo name from /api/ui/context
+//   ${repoPath}     - active repo path on disk
+//   ${config.X}     - any top-level key from configData
 //
 // requires: array of context keys that must be non-empty; toasts and bails if any are missing.
 function _pluginActionContext() {
@@ -24054,7 +24067,7 @@ function runPluginAiAction(plugin, action) {
   if (action.action) return executePluginAction(plugin, action.action);
 
   var ctx = _pluginActionContext();
-  // Enforce requires[] -- bail with a toast if any required context is blank.
+  // Enforce requires[] - bail with a toast if any required context is blank.
   var requires = action.requires || [];
   for (var i = 0; i < requires.length; i++) {
     var key = requires[i];
@@ -24168,7 +24181,7 @@ var pluginTabRegistry = [];
 function registerPluginTab(plugin, tabDef) {
   // Only openable iframe-backed plugin tabs belong in the '+ Open Tab' menu.
   // Pinned tabs slot in permanently, popup tabs have their own triggers, and
-  // claims-based tabs take over a hardcoded built-in slot -- none of those are
+  // claims-based tabs take over a hardcoded built-in slot - none of those are
   // "openable from the menu".
   if (!tabDef || tabDef.pinned || tabDef.popup || tabDef.claims || !tabDef.html) return;
   var tabId = 'plugin-' + plugin.id + '-' + tabDef.id;
@@ -24373,7 +24386,7 @@ function applyPluginPinnedTabs(isIncognito, opts) {
       if (tab.popup) {
         // Popup tabs always start hidden; plugin code reveals them on demand
         // (e.g. viewWorkItem). Closing happens via the panel's own close
-        // affordance -- the tab itself does not get an X.
+        // affordance - the tab itself does not get an X.
         el.style.display = 'none';
       } else if (isIncognito) {
         el.style.display = 'none';
@@ -24693,7 +24706,7 @@ document.addEventListener('click', function(e) {
   if (menu && wrap && !wrap.contains(e.target)) menu.classList.remove('open');
 });
 
-// -- Persist open plugin tabs in localStorage ---------------------------------
+// - Persist open plugin tabs in localStorage ---------------------------------
 function saveOpenTabs() {
   var open = [];
   document.querySelectorAll('.tab-btn.closable').forEach(function(btn) {
@@ -24825,7 +24838,7 @@ function registerContextMenuItem(plugin, item) {
 }
 
 // Initialize all plugins on load. `_pluginsReady` resolves when the IIFE has
-// fetched /api/plugins and finished injecting contributions -- other async
+// fetched /api/plugins and finished injecting contributions - other async
 // startup code (loadConfig, applyPluginPinnedTabs) should await this before
 // assuming _loadedPlugins reflects reality.
 var _loadedPlugins = [];
@@ -24902,7 +24915,7 @@ async function refreshPluginActivation() {
   // Settings > Plugins should list every installed plugin (active + inactive)
   // so users can configure an installed-but-unconfigured plugin before its
   // routes activate. Must run even when /api/plugins returned zero active
-  // plugins -- that is exactly the "fresh install with only unconfigured
+  // plugins - that is exactly the "fresh install with only unconfigured
   // first-party plugins" case. /api/plugins/installed returns both kinds with
   // an `active` flag; fall back to the active list if the endpoint is missing.
   try {

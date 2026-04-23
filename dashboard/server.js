@@ -538,11 +538,11 @@ const server = http.createServer(async (req, res) => {
     // Azure DevOps routes (/api/workitems/*, /api/iterations, /api/teams,
     // /api/areas, /api/velocity, /api/burndown, /api/team-members,
     // /api/start-working) are fully owned by the azure-devops plugin as
-    // of v0.4.0 -- registered via ctx.addAbsoluteRoute against the same
+    // of v0.4.0 - registered via ctx.addAbsoluteRoute against the same
     // URLs. Same story for GitHub (/api/github/*, /api/pull-request):
     // owned by the github plugin v0.4.0. When a plugin is uninstalled or
     // unconfigured, the route 404s naturally because no handler is
-    // registered -- no explicit gate needed in core.
+    // registered - no explicit gate needed in core.
 
     // ── Notes ─────────────────────────────────────────────────────────────
     if (url.pathname === '/api/notes' && req.method === 'GET')    return handleListNotes(url, res);
@@ -720,7 +720,7 @@ const server = http.createServer(async (req, res) => {
       fs.createReadStream(route.file).pipe(res);
     } else {
       // Plugin-aware 404 for /api/ paths owned by extracted plugins. Keeps the
-      // UI and AI seeing a structured 'this feature lives in a plugin -- install
+      // UI and AI seeing a structured 'this feature lives in a plugin - install
       // it' response instead of a bare "Not found" when the plugin is absent.
       const unclaimed = matchUnclaimedPluginRoute(url.pathname, loadedPlugins);
       if (unclaimed) {
@@ -1187,7 +1187,7 @@ function handlePrerequisites(res) {
   try {
     const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     result.config.exists = true;
-    // "Complete" no longer means ADO is configured -- the shell ships plugin-first, so
+    // "Complete" no longer means ADO is configured - the shell ships plugin-first, so
     // a DefaultUser + at least one configured repo is enough to be a usable install.
     result.config.complete = !!(cfg.DefaultUser && cfg.Repos && Object.keys(cfg.Repos).length > 0);
   } catch (_) {}
@@ -1212,10 +1212,10 @@ const CLI_INSTALL_COMMANDS = {
 // Detect a CLI tool via `where` first, then fall back to common npm global paths.
 // After a fresh npm install the current process PATH may be stale, so we also
 // check the typical npm global bin directories directly (same strategy as detectPwsh).
-// Returns { installed, path, inPath } -- `inPath` indicates if `where` found it (ready to use)
+// Returns { installed, path, inPath } - `inPath` indicates if `where` found it (ready to use)
 // vs found via fallback (installed but may need terminal restart).
 function detectCli(cli) {
-  // 1. Try `where` (checks current PATH -- means it's ready to use right now)
+  // 1. Try `where` (checks current PATH - means it's ready to use right now)
   const whereCmd = `where ${cli}.cmd 2>nul || where ${cli} 2>nul`;
   try {
     const where = execSync(whereCmd, { encoding: 'utf8', timeout: 5000 }).trim();
@@ -1798,11 +1798,11 @@ function handleGitDiff(url, res) {
   let diff = '';
   if (filePath) {
     // Try staged + unstaged diff against HEAD (ignore CRLF differences on Windows)
-    diff = gitExec(repoPath, `diff --ignore-cr-at-eol HEAD -- "${filePath}"`);
+    diff = gitExec(repoPath, `diff --ignore-cr-at-eol HEAD - "${filePath}"`);
     // Try unstaged only
-    if (!diff) diff = gitExec(repoPath, `diff --ignore-cr-at-eol -- "${filePath}"`);
+    if (!diff) diff = gitExec(repoPath, `diff --ignore-cr-at-eol - "${filePath}"`);
     // Try staged only
-    if (!diff) diff = gitExec(repoPath, `diff --ignore-cr-at-eol --cached -- "${filePath}"`);
+    if (!diff) diff = gitExec(repoPath, `diff --ignore-cr-at-eol --cached - "${filePath}"`);
     // For untracked/new files, show entire content as additions
     if (!diff) {
       const fullPath = path.join(repoPath, filePath);
@@ -1884,7 +1884,7 @@ function handleCommitDiff(url, res) {
   if (!repoPath) return json(res, { error: 'Repo not found' }, 400);
   if (!hash) return json(res, { error: 'hash required' }, 400);
 
-  const pathArg = filePath ? ` -- "${filePath}"` : '';
+  const pathArg = filePath ? ` - "${filePath}"` : '';
   const diff = gitExec(repoPath, `diff --ignore-cr-at-eol ${hash}~1 ${hash}${pathArg}`);
   const stat = gitExec(repoPath, `diff --ignore-cr-at-eol --stat=999 ${hash}~1 ${hash}`);
   const msg = gitExec(repoPath, `log -1 --pretty=format:"%s" ${hash}`);
@@ -1892,7 +1892,7 @@ function handleCommitDiff(url, res) {
   json(res, { diff: diff || 'No changes', stat, message: msg, hash });
 }
 
-// ── Git Actions (checkout, pull, push, fetch) -- async with busy guards ────
+// ── Git Actions (checkout, pull, push, fetch) - async with busy guards ────
 async function handleGitCheckout(req, res) {
   try {
     const body = await readBody(req);
@@ -1918,7 +1918,7 @@ async function handleGitCheckout(req, res) {
       try {
         pullMsg = await gitAsync(repoPath, 'pull', { timeout: 30000 });
       } catch (_) {
-        // Pull failed -- checkout still succeeded, continue
+        // Pull failed - checkout still succeeded, continue
       }
 
       // Notify UI of branch change
@@ -1966,7 +1966,7 @@ async function handleGitPush(req, res) {
         const behind = await gitAsync(repoPath, `rev-list --count HEAD..origin/${branch}`);
         behindCount = parseInt(behind, 10) || 0;
       } catch (_) {
-        // Remote branch doesn't exist yet -- not behind, safe to push
+        // Remote branch doesn't exist yet - not behind, safe to push
       }
       if (behindCount > 0) {
         throw Object.assign(
@@ -2021,16 +2021,16 @@ async function handleGitDiscard(req, res) {
     const filePath = body.path;
 
     // Check if the file is untracked (new) or tracked
-    const status = gitExec(repoPath, `status --porcelain -- "${filePath}"`);
+    const status = gitExec(repoPath, `status --porcelain - "${filePath}"`);
     const statusCode = status ? status.substring(0, 2) : '';
 
     if (statusCode.trim().startsWith('?')) {
-      // Untracked file -- remove it
-      gitExec(repoPath, `clean -f -- "${filePath}"`);
+      // Untracked file - remove it
+      gitExec(repoPath, `clean -f - "${filePath}"`);
     } else {
-      // Tracked file -- unstage and restore
-      gitExec(repoPath, `reset HEAD -- "${filePath}"`);
-      gitExec(repoPath, `checkout -- "${filePath}"`);
+      // Tracked file - unstage and restore
+      gitExec(repoPath, `reset HEAD - "${filePath}"`);
+      gitExec(repoPath, `checkout - "${filePath}"`);
     }
 
     json(res, { ok: true, discarded: filePath });
@@ -2211,7 +2211,7 @@ async function handleOpenExternal(req, res) {
 
 // ── Image Proxy ─────────────────────────────────────────────────────────────
 // Plugins contribute contributions.imageAuth entries to register URL-pattern
-// auth headers. Core never hardcodes service-specific auth -- it just walks
+// auth headers. Core never hardcodes service-specific auth - it just walks
 // the contributed rules. Each rule: { hostnamePattern, authType, authConfigKey }.
 //   authType 'basic-pat' -> 'Basic ' + base64(':' + config[authConfigKey])
 //   authType 'bearer'    -> 'Bearer ' + config[authConfigKey]
@@ -2854,7 +2854,7 @@ function writePluginHints() {
     try {
       // Replace the filename placeholder
       let content = template.replace('{{FILENAME}}', filename);
-      // Orchestration and Graph Runs are always on -- the ORCH_* and GRAPH_*
+      // Orchestration and Graph Runs are always on - the ORCH_* and GRAPH_*
       // marker pairs are always kept. Markers themselves get cleaned up by
       // the generic pass below so they don't leak into the rendered file.
       // Strip repo-specific context when in No Repo mode (handles multiple marker pairs)
@@ -2985,7 +2985,7 @@ writePluginHints();
     const cfg = getConfig();
     const wants = [];
     const installedIds = new Set((loadedPlugins || []).map(p => p.id));
-    // Skip anything the user uninstalled on purpose -- re-cloning a plugin the
+    // Skip anything the user uninstalled on purpose - re-cloning a plugin the
     // user just removed is exactly the "I uninstalled it, restarted, it came
     // back" bug we are fixing.
     let tombstoned = [];

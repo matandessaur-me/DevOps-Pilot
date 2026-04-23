@@ -70,7 +70,7 @@ const BROWSER_TOOLS = [
     parameters: { type: 'object', properties: { selector: { type: 'string' }, name: { type: 'string' }, value: { type: 'string' } }, required: ['selector', 'name'] } },
   { name: 'set_text',       description: 'Replace the textContent of the first matching element with the given string.',
     parameters: { type: 'object', properties: { selector: { type: 'string' }, text: { type: 'string' } }, required: ['selector', 'text'] } },
-  { name: 'set_html',       description: 'Replace the innerHTML of the first matching element. Use carefully -- overwrites all children.',
+  { name: 'set_html',       description: 'Replace the innerHTML of the first matching element. Use carefully - overwrites all children.',
     parameters: { type: 'object', properties: { selector: { type: 'string' }, html: { type: 'string' } }, required: ['selector', 'html'] } },
   { name: 'scroll_to',      description: 'Smooth-scroll the page so the first matching element is in view.',
     parameters: { type: 'object', properties: { selector: { type: 'string' }, block: { type: 'string', description: 'center|start|end|nearest (default center).' } }, required: ['selector'] } },
