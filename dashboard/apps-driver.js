@@ -26,6 +26,11 @@ function runPs(script, { timeoutMs = 8000 } = {}) {
     ]);
     let out = '';
     let err = '';
+    // setEncoding('utf8') makes the readable streams emit decoded strings
+    // and buffers any partial multi-byte sequence until the next chunk, so
+    // a UTF-8 char split across two chunks doesn't get corrupted on '+='.
+    p.stdout.setEncoding('utf8');
+    p.stderr.setEncoding('utf8');
     const timer = setTimeout(() => {
       try { p.kill('SIGKILL'); } catch (_) {}
       reject(new Error(`powershell timed out after ${timeoutMs}ms`));

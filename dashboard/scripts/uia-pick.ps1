@@ -17,6 +17,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+# Force UTF-8 stdout so non-ASCII Name/AutomationId values survive intact;
+# the default OEM encoding mangles them to '?' and breaks JSON.parse.
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 
 try {
   Add-Type -AssemblyName UIAutomationClient

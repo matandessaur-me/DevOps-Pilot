@@ -20,6 +20,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+# UIA Name/AutomationId fields can contain non-ASCII (smart quotes, accents,
+# CJK). Default console output encoding on Windows is OEM/ANSI, which would
+# replace those bytes with '?' and corrupt the JSON we hand back to Node.
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 
 try {
   Add-Type -AssemblyName UIAutomationClient
