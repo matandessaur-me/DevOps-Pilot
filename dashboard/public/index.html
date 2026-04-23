@@ -1088,8 +1088,13 @@
     .tab-panel#panel-browser.active { display: flex; }
     .inapp-browser {
       display: flex; flex-direction: column; flex: 1;
-      min-width: 0; min-height: 0; overflow: hidden;
+      min-width: 0; min-height: 0; overflow: hidden; max-width: 100%;
     }
+    /* The browser tab sometimes shows a spurious horizontal scrollbar on the
+       Symphonee frame itself when the emulator or a flex child reports a
+       larger natural width. Clamping overflow-x on the whole chain kills it. */
+    #panel-browser { overflow-x: hidden !important; }
+    .inapp-browser, .inapp-browser-body, .inapp-browser-stage, .inapp-browser-frame { overflow-x: hidden !important; max-width: 100%; }
     .inapp-browser-bar {
       display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
       padding: 6px 8px; background: var(--mantle);
@@ -1341,24 +1346,21 @@
       background: color-mix(in srgb, var(--accent) 16%, transparent);
       border-color: var(--accent); color: var(--accent);
     }
-    /* ── Tools button + dropdown + panel ──────────────────────────────── */
-    .inapp-tools-wrap { position: relative; display: inline-flex; }
-    .inapp-tools-menu {
-      position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
-      min-width: 280px; padding: 6px;
-      background: var(--mantle); border: 1px solid var(--surface1);
-      border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0,0,0,0.35);
-      display: flex; flex-direction: column; gap: 2px;
-    }
-    .inapp-tools-menu[hidden] { display: none; }
+    /* ── Tools button + in-browser sidebar panel ──────────────────────── */
+    .inapp-tools-menu-list { display: flex; flex-direction: column; gap: 2px; margin: -4px; }
+    .inapp-tools-sep { height: 1px; background: var(--surface0); margin: 6px 4px; }
     .inapp-tools-item {
       display: flex; align-items: flex-start; gap: 10px;
       padding: 8px 10px; border-radius: var(--radius);
-      background: transparent; border: none; text-align: left;
-      cursor: pointer; color: var(--text);
-      transition: background 0.12s;
+      background: transparent; border: 1px solid transparent; text-align: left;
+      cursor: pointer; color: var(--text); width: 100%;
+      transition: background 0.12s, border-color 0.12s;
     }
     .inapp-tools-item:hover { background: var(--surface0); }
+    .inapp-tools-item[data-active="1"] {
+      background: color-mix(in srgb, var(--accent) 10%, var(--surface0));
+      border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+    }
     .inapp-tools-item i {
       width: 16px; height: 16px; flex-shrink: 0; margin-top: 2px;
       color: var(--accent);
@@ -1366,6 +1368,20 @@
     .inapp-tools-item-copy { flex: 1; min-width: 0; }
     .inapp-tools-item-title { font: 600 12px var(--font-ui); color: var(--text); }
     .inapp-tools-item-sub { font: 11px var(--font-ui); color: var(--subtext0); margin-top: 2px; line-height: 1.35; }
+    .inapp-tools-pill {
+      align-self: center; flex-shrink: 0;
+      padding: 1px 7px; border-radius: 999px;
+      font: 600 10px var(--font-ui); letter-spacing: 0.5px; text-transform: uppercase;
+      background: var(--accent); color: var(--base);
+    }
+    .inapp-tools-back {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 24px; height: 24px; padding: 0; margin-right: 2px;
+      background: transparent; border: 1px solid transparent; border-radius: 4px;
+      color: var(--subtext0); cursor: pointer; transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .inapp-tools-back:hover { background: var(--surface1); color: var(--text); border-color: var(--overlay0); }
+    .inapp-tools-back i, .inapp-tools-back svg { width: 14px !important; height: 14px !important; }
     .inapp-tools-panel {
       display: none; width: 380px; min-width: 320px; max-width: 55%;
       flex-direction: column; flex-shrink: 0;
@@ -4731,124 +4747,8 @@
           <button class="tab-bar-btn" onclick="inappBrowserReload()" title="Reload"><i data-lucide="rotate-cw" style="width:13px;height:13px;"></i></button>
           <input id="inappBrowserUrl" type="text" placeholder="Enter a URL or search" onkeydown="if(event.key==='Enter')inappBrowserGo()" />
           <button class="tab-bar-btn" onclick="inappBrowserGo()"><i data-lucide="arrow-right-circle" style="width:13px;height:13px;"></i> Go</button>
-          <div class="inapp-tools-wrap">
-            <button class="tab-bar-btn" id="inappToolsBtn" type="button" onclick="toggleInappToolsMenu(event)" title="Web tools"><i data-lucide="wrench" style="width:13px;height:13px;"></i> Tools</button>
-            <div class="inapp-tools-menu" id="inappToolsMenu" hidden>
-              <button class="inapp-tools-item" id="inappInspectBtn" type="button" onclick="toggleInappInspectMode(); closeInappToolsMenu();">
-                <i data-lucide="crosshair"></i>
-                <div class="inapp-tools-item-copy">
-                  <div class="inapp-tools-item-title" id="inappInspectToggleLabel">Inspect element</div>
-                  <div class="inapp-tools-item-sub">Click a page element to highlight and inspect it</div>
-                </div>
-              </button>
-              <div class="inapp-tools-sep"></div>
-              <button class="inapp-tools-item" type="button" onclick="openInappTool('brand')">
-                <i data-lucide="palette"></i>
-                <div class="inapp-tools-item-copy">
-                  <div class="inapp-tools-item-title">Detect brand</div>
-                  <div class="inapp-tools-item-sub">Extract colors, fonts, logo, and meta from the current page</div>
-                </div>
-              </button>
-              <button class="inapp-tools-item" type="button" onclick="openInappTool('inspect')">
-                <i data-lucide="code-2"></i>
-                <div class="inapp-tools-item-copy">
-                  <div class="inapp-tools-item-title">Inspect code</div>
-                  <div class="inapp-tools-item-sub">Human-readable view of tag, attributes, and computed styles</div>
-                </div>
-              </button>
-              <button class="inapp-tools-item" type="button" onclick="openInappTool('reader')">
-                <i data-lucide="book-open"></i>
-                <div class="inapp-tools-item-copy">
-                  <div class="inapp-tools-item-title">Reader view</div>
-                  <div class="inapp-tools-item-sub">Strip the page down to its main article</div>
-                </div>
-              </button>
-              <button class="inapp-tools-item" type="button" onclick="openInappTool('audit')">
-                <i data-lucide="gauge"></i>
-                <div class="inapp-tools-item-copy">
-                  <div class="inapp-tools-item-title">Site audit</div>
-                  <div class="inapp-tools-item-sub">SEO checks, performance timing, accessibility hints</div>
-                </div>
-              </button>
-              <button class="inapp-tools-item" type="button" onclick="openInappTool('emulate')">
-                <i data-lucide="smartphone"></i>
-                <div class="inapp-tools-item-copy">
-                  <div class="inapp-tools-item-title">Emulate device</div>
-                  <div class="inapp-tools-item-sub">Viewport presets, color-scheme, reduced-motion, CPU + network throttle</div>
-                </div>
-              </button>
-              <button class="inapp-tools-item" type="button" onclick="openInappTool('issues')">
-                <i data-lucide="alert-octagon"></i>
-                <div class="inapp-tools-item-copy">
-                  <div class="inapp-tools-item-title">Browser issues</div>
-                  <div class="inapp-tools-item-sub">Live problems Chrome reports (CSP, mixed content, cookies, deprecations)</div>
-                </div>
-              </button>
-              <div class="inapp-tools-sep"></div>
-              <button class="inapp-tools-item" type="button" onclick="toggleInappDarkMode()">
-                <i data-lucide="moon"></i>
-                <div class="inapp-tools-item-copy">
-                  <div class="inapp-tools-item-title" id="inappDarkToggleLabel">Dark-mode overlay</div>
-                  <div class="inapp-tools-item-sub">Invert colors intelligently</div>
-                </div>
-              </button>
-              <button class="inapp-tools-item" type="button" onclick="toggleInappGrayscale()">
-                <i data-lucide="contrast"></i>
-                <div class="inapp-tools-item-copy">
-                  <div class="inapp-tools-item-title" id="inappGrayToggleLabel">Grayscale</div>
-                  <div class="inapp-tools-item-sub">Strip color for design/accessibility review</div>
-                </div>
-              </button>
-              <button class="inapp-tools-item" type="button" onclick="toggleInappFocusMode()">
-                <i data-lucide="focus"></i>
-                <div class="inapp-tools-item-copy">
-                  <div class="inapp-tools-item-title" id="inappFocusToggleLabel">Focus mode</div>
-                  <div class="inapp-tools-item-sub">Hide navs, banners, sticky overlays</div>
-                </div>
-              </button>
-              <div class="inapp-tools-sep"></div>
-              <button class="inapp-tools-item" type="button" onclick="openInappTool('patches')">
-                <i data-lucide="history"></i>
-                <div class="inapp-tools-item-copy">
-                  <div class="inapp-tools-item-title">Saved patches</div>
-                  <div class="inapp-tools-item-sub">Re-apply saved DOM/style edits for this URL</div>
-                </div>
-              </button>
-              <button class="inapp-tools-item" type="button" onclick="showInappShortcutsHelp()">
-                <i data-lucide="keyboard"></i>
-                <div class="inapp-tools-item-copy">
-                  <div class="inapp-tools-item-title">Keyboard shortcuts</div>
-                  <div class="inapp-tools-item-sub">i / h / ? / Esc</div>
-                </div>
-              </button>
-            </div>
-          </div>
-          <div class="inapp-tools-wrap">
-            <button class="tab-bar-btn" id="inappMoreBtn" type="button" onclick="toggleInappMoreMenu(event)" title="More"><i data-lucide="more-horizontal" style="width:13px;height:13px;"></i></button>
-            <div class="inapp-tools-menu" id="inappMoreMenu" hidden>
-              <button class="inapp-tools-item" type="button" onclick="resetBrowserTab(); closeInappMoreMenu();">
-                <i data-lucide="refresh-ccw"></i>
-                <div class="inapp-tools-item-copy">
-                  <div class="inapp-tools-item-title">Reset tab</div>
-                  <div class="inapp-tools-item-sub">Drop the webview, clear chat, start fresh</div>
-                </div>
-              </button>
-              <button class="inapp-tools-item" type="button" onclick="inappBrowserOpenExternal(); closeInappMoreMenu();">
-                <i data-lucide="external-link"></i>
-                <div class="inapp-tools-item-copy">
-                  <div class="inapp-tools-item-title">Open external</div>
-                  <div class="inapp-tools-item-sub">Open this URL in your system browser</div>
-                </div>
-              </button>
-              <div class="inapp-tools-sep"></div>
-              <div class="inapp-more-zoom" role="group" aria-label="Browser zoom">
-                <span class="inapp-more-zoom-label">Zoom</span>
-                <button class="tab-bar-btn" type="button" onclick="inappBrowserZoomOut()" title="Zoom out"><i data-lucide="minus" style="width:13px;height:13px;"></i></button>
-                <button class="inapp-browser-zoom-value" type="button" id="inappBrowserZoomValue" onclick="inappBrowserZoomReset()" title="Reset zoom">100%</button>
-                <button class="tab-bar-btn" type="button" onclick="inappBrowserZoomIn()" title="Zoom in"><i data-lucide="plus" style="width:13px;height:13px;"></i></button>
-              </div>
-            </div>
-          </div>
+          <button class="tab-bar-btn" id="inappToolsBtn" type="button" onclick="toggleInappToolsPanelMenu()" title="Web tools (T)"><i data-lucide="wrench" style="width:13px;height:13px;"></i> Tools</button>
+          <button class="tab-bar-btn" id="inappMoreBtn" type="button" onclick="toggleInappMorePanel()" title="More"><i data-lucide="more-horizontal" style="width:13px;height:13px;"></i></button>
           <button class="inapp-agent-chip" id="inappAgentChip" onclick="toggleBrowserAgentPanel()" title="Ask AI to drive this browser">
             <span class="inapp-agent-chip-dot"></span>
             <span>Ask AI</span>
@@ -5998,7 +5898,14 @@ const TERM_THEMES = {
 
 let activeThemeId = 'industrial-blue';
 function getActiveTermTheme() {
-  return TERM_THEMES['_active'] || TERM_THEMES[activeThemeId] || TERM_THEMES['industrial-blue'];
+  const base = TERM_THEMES['_active'] || TERM_THEMES[activeThemeId] || TERM_THEMES['industrial-blue'];
+  // Mirror --mantle so the terminal background blends with the sidebar,
+  // intel panel, center padding, and rails (no visual seam around xterm).
+  try {
+    const mantle = getComputedStyle(document.documentElement).getPropertyValue('--mantle').trim();
+    if (mantle) return Object.assign({}, base, { background: mantle });
+  } catch (_) {}
+  return base;
 }
 
 let activeCli = localStorage.getItem('symphonee-cli') || 'claude';
@@ -13961,6 +13868,19 @@ function _handleInappBrowserConsoleMessage(message) {
         try { input.setSelectionRange(input.value.length, input.value.length); } catch (_) {}
       }
     }
+    // One-shot capture: turn the picker off after a target lands so the user
+    // must reopen Tools > Select / Inspect code to grab another element.
+    // We disarm inline (not via toggleInappInspectMode, which would also
+    // wipe _browserInspectState.selected and blank the Inspect code panel).
+    if (_browserInspectState.enabled) {
+      _browserInspectState.enabled = false;
+      _syncInappInspectButton();
+      const view = _ensureInappBrowser();
+      if (view) { try { _applyInappInspectMode(view); } catch (_) {} }
+      if (_inappToolsState.open && _inappToolsState.current === 'menu') {
+        try { _renderInappToolsMenu(); } catch (_) {}
+      }
+    }
   } catch (_) {}
 }
 // Handle a shortcut forwarded from inside the webview via console.info.
@@ -13984,10 +13904,9 @@ function _dispatchForwardedKey(payload) {
   const low = k.toLowerCase();
   if (low === 'i') { toggleInappInspectMode(); return; }
   if (low === 'h') { if (shift) { _ensureSymKit().then(() => _symKitCall('unhideAll')); toast('Un-hid all', 'info', { duration: 1000 }); } else if (_inspectActiveSelector) _inspectHideSelected(); return; }
-  if (low === 'd') { toggleInappDarkMode(); return; }
   if (low === 'g') { toggleInappGrayscale(); return; }
   if (low === 'f') { toggleInappFocusMode(); return; }
-  if (low === 't') { toggleInappToolsMenu(); return; }
+  if (low === 't') { toggleInappToolsPanelMenu(); return; }
   if (low === 'e') { _inspectToggleEdit(); return; }
 }
 function toggleInappInspectMode(forceState) {
@@ -17340,12 +17259,10 @@ async function _ensureSymKit() {
 // On navigation, injected styles are wiped but renderer state isn't. Reset
 // the flags + their menu labels so they match reality on the new page.
 function _resetOverlayStateForNewPage() {
-  _inappToolsState.darkMode = false;
   _inappToolsState.grayscale = false;
   _inappToolsState.focus = false;
-  const dark = document.getElementById('inappDarkToggleLabel'); if (dark) dark.textContent = 'Dark-mode overlay';
-  const gray = document.getElementById('inappGrayToggleLabel'); if (gray) gray.textContent = 'Grayscale';
-  const focus = document.getElementById('inappFocusToggleLabel'); if (focus) focus.textContent = 'Focus mode';
+  // Re-render the tools menu if it's currently showing, so toggle pills match reality.
+  if (_inappToolsState.open && _inappToolsState.current === 'menu') _renderInappToolsMenu();
 }
 async function _symKitCall(method, ...args) {
   const view = await _ensureSymKit();
@@ -17354,62 +17271,164 @@ async function _symKitCall(method, ...args) {
   try { return await view.executeJavaScript(js, true); } catch (_) { return null; }
 }
 
-// ── In-browser Tools (Brand detect, Inspect code, Save page, Reader) ─────
-const _inappToolsState = { open: false, current: null, brand: null, audit: null, patches: { loaded: null, list: [] }, darkMode: false, grayscale: false, focus: false };
+// ── In-browser Tools (sidebar menu + sub-views) ─────────────────────────
+const _inappToolsState = { open: false, current: null, brand: null, audit: null, patches: { loaded: null, list: [] }, grayscale: false, focus: false };
 
-function toggleInappToolsMenu(ev) {
-  if (ev) ev.stopPropagation();
-  closeInappMoreMenu && closeInappMoreMenu();
-  const menu = document.getElementById('inappToolsMenu');
-  if (!menu) return;
-  const nowHidden = !menu.hasAttribute('hidden');
-  if (nowHidden) menu.setAttribute('hidden', '');
-  else menu.removeAttribute('hidden');
-  if (!menu.hasAttribute('hidden')) {
-    setTimeout(() => {
-      document.addEventListener('click', _closeInappToolsMenuOnClickAway, { once: true });
-    }, 0);
-  }
-}
-function _closeInappToolsMenuOnClickAway(ev) {
-  const menu = document.getElementById('inappToolsMenu');
-  const wrap = document.querySelector('.inapp-tools-wrap');
-  if (!menu || !wrap) return;
-  if (wrap.contains(ev.target)) return;
-  menu.setAttribute('hidden', '');
-}
-function _closeInappToolsMenu() {
-  const menu = document.getElementById('inappToolsMenu');
-  if (menu) menu.setAttribute('hidden', '');
-}
-function closeInappToolsMenu() { _closeInappToolsMenu(); }
+// Legacy no-ops so any stray callers (keyboard shortcuts, etc.) keep working.
+function toggleInappToolsMenu(ev) { if (ev && ev.stopPropagation) ev.stopPropagation(); toggleInappToolsPanelMenu(); }
+function closeInappToolsMenu() {}
+function _closeInappToolsMenu() {}
 
-function toggleInappMoreMenu(ev) {
-  if (ev) ev.stopPropagation();
-  _closeInappToolsMenu();
-  const menu = document.getElementById('inappMoreMenu');
-  if (!menu) return;
-  const willOpen = menu.hasAttribute('hidden');
-  if (willOpen) menu.removeAttribute('hidden');
-  else menu.setAttribute('hidden', '');
-  if (willOpen) {
-    setTimeout(() => {
-      document.addEventListener('click', _closeInappMoreMenuOnClickAway, { once: true });
-    }, 0);
+// Open (or close) the tools panel and show the top-level menu.
+function toggleInappToolsPanelMenu() {
+  if (_inappToolsState.open && _inappToolsState.current === 'menu') {
+    closeInappToolsPanel();
+    return;
   }
+  _openInappToolsPanel();
+  _inappToolsState.current = 'menu';
+  _renderInappToolsMenu();
 }
-function _closeInappMoreMenuOnClickAway(ev) {
-  const menu = document.getElementById('inappMoreMenu');
-  const btn = document.getElementById('inappMoreBtn');
-  if (!menu || !btn) return;
-  // Keep the menu open for clicks on its own button or inside the menu itself.
-  const wrap = btn.closest('.inapp-tools-wrap');
-  if (wrap && wrap.contains(ev.target)) return;
-  menu.setAttribute('hidden', '');
+
+// Tool registry: items shown in the menu. Keep order stable.
+const _INAPP_TOOLS_ITEMS = [
+  { kind: 'select',   icon: 'crosshair',     title: 'Select element',   sub: 'Select and ask AI about this element.', toggle: true },
+  { kind: 'sep' },
+  { kind: 'brand',    icon: 'palette',       title: 'Detect brand',     sub: 'Extract colors, fonts, logo, and meta from the current page.' },
+  { kind: 'inspect',  icon: 'code-2',        title: 'Inspect code',     sub: 'Human-readable view of tag, attributes, and computed styles.' },
+  { kind: 'reader',   icon: 'book-open',     title: 'Reader view',      sub: 'Strip the page down to its main article.' },
+  { kind: 'audit',    icon: 'gauge',         title: 'Site audit',       sub: 'SEO checks, performance timing, accessibility hints.' },
+  { kind: 'emulate',  icon: 'smartphone',    title: 'Emulate device',   sub: 'Viewport presets, color-scheme, reduced-motion.' },
+  { kind: 'issues',   icon: 'alert-octagon', title: 'Browser issues',   sub: 'Live problems Chrome reports (CSP, mixed content, cookies).' },
+  { kind: 'sep' },
+  { kind: 'grayscale', icon: 'contrast', title: 'Grayscale',  sub: 'Strip color for design/accessibility review.', toggle: true },
+  { kind: 'focus',     icon: 'focus',    title: 'Focus mode', sub: 'Hide navs, banners, sticky overlays.',        toggle: true },
+  { kind: 'sep' },
+  { kind: 'patches',  icon: 'history',   title: 'Saved patches',      sub: 'Re-apply saved DOM/style edits for this URL.' },
+  { kind: 'shortcuts', icon: 'keyboard', title: 'Keyboard shortcuts', sub: 'i / h / ? / Esc' },
+];
+
+function _renderInappToolsMenu() {
+  _setInappToolsTitle('Tools');
+  const body = document.getElementById('inappToolsBody');
+  if (!body) return;
+  const esc = _escapeHtml;
+  const isActive = (kind) => {
+    if (kind === 'select')    return !!(window._browserInspectState && _browserInspectState.enabled);
+    if (kind === 'grayscale') return !!_inappToolsState.grayscale;
+    if (kind === 'focus')     return !!_inappToolsState.focus;
+    return false;
+  };
+  const rows = _INAPP_TOOLS_ITEMS.map((it) => {
+    if (it.kind === 'sep') return '<div class="inapp-tools-sep"></div>';
+    const active = it.toggle && isActive(it.kind) ? ' data-active="1"' : '';
+    const badge = (it.toggle && isActive(it.kind)) ? '<span class="inapp-tools-pill">On</span>' : '';
+    return '<button class="inapp-tools-item" type="button"' + active + ' data-tool-kind="' + esc(it.kind) + '">'
+      + '<i data-lucide="' + esc(it.icon) + '"></i>'
+      + '<div class="inapp-tools-item-copy">'
+        + '<div class="inapp-tools-item-title">' + esc(it.title) + '</div>'
+        + '<div class="inapp-tools-item-sub">' + esc(it.sub) + '</div>'
+      + '</div>'
+      + badge
+      + '</button>';
+  }).join('');
+  body.innerHTML = '<div class="inapp-tools-menu-list">' + rows + '</div>';
+  body.onclick = function(ev) {
+    const item = ev.target && ev.target.closest && ev.target.closest('[data-tool-kind]');
+    if (!item) return;
+    ev.preventDefault();
+    const kind = item.getAttribute('data-tool-kind');
+    _runInappToolFromMenu(kind);
+  };
+  try { if (window.lucide && lucide.createIcons) lucide.createIcons(); } catch (_) {}
 }
-function closeInappMoreMenu() {
-  const menu = document.getElementById('inappMoreMenu');
-  if (menu) menu.setAttribute('hidden', '');
+
+function _runInappToolFromMenu(kind) {
+  if (kind === 'select')    { toggleInappInspectMode(); _renderInappToolsMenu(); return; }
+  if (kind === 'grayscale') { toggleInappGrayscale().then(() => _renderInappToolsMenu()); return; }
+  if (kind === 'focus')     { toggleInappFocusMode().then(() => _renderInappToolsMenu()); return; }
+  if (kind === 'shortcuts') { showInappShortcutsHelp(); return; }
+  openInappTool(kind);
+}
+
+// Back button for sub-views, rendered as the panel head's leading affordance.
+function _setInappToolsHeadBack(label) {
+  const head = document.querySelector('.inapp-tools-head');
+  if (!head) return;
+  const old = head.querySelector('.inapp-tools-back');
+  if (old) old.remove();
+  if (!label) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'inapp-tools-back';
+  btn.title = 'Back to tools';
+  btn.setAttribute('aria-label', 'Back to tools');
+  btn.innerHTML = '<i data-lucide="chevron-left"></i>';
+  btn.onclick = () => { _inappToolsState.current = 'menu'; _renderInappToolsMenu(); _setInappToolsHeadBack(''); };
+  head.prepend(btn);
+  try { if (window.lucide && lucide.createIcons) lucide.createIcons({ nodes: [btn] }); } catch (_) {}
+}
+
+// Legacy shims so any stray callers continue to work.
+function toggleInappMoreMenu(ev) { if (ev && ev.stopPropagation) ev.stopPropagation(); toggleInappMorePanel(); }
+function closeInappMoreMenu() {}
+
+// "More" opens inside the same tools sidebar as a dedicated sub-view.
+function toggleInappMorePanel() {
+  if (_inappToolsState.open && _inappToolsState.current === 'more') {
+    closeInappToolsPanel();
+    return;
+  }
+  _openInappToolsPanel();
+  _inappToolsState.current = 'more';
+  _setInappToolsHeadBack('');
+  _setInappToolsTitle('More');
+  _renderInappMorePanel();
+}
+function _renderInappMorePanel() {
+  const body = document.getElementById('inappToolsBody');
+  if (!body) return;
+  body.onclick = null;
+  body.innerHTML = `
+    <div class="inapp-tools-menu-list">
+      <button class="inapp-tools-item" type="button" data-more-action="reset">
+        <i data-lucide="refresh-ccw"></i>
+        <div class="inapp-tools-item-copy">
+          <div class="inapp-tools-item-title">Reset tab</div>
+          <div class="inapp-tools-item-sub">Drop the webview, clear chat, start fresh.</div>
+        </div>
+      </button>
+      <button class="inapp-tools-item" type="button" data-more-action="external">
+        <i data-lucide="external-link"></i>
+        <div class="inapp-tools-item-copy">
+          <div class="inapp-tools-item-title">Open external</div>
+          <div class="inapp-tools-item-sub">Open this URL in your system browser.</div>
+        </div>
+      </button>
+      <div class="inapp-tools-sep"></div>
+      <div style="display:flex;flex-direction:column;gap:6px;padding:4px 2px;">
+        <div style="font:600 10px var(--font-ui);color:var(--subtext1);letter-spacing:0.5px;text-transform:uppercase;">Zoom</div>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <button class="tab-bar-btn" type="button" data-more-action="zoom-out" title="Zoom out"><i data-lucide="minus" style="width:13px;height:13px;"></i></button>
+          <button class="inapp-browser-zoom-value" type="button" id="inappBrowserZoomValue" data-more-action="zoom-reset" title="Reset zoom">100%</button>
+          <button class="tab-bar-btn" type="button" data-more-action="zoom-in" title="Zoom in"><i data-lucide="plus" style="width:13px;height:13px;"></i></button>
+        </div>
+      </div>
+    </div>
+  `;
+  body.onclick = function(ev) {
+    const t = ev.target && ev.target.closest && ev.target.closest('[data-more-action]');
+    if (!t) return;
+    ev.preventDefault();
+    const action = t.getAttribute('data-more-action');
+    if (action === 'reset')       { resetBrowserTab(); closeInappToolsPanel(); return; }
+    if (action === 'external')    { inappBrowserOpenExternal(); return; }
+    if (action === 'zoom-out')    { inappBrowserZoomOut(); return; }
+    if (action === 'zoom-reset')  { inappBrowserZoomReset(); return; }
+    if (action === 'zoom-in')     { inappBrowserZoomIn(); return; }
+  };
+  try { _syncInappBrowserZoomUi(); } catch (_) {}
+  try { if (window.lucide && lucide.createIcons) lucide.createIcons(); } catch (_) {}
 }
 function _openInappToolsPanel() {
   const p = document.getElementById('inappToolsPanel');
@@ -17421,9 +17440,16 @@ function closeInappToolsPanel() {
   const p = document.getElementById('inappToolsPanel');
   if (p) p.classList.remove('open');
   const wasInspect = _inappToolsState.current === 'inspect';
+  const wasEmulate = _inappToolsState.current === 'emulate';
   _inappToolsState.open = false;
   _inappToolsState.current = null;
+  _setInappToolsHeadBack('');
   if (wasInspect && _browserInspectState.enabled) toggleInappInspectMode(false);
+  // Auto-reset device emulation on close so users can't get stuck with a
+  // glitched page after leaving the Emulate tool with overrides applied.
+  if (wasEmulate && typeof _emulateState !== 'undefined' && (_emulateState.device !== 'off' || _emulateState.colorScheme || _emulateState.reducedMotion || _emulateState.contrast || _emulateState.network !== 'no-throttle' || _emulateState.cpuRate !== 1)) {
+    try { _resetAllEmulation(); } catch (_) {}
+  }
 }
 function _setInappToolsTitle(text) {
   const t = document.getElementById('inappToolsTitle');
@@ -17445,9 +17471,13 @@ function _escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 }
 async function openInappTool(kind) {
-  _closeInappToolsMenu();
   _openInappToolsPanel();
   _inappToolsState.current = kind;
+  // Show a back arrow in the header so users can return to the tools menu.
+  _setInappToolsHeadBack('back');
+  // Reset the menu click handler since sub-views install their own.
+  const body = document.getElementById('inappToolsBody');
+  if (body) body.onclick = null;
   switch (kind) {
     case 'brand':     await _runInappBrandDetect(); break;
     case 'inspect':   _runInappCodeInspect(); break;
@@ -17462,17 +17492,20 @@ async function openInappTool(kind) {
 
 // ── Brand detect ─────────────────────────────────────────────────────────
 const _BRAND_EXTRACT_SCRIPT = `(function(){
-  function rgbToHex(rgb){
-    if (!rgb) return null;
-    var m = String(rgb).match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([0-9.]+))?\\)/);
+  function parseColor(str){
+    if (!str) return null;
+    var m = String(str).match(/rgba?\\((-?[0-9.]+)[,\\s]+(-?[0-9.]+)[,\\s]+(-?[0-9.]+)(?:[,/\\s]+([0-9.]+%?))?\\)/);
     if (!m) return null;
-    var a = m[4] != null ? parseFloat(m[4]) : 1;
-    if (a === 0) return null;
-    function h(v){ var x=parseInt(v,10).toString(16); return x.length<2?'0'+x:x; }
-    return '#' + h(m[1]) + h(m[2]) + h(m[3]);
+    var a = m[4] == null ? 1 : (String(m[4]).slice(-1) === '%' ? parseFloat(m[4]) / 100 : parseFloat(m[4]));
+    if (a <= 0.02) return null;
+    var r = Math.round(Math.max(0, Math.min(255, parseFloat(m[1]))));
+    var g = Math.round(Math.max(0, Math.min(255, parseFloat(m[2]))));
+    var b = Math.round(Math.max(0, Math.min(255, parseFloat(m[3]))));
+    function h(v){ var x = v.toString(16); return x.length < 2 ? '0' + x : x; }
+    return { hex: ('#' + h(r) + h(g) + h(b)).toLowerCase(), a: a };
   }
   function getMeta(name){
-    var el = document.querySelector('meta[name="'+name+'"], meta[property="'+name+'"]');
+    var el = document.querySelector('meta[name="' + name + '"], meta[property="' + name + '"]');
     return el ? el.getAttribute('content') : null;
   }
   var title = document.title;
@@ -17484,37 +17517,124 @@ const _BRAND_EXTRACT_SCRIPT = `(function(){
   var description = getMeta('og:description') || getMeta('description');
   var faviconEl = document.querySelector('link[rel~="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]');
   var favicon = faviconEl ? faviconEl.href : (location.origin + '/favicon.ico');
-  var palette = [];
+
+  // Palette: {hex, roles: Set, count}. Roles tell the user what the color is
+  // used for (background / text / link / button-bg / button-text / border / accent / css-var).
+  var byHex = {};
   function add(hex, role){
     if (!hex) return;
-    hex = hex.toLowerCase();
-    if (palette.find(function(p){return p.hex===hex;})) return;
-    palette.push({ hex: hex, role: role });
+    hex = String(hex).toLowerCase();
+    if (!byHex[hex]) byHex[hex] = { hex: hex, roles: {}, count: 0 };
+    byHex[hex].roles[role] = (byHex[hex].roles[role] || 0) + 1;
+    byHex[hex].count++;
   }
+  function sample(el, role, prop){
+    if (!el) return;
+    try {
+      var c = parseColor(getComputedStyle(el).getPropertyValue(prop));
+      if (c) add(c.hex, role);
+    } catch (_) {}
+  }
+  function sampleBorder(el){
+    if (!el) return;
+    try {
+      var cs = getComputedStyle(el);
+      ['border-top-color','border-right-color','border-bottom-color','border-left-color'].forEach(function(p){
+        var c = parseColor(cs.getPropertyValue(p));
+        if (c) add(c.hex, 'border');
+      });
+    } catch (_) {}
+  }
+
+  // Body defaults
   var body = document.body;
-  if (body){
-    add(rgbToHex(getComputedStyle(body).backgroundColor), 'background');
-    add(rgbToHex(getComputedStyle(body).color), 'text');
-  }
-  Array.from(document.querySelectorAll('h1, h2')).slice(0,3).forEach(function(h){ add(rgbToHex(getComputedStyle(h).color), 'heading'); });
-  Array.from(document.querySelectorAll('a')).slice(0,3).forEach(function(a){ add(rgbToHex(getComputedStyle(a).color), 'link'); });
-  Array.from(document.querySelectorAll('button, [class*="btn"]')).slice(0,3).forEach(function(b){
-    add(rgbToHex(getComputedStyle(b).backgroundColor), 'button');
-    add(rgbToHex(getComputedStyle(b).color), 'button-text');
+  sample(body, 'background', 'background-color');
+  sample(body, 'text', 'color');
+
+  // CSS custom properties on :root / html / body that look like color hex / rgb
+  var CSSVAR_COLOR_RE = /^(#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\\(|hsla?\\()/i;
+  var cssVars = [];
+  try {
+    var scopes = [document.documentElement, document.body];
+    scopes.forEach(function(scope){
+      if (!scope) return;
+      var cs = getComputedStyle(scope);
+      for (var i = 0; i < cs.length; i++) {
+        var name = cs[i];
+        if (name && name.indexOf('--') === 0) {
+          var raw = cs.getPropertyValue(name).trim();
+          if (CSSVAR_COLOR_RE.test(raw)) {
+            var c = parseColor(raw);
+            if (!c && raw.charAt(0) === '#') {
+              // Expand 3-digit hex to 6-digit.
+              var h = raw.replace('#','');
+              if (h.length === 3) h = h.split('').map(function(x){return x+x;}).join('');
+              h = h.slice(0, 6);
+              c = /^[0-9a-f]{6}$/i.test(h) ? { hex: ('#' + h).toLowerCase(), a: 1 } : null;
+            }
+            if (c) {
+              add(c.hex, 'css-var');
+              if (cssVars.length < 24) cssVars.push({ name: name, hex: c.hex });
+            }
+          }
+        }
+      }
+    });
+  } catch (_) {}
+
+  // Headings + links
+  Array.from(document.querySelectorAll('h1, h2, h3')).slice(0, 6).forEach(function(h){ sample(h, 'heading', 'color'); });
+  Array.from(document.querySelectorAll('a')).slice(0, 8).forEach(function(a){ sample(a, 'link', 'color'); });
+
+  // Buttons: distinguish background from text explicitly.
+  Array.from(document.querySelectorAll('button, [role="button"], [class*="btn"], .button, input[type="submit"], input[type="button"]')).slice(0, 10).forEach(function(b){
+    sample(b, 'button-bg', 'background-color');
+    sample(b, 'button-text', 'color');
+    sampleBorder(b);
   });
-  if (themeColor) add(themeColor.toLowerCase(), 'theme');
+
+  // Form fields
+  var firstInput = document.querySelector('input[type="text"], input[type="email"], input[type="search"], textarea');
+  if (firstInput) { sample(firstInput, 'input-bg', 'background-color'); sample(firstInput, 'input-text', 'color'); sampleBorder(firstInput); }
+
+  // Theme color meta
+  if (themeColor) {
+    var tc = parseColor(themeColor) || (themeColor.charAt(0) === '#' ? { hex: themeColor.toLowerCase() } : null);
+    if (tc) add(tc.hex, 'theme');
+  }
+
+  // Build palette. Each entry carries a primary label (most common role) + all roles.
+  var ROLE_PRIORITY = ['theme','background','text','button-bg','button-text','link','heading','input-bg','input-text','border','css-var'];
+  var palette = Object.keys(byHex).map(function(hex){
+    var e = byHex[hex];
+    var roles = Object.keys(e.roles);
+    var primary = roles.slice().sort(function(a, b){
+      var pa = ROLE_PRIORITY.indexOf(a); if (pa < 0) pa = 99;
+      var pb = ROLE_PRIORITY.indexOf(b); if (pb < 0) pb = 99;
+      return pa - pb;
+    })[0] || 'color';
+    return { hex: hex, role: primary, roles: roles, count: e.count };
+  }).sort(function(a, b){
+    var pa = ROLE_PRIORITY.indexOf(a.role); if (pa < 0) pa = 99;
+    var pb = ROLE_PRIORITY.indexOf(b.role); if (pb < 0) pb = 99;
+    if (pa !== pb) return pa - pb;
+    return b.count - a.count;
+  }).slice(0, 24);
+
+  // Fonts
   var fonts = [];
   function addFont(family, role, size){
     family = (family || '').trim(); if (!family) return;
-    var existing = fonts.find(function(f){return f.family===family;});
-    if (existing){ if (existing.roles.indexOf(role)<0) existing.roles.push(role); return; }
+    var existing = fonts.find(function(f){return f.family === family;});
+    if (existing){ if (existing.roles.indexOf(role) < 0) existing.roles.push(role); return; }
     fonts.push({ family: family, roles: [role], size: size });
   }
   if (body){ addFont(getComputedStyle(body).fontFamily, 'body', getComputedStyle(body).fontSize); }
   var h1 = document.querySelector('h1'); if (h1){ addFont(getComputedStyle(h1).fontFamily, 'heading', getComputedStyle(h1).fontSize); }
   var h2 = document.querySelector('h2'); if (h2){ addFont(getComputedStyle(h2).fontFamily, 'heading', getComputedStyle(h2).fontSize); }
   var btn = document.querySelector('button'); if (btn){ addFont(getComputedStyle(btn).fontFamily, 'ui', getComputedStyle(btn).fontSize); }
-  return { title: title, url: url, host: host, themeColor: themeColor, ogImage: ogImage, ogSiteName: ogSiteName, description: description, favicon: favicon, palette: palette.slice(0,12), fonts: fonts.slice(0,4) };
+
+  return { title: title, url: url, host: host, themeColor: themeColor, ogImage: ogImage, ogSiteName: ogSiteName, description: description, favicon: favicon, palette: palette, cssVars: cssVars, fonts: fonts.slice(0, 4) };
 })();`;
 
 async function _runInappBrandDetect() {
@@ -17539,11 +17659,27 @@ async function _runInappBrandDetect() {
 function _renderInappBrandPanel(data) {
   const brandName = data.ogSiteName || data.title || data.host;
   const logoSrc = data.ogImage || data.favicon;
-  const palette = (data.palette || []).map((p) => `
-    <div class="brand-swatch" onclick="_copyText('${_escapeHtml(p.hex)}')" title="Click to copy ${_escapeHtml(p.hex)}">
+  const roleLabel = (r) => ({
+    'theme':'Theme','background':'Background','text':'Text','link':'Link','heading':'Heading',
+    'button-bg':'Button bg','button-text':'Button text','border':'Border',
+    'input-bg':'Input bg','input-text':'Input text','css-var':'CSS variable','color':'Color',
+  })[r] || r;
+  const palette = (data.palette || []).map((p) => {
+    const extraRoles = (p.roles || []).filter(r => r !== p.role);
+    const subtitle = extraRoles.length ? extraRoles.map(roleLabel).join(', ') : '';
+    return `
+    <div class="brand-swatch" onclick="_copyText('${_escapeHtml(p.hex)}')" title="${_escapeHtml(p.hex)} — ${_escapeHtml(roleLabel(p.role))}${subtitle ? ' (also: ' + _escapeHtml(subtitle) + ')' : ''}">
       <div class="brand-swatch-chip" style="background:${_escapeHtml(p.hex)}"></div>
       <div class="brand-swatch-hex">${_escapeHtml(p.hex)}</div>
-      <div class="brand-swatch-role">${_escapeHtml(p.role)}</div>
+      <div class="brand-swatch-role">${_escapeHtml(roleLabel(p.role))}</div>
+      ${subtitle ? `<div class="brand-swatch-sub" style="font:10px var(--font-ui);color:var(--subtext0);text-align:center;margin-top:1px;">${_escapeHtml(subtitle)}</div>` : ''}
+    </div>
+  `;
+  }).join('');
+  const cssVars = (data.cssVars || []).map((v) => `
+    <div class="brand-meta-row" onclick="_copyText('${_escapeHtml(v.name)}')" style="cursor:pointer;" title="Click to copy ${_escapeHtml(v.name)}">
+      <span class="k" style="display:inline-flex;align-items:center;gap:6px;"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${_escapeHtml(v.hex)};border:1px solid rgba(0,0,0,0.15);"></span><code>${_escapeHtml(v.name)}</code></span>
+      <span class="v" style="font:500 11px var(--font-mono);">${_escapeHtml(v.hex)}</span>
     </div>
   `).join('');
   const fonts = (data.fonts || []).map((f) => `
@@ -17568,6 +17704,7 @@ function _renderInappBrandPanel(data) {
       </div>
     </div>
     ${palette ? '<div class="brand-section-title">Palette</div><div class="brand-palette">' + palette + '</div>' : ''}
+    ${cssVars ? '<div class="brand-section-title">CSS variables</div><div style="display:flex;flex-direction:column;gap:4px;">' + cssVars + '</div>' : ''}
     ${fonts ? '<div class="brand-section-title">Typography</div><div style="display:flex;flex-direction:column;gap:8px;">' + fonts + '</div>' : ''}
     ${meta ? '<div class="brand-section-title">Meta</div><div style="display:flex;flex-direction:column;gap:4px;">' + meta + '</div>' : ''}
     <div class="inapp-tools-actions" style="margin:8px -12px -12px;">
@@ -18295,16 +18432,8 @@ function _clearAllPatches() {
 }
 
 // ── Dark / grayscale / focus toggles ────────────────────────────────────
-async function toggleInappDarkMode() {
-  _closeInappToolsMenu();
-  _inappToolsState.darkMode = !_inappToolsState.darkMode;
-  await _ensureSymKit();
-  await _symKitCall('applyDarkMode', _inappToolsState.darkMode);
-  const label = document.getElementById('inappDarkToggleLabel');
-  if (label) label.textContent = _inappToolsState.darkMode ? 'Dark-mode overlay (on)' : 'Dark-mode overlay';
-}
+// Dark-mode overlay was removed per user feedback (no clear use case).
 async function toggleInappGrayscale() {
-  _closeInappToolsMenu();
   _inappToolsState.grayscale = !_inappToolsState.grayscale;
   await _ensureSymKit();
   await _symKitCall('applyGrayscale', _inappToolsState.grayscale);
@@ -18312,7 +18441,6 @@ async function toggleInappGrayscale() {
   if (label) label.textContent = _inappToolsState.grayscale ? 'Grayscale (on)' : 'Grayscale';
 }
 async function toggleInappFocusMode() {
-  _closeInappToolsMenu();
   _inappToolsState.focus = !_inappToolsState.focus;
   await _ensureSymKit();
   await _symKitCall('applyFocusMode', _inappToolsState.focus);
@@ -18321,7 +18449,7 @@ async function toggleInappFocusMode() {
 }
 
 // ── Shortcuts help ──────────────────────────────────────────────────────
-function showInappShortcutsHelp() { _closeInappToolsMenu(); const o = document.getElementById('symShortcutsOverlay'); if (o) o.classList.add('open'); }
+function showInappShortcutsHelp() { const o = document.getElementById('symShortcutsOverlay'); if (o) o.classList.add('open'); }
 function hideInappShortcutsHelp() { const o = document.getElementById('symShortcutsOverlay'); if (o) o.classList.remove('open'); }
 
 // ── Global keyboard shortcuts (Browser tab only; ignores field focus) ───
@@ -18349,15 +18477,16 @@ document.addEventListener('keydown', function(ev) {
     else if (_inspectActiveSelector) _inspectHideSelected();
     ev.preventDefault(); return;
   }
-  if (k === 'd') { toggleInappDarkMode(); ev.preventDefault(); return; }
   if (k === 'g') { toggleInappGrayscale(); ev.preventDefault(); return; }
   if (k === 'f') { toggleInappFocusMode(); ev.preventDefault(); return; }
-  if (k === 't') { toggleInappToolsMenu(); ev.preventDefault(); return; }
+  if (k === 't') { toggleInappToolsPanelMenu(); ev.preventDefault(); return; }
   if (k === 'k') { toggleBrowserAgentPanel(); ev.preventDefault(); return; }
   if (k === 'e') { _inspectToggleEdit(); ev.preventDefault(); return; }
 }, true);
 
 // ── Reader view (overlay + scoped minimalist stylesheet) ────────────────
+const _READER_FONT_SIZES = ['15px', '17px', '19px', '21px', '24px'];
+const _inappReaderState = { active: false, sizeIdx: 2, words: 0, minutes: 0, rootTag: '' };
 async function _runInappReaderView() {
   _setInappToolsTitle('Reader view');
   _setInappToolsBodyLoading('Building reader view...');
@@ -18445,69 +18574,45 @@ async function _runInappReaderView() {
     overlay.id = '__symphoneeReaderOverlay';
     overlay.className = 'sym-rv';
     var style = document.createElement('style');
+    // Minimal, classless-style stylesheet -- reads like a Markdown preview.
+    // No drop caps, no book/serif typography, no floating buttons.
     style.textContent = [
-      '.sym-rv{position:fixed;inset:0;z-index:2147483647;background:#fbfaf6;overflow:auto;-webkit-font-smoothing:antialiased;}',
+      '.sym-rv{position:fixed;inset:0;z-index:2147483647;background:#ffffff;overflow:auto;-webkit-font-smoothing:antialiased;}',
       '.sym-rv *{box-sizing:border-box;max-width:100%;}',
-      '.sym-rv .rv-wrap{max-width:680px;margin:64px auto 120px;padding:0 28px;font:19px/1.7 "Charter","Iowan Old Style","Georgia",serif;color:#1d1d1c;}',
-      '.sym-rv .rv-eyebrow{font:500 11px/1 -apple-system,"Segoe UI",sans-serif;letter-spacing:1px;text-transform:uppercase;color:#8a8478;margin-bottom:14px;}',
-      '.sym-rv h1.rv-title{font:700 40px/1.15 "Charter","Iowan Old Style","Georgia",serif;color:#0f0f0e;margin:0 0 18px;letter-spacing:-0.015em;}',
-      '.sym-rv .rv-meta{font:500 13px/1.4 -apple-system,"Segoe UI",sans-serif;color:#7a7468;margin-bottom:44px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;}',
-      '.sym-rv .rv-meta .rv-dot{width:3px;height:3px;border-radius:50%;background:#c9c2b3;}',
+      '.sym-rv .rv-wrap{max-width:720px;margin:20px auto 32px;padding:0 20px;font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Inter","Helvetica Neue",Arial,sans-serif;color:#1f2328;}',
+      '.sym-rv .rv-eyebrow{font-size:12px;color:#6e7681;margin-bottom:4px;}',
+      '.sym-rv h1.rv-title{font-size:24px;line-height:1.25;margin:0 0 4px;font-weight:600;color:#1f2328;letter-spacing:-0.005em;}',
+      '.sym-rv .rv-meta{font-size:12px;color:#6e7681;margin-bottom:14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;}',
+      '.sym-rv .rv-meta .rv-dot{width:3px;height:3px;border-radius:50%;background:#d0d7de;}',
       '.sym-rv .rv-body{font-size:inherit;line-height:inherit;color:inherit;}',
-      '.sym-rv .rv-body p{margin:0 0 1.3em;}',
-      '.sym-rv .rv-body p:first-child::first-letter{font-size:3.2em;line-height:1;float:left;margin:0.04em 0.08em 0 -0.03em;font-weight:700;color:#0f0f0e;}',
-      '.sym-rv .rv-body h1,.sym-rv .rv-body h2,.sym-rv .rv-body h3,.sym-rv .rv-body h4,.sym-rv .rv-body h5,.sym-rv .rv-body h6{font-family:"Charter","Iowan Old Style","Georgia",serif;line-height:1.25;color:#0f0f0e;letter-spacing:-0.01em;}',
-      '.sym-rv .rv-body h2{font-size:1.5em;margin:2em 0 0.6em;font-weight:700;}',
-      '.sym-rv .rv-body h3{font-size:1.25em;margin:1.8em 0 0.5em;font-weight:700;}',
-      '.sym-rv .rv-body h4,.sym-rv .rv-body h5,.sym-rv .rv-body h6{font-size:1em;margin:1.5em 0 0.4em;font-weight:600;}',
-      '.sym-rv .rv-body a{color:#0a66c2;text-decoration:underline;text-decoration-thickness:0.05em;text-underline-offset:0.18em;}',
-      '.sym-rv .rv-body a:hover{color:#064b90;}',
-      '.sym-rv .rv-body strong{font-weight:700;color:#0f0f0e;}',
+      '.sym-rv .rv-body p{margin:0 0 0.7em;}',
+      '.sym-rv .rv-body h1,.sym-rv .rv-body h2,.sym-rv .rv-body h3,.sym-rv .rv-body h4,.sym-rv .rv-body h5,.sym-rv .rv-body h6{line-height:1.3;color:#1f2328;font-weight:600;}',
+      '.sym-rv .rv-body h1{font-size:1.45em;margin:1em 0 0.35em;}',
+      '.sym-rv .rv-body h2{font-size:1.25em;margin:1em 0 0.3em;padding-bottom:0.15em;border-bottom:1px solid #eaeef2;}',
+      '.sym-rv .rv-body h3{font-size:1.1em;margin:0.9em 0 0.25em;}',
+      '.sym-rv .rv-body h4,.sym-rv .rv-body h5,.sym-rv .rv-body h6{font-size:1em;margin:0.8em 0 0.2em;}',
+      '.sym-rv .rv-body a{color:#0969da;text-decoration:underline;text-underline-offset:0.15em;}',
+      '.sym-rv .rv-body a:hover{color:#0550ae;}',
+      '.sym-rv .rv-body strong{font-weight:600;color:#1f2328;}',
       '.sym-rv .rv-body em{font-style:italic;}',
-      '.sym-rv .rv-body ul,.sym-rv .rv-body ol{margin:0 0 1.3em;padding-left:1.4em;}',
-      '.sym-rv .rv-body li{margin:0.35em 0;}',
-      '.sym-rv .rv-body blockquote{margin:1.6em 0;padding:0.2em 0 0.2em 1.2em;border-left:3px solid #c9c2b3;color:#4a4639;font-style:italic;}',
-      '.sym-rv .rv-body blockquote p{margin:0 0 0.6em;}',
-      '.sym-rv .rv-body code{font-family:ui-monospace,"SF Mono","Menlo","Consolas",monospace;font-size:0.88em;background:#eee6d1;padding:0.12em 0.4em;border-radius:3px;}',
-      '.sym-rv .rv-body pre{font-family:ui-monospace,"SF Mono","Menlo","Consolas",monospace;font-size:0.86em;background:#efe7d1;padding:14px 18px;border-radius:6px;overflow-x:auto;margin:1.3em 0;line-height:1.55;color:#2a2620;}',
+      '.sym-rv .rv-body ul,.sym-rv .rv-body ol{margin:0 0 0.7em;padding-left:1.4em;}',
+      '.sym-rv .rv-body li{margin:0.12em 0;}',
+      '.sym-rv .rv-body li > p{margin:0 0 0.25em;}',
+      '.sym-rv .rv-body blockquote{margin:0.7em 0;padding:0 0.9em;border-left:3px solid #d0d7de;color:#57606a;}',
+      '.sym-rv .rv-body blockquote p{margin:0 0 0.35em;}',
+      '.sym-rv .rv-body code{font-family:ui-monospace,"SF Mono","Menlo","Consolas",monospace;font-size:0.88em;background:#f3f4f6;padding:0.1em 0.3em;border-radius:4px;}',
+      '.sym-rv .rv-body pre{font-family:ui-monospace,"SF Mono","Menlo","Consolas",monospace;font-size:0.86em;background:#f3f4f6;padding:10px 12px;border-radius:6px;overflow-x:auto;margin:0.7em 0;line-height:1.5;color:#1f2328;}',
       '.sym-rv .rv-body pre code{background:transparent;padding:0;font-size:inherit;}',
-      '.sym-rv .rv-body img,.sym-rv .rv-body video{display:block;width:100%;height:auto;border-radius:6px;margin:1.8em auto;}',
-      '.sym-rv .rv-body figure{margin:1.8em 0;}',
-      '.sym-rv .rv-body figcaption{font:italic 14px/1.5 "Charter","Georgia",serif;color:#7a7468;margin-top:8px;text-align:center;}',
-      '.sym-rv .rv-body hr{border:0;border-top:1px solid #d8d0bc;margin:3em auto;width:40%;}',
-      '.sym-rv .rv-body table{width:100%;border-collapse:collapse;margin:1.4em 0;font-size:0.9em;}',
-      '.sym-rv .rv-body th,.sym-rv .rv-body td{padding:0.5em 0.7em;border-bottom:1px solid #e2d9c4;text-align:left;}',
-      '.sym-rv .rv-body th{font-weight:700;color:#0f0f0e;}',
-      '.sym-rv .rv-bar{position:fixed;top:14px;right:28px;display:flex;gap:6px;z-index:1;}',
+      '.sym-rv .rv-body img,.sym-rv .rv-body video{display:block;max-width:100%;height:auto;border-radius:4px;margin:0.7em auto;}',
+      '.sym-rv .rv-body figure{margin:0.7em 0;}',
+      '.sym-rv .rv-body figcaption{font-size:0.9em;color:#6e7681;margin-top:4px;text-align:center;}',
+      '.sym-rv .rv-body hr{border:0;border-top:1px solid #eaeef2;margin:1em 0;}',
+      '.sym-rv .rv-body table{width:100%;border-collapse:collapse;margin:0.7em 0;font-size:0.95em;}',
+      '.sym-rv .rv-body th,.sym-rv .rv-body td{padding:0.35em 0.6em;border:1px solid #eaeef2;text-align:left;}',
+      '.sym-rv .rv-body th{font-weight:600;background:#f6f8fa;}',
       '.sym-rv::-webkit-scrollbar{width:10px;}',
       '.sym-rv::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.2);border-radius:5px;}',
       '.sym-rv::-webkit-scrollbar-thumb:hover{background:rgba(0,0,0,0.32);}',
-      '.sym-rv.rv-dark::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.18);}',
-      '.sym-rv.rv-dark::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.28);}',
-      '.sym-rv .rv-btn{padding:7px 14px;border-radius:18px;border:1px solid rgba(0,0,0,0.08);background:rgba(255,255,255,0.9);backdrop-filter:blur(6px);color:#3a3628;cursor:pointer;font:600 12px -apple-system,"Segoe UI",sans-serif;box-shadow:0 2px 12px rgba(0,0,0,0.06);transition:background .12s;}',
-      '.sym-rv .rv-btn:hover{background:#fff;}',
-      /* Dark theme -- applied when overlay also has .rv-dark (toggled by the Dark button). */
-      '.sym-rv.rv-dark{background:#1a1a17 !important;}',
-      '.sym-rv.rv-dark .rv-wrap{color:#e8e3d4 !important;}',
-      '.sym-rv.rv-dark .rv-eyebrow{color:#b7b1a1 !important;}',
-      '.sym-rv.rv-dark h1.rv-title{color:#fdfaf0 !important;}',
-      '.sym-rv.rv-dark .rv-meta{color:#b7b1a1 !important;}',
-      '.sym-rv.rv-dark .rv-meta .rv-dot{background:#4a463a !important;}',
-      '.sym-rv.rv-dark .rv-body{color:#e8e3d4 !important;}',
-      '.sym-rv.rv-dark .rv-body p:first-child::first-letter{color:#fdfaf0 !important;}',
-      '.sym-rv.rv-dark .rv-body h1,.sym-rv.rv-dark .rv-body h2,.sym-rv.rv-dark .rv-body h3,.sym-rv.rv-dark .rv-body h4,.sym-rv.rv-dark .rv-body h5,.sym-rv.rv-dark .rv-body h6{color:#fdfaf0 !important;}',
-      '.sym-rv.rv-dark .rv-body strong{color:#fdfaf0 !important;}',
-      '.sym-rv.rv-dark .rv-body a{color:#78b9ff !important;}',
-      '.sym-rv.rv-dark .rv-body a:hover{color:#a7d1ff !important;}',
-      '.sym-rv.rv-dark .rv-body code{background:#26251f !important;color:#e8e3d4 !important;}',
-      '.sym-rv.rv-dark .rv-body pre{background:#26251f !important;color:#e8e3d4 !important;}',
-      '.sym-rv.rv-dark .rv-body blockquote{border-left-color:#4a463a !important;color:#b7b1a1 !important;}',
-      '.sym-rv.rv-dark .rv-body hr{border-top-color:#3a362c !important;}',
-      '.sym-rv.rv-dark .rv-body th{color:#fdfaf0 !important;}',
-      '.sym-rv.rv-dark .rv-body th,.sym-rv.rv-dark .rv-body td{border-bottom-color:#3a362c !important;}',
-      '.sym-rv.rv-dark .rv-body figcaption{color:#b7b1a1 !important;}',
-      '.sym-rv.rv-dark .rv-btn{background:rgba(40,38,32,0.9) !important;color:#e8e3d4 !important;border-color:rgba(255,255,255,0.12) !important;}',
-      '.sym-rv.rv-dark .rv-btn:hover{background:#3a362c !important;}',
     ].join('\\n');
     overlay.appendChild(style);
 
@@ -18541,19 +18646,11 @@ async function _runInappReaderView() {
     wrap.appendChild(body);
     overlay.appendChild(wrap);
 
-    // Top bar with font-size toggle + exit.
-    var bar = document.createElement('div');
-    bar.className = 'rv-bar';
-    function makeBtn(label, fn){
-      var b = document.createElement('button'); b.className = 'rv-btn'; b.textContent = label; b.onclick = fn; return b;
-    }
-    var sizeIdx = 1;
-    var sizes = ['17px', '19px', '21px', '24px'];
-    bar.appendChild(makeBtn('A-', function(){ sizeIdx = Math.max(0, sizeIdx - 1); wrap.style.fontSize = sizes[sizeIdx]; }));
-    bar.appendChild(makeBtn('A+', function(){ sizeIdx = Math.min(sizes.length - 1, sizeIdx + 1); wrap.style.fontSize = sizes[sizeIdx]; }));
-    bar.appendChild(makeBtn('Dark', function(){ overlay.classList.toggle('rv-dark'); }));
-    overlay.appendChild(bar);
-
+    // Font size is driven from the Symphonee tools sidebar, not an in-page bar.
+    // The sidebar calls __symphoneeReaderSetFontSize(px) via executeJavaScript.
+    window.__symphoneeReaderSetFontSize = function(px){
+      try { wrap.style.fontSize = px; } catch (_) {}
+    };
     document.body.appendChild(overlay);
     overlay.scrollTop = 0;
     // Lock the underlying page scroll so only the overlay scrolls (no double scrollbars).
@@ -18568,17 +18665,57 @@ async function _runInappReaderView() {
   try { result = await view.executeJavaScript(script, true); }
   catch (e) { _setInappToolsBodyError('Reader view failed: ' + (e.message || String(e))); return; }
   const on = !!(result && result.applied);
+  _inappReaderState.active = on;
+  if (on) {
+    _inappReaderState.words = result.words || 0;
+    _inappReaderState.minutes = result.minutes || 1;
+    _inappReaderState.rootTag = result.rootTag || 'body';
+    if (_inappReaderState.sizeIdx == null) _inappReaderState.sizeIdx = 2;
+    // Push the current font-size so the reader matches the saved preference.
+    _inappReaderSetFontSize(_READER_FONT_SIZES[_inappReaderState.sizeIdx]);
+  }
+  _renderInappReaderSidebar();
+}
+function _renderInappReaderSidebar() {
+  const on = _inappReaderState.active;
   _setInappToolsBodyHtml(`
-    <div class="inapp-tools-empty" style="padding:20px;">
-      <i data-lucide="${on ? 'book-open-check' : 'x-circle'}" style="width:24px;height:24px;display:block;margin:0 auto 10px;color:var(--accent);"></i>
-      <div style="font-weight:600;color:var(--text);">${on ? 'Reader view on' : 'Reader view off'}</div>
-      <div style="font-size:11px;margin-top:6px;">${on ? ('Parsed ' + (result.words || 0).toLocaleString() + ' words from &lt;' + _escapeHtml(result.rootTag || 'body') + '&gt; -- about ' + (result.minutes || 1) + ' min read. Use A- / A+ / Dark in the page bar.') : 'Toggled off.'}</div>
+    <div style="text-align:center;padding:10px 4px 4px;">
+      <i data-lucide="${on ? 'book-open-check' : 'book-open'}" style="width:22px;height:22px;display:block;margin:0 auto 6px;color:var(--accent);"></i>
+      <div style="font:600 12px var(--font-ui);color:var(--text);">${on ? 'Reader view on' : 'Reader view off'}</div>
+      <div style="font:11px/1.35 var(--font-ui);margin-top:3px;color:var(--subtext0);">${on ? ('Parsed ' + (_inappReaderState.words||0).toLocaleString() + ' words from &lt;' + _escapeHtml(_inappReaderState.rootTag) + '&gt; &mdash; about ' + (_inappReaderState.minutes||1) + ' min read.') : 'Click Turn on to parse the current page.'}</div>
     </div>
-    <div class="inapp-tools-actions" style="margin:8px -12px -12px;">
-      <button class="tab-bar-btn" type="button" onclick="_runInappReaderView()"><i data-lucide="repeat" style="width:13px;height:13px;"></i> Toggle</button>
+    <div class="inapp-tools-actions" style="margin:8px -12px -12px;gap:4px;">
+      <button class="tab-bar-btn" type="button" onclick="_runInappReaderView()"><i data-lucide="repeat" style="width:13px;height:13px;"></i> ${on ? 'Turn off' : 'Turn on'}</button>
+      ${on ? `
+        <button class="tab-bar-btn" type="button" id="readerSizeMinus" title="Smaller font"><i data-lucide="minus" style="width:13px;height:13px;"></i></button>
+        <button class="tab-bar-btn" type="button" id="readerSizePlus" title="Larger font"><i data-lucide="plus" style="width:13px;height:13px;"></i></button>
+      ` : ''}
     </div>
   `);
+  if (on) {
+    const minus = document.getElementById('readerSizeMinus');
+    const plus  = document.getElementById('readerSizePlus');
+    if (minus) minus.onclick = () => _inappReaderBumpFontSize(-1);
+    if (plus)  plus.onclick  = () => _inappReaderBumpFontSize(+1);
+  }
   try { if (window.lucide && lucide.createIcons) lucide.createIcons(); } catch (_) {}
+}
+function _inappReaderBumpFontSize(delta) {
+  const max = _READER_FONT_SIZES.length - 1;
+  _inappReaderState.sizeIdx = Math.max(0, Math.min(max, (_inappReaderState.sizeIdx || 2) + delta));
+  _inappReaderSetFontSize(_READER_FONT_SIZES[_inappReaderState.sizeIdx]);
+  _renderInappReaderSidebar();
+}
+function _inappReaderSetSizeIdx(idx) {
+  const max = _READER_FONT_SIZES.length - 1;
+  _inappReaderState.sizeIdx = Math.max(0, Math.min(max, idx));
+  _inappReaderSetFontSize(_READER_FONT_SIZES[_inappReaderState.sizeIdx]);
+  _renderInappReaderSidebar();
+}
+function _inappReaderSetFontSize(px) {
+  const view = _ensureInappBrowser();
+  if (!view || view.tagName.toLowerCase() !== 'webview') return;
+  try { view.executeJavaScript('try{window.__symphoneeReaderSetFontSize && window.__symphoneeReaderSetFontSize(' + JSON.stringify(px) + ');}catch(_){}', true); } catch (_) {}
 }
 
 // ── Site audit (SEO + performance + a11y) ───────────────────────────────
@@ -18675,6 +18812,10 @@ async function _runInappEmulatePanel() {
   _setInappToolsTitle('Emulate device');
   const devOpts = _EMULATE_DEVICES.map(d => `<option value="${d.id}" ${_emulateState.device === d.id ? 'selected' : ''}>${_escapeHtml(d.label)}${d.w ? ' — ' + d.w + '×' + d.h + ' @' + d.dpr + 'x' : ''}</option>`).join('');
   _setInappToolsBodyHtml(`
+    <div style="font:11px/1.45 var(--font-ui);color:var(--yellow);background:color-mix(in srgb, var(--yellow) 12%, var(--surface0));border:1px solid color-mix(in srgb, var(--yellow) 35%, transparent);padding:8px 10px;border-radius:var(--radius);display:flex;gap:8px;align-items:flex-start;">
+      <i data-lucide="alert-triangle" style="width:14px;height:14px;color:var(--yellow);flex-shrink:0;margin-top:1px;"></i>
+      <div><strong>Heads up:</strong> device emulation rides on top of Chromium&rsquo;s DevTools protocol. Some pages flicker or lose layout when overrides are applied. If things look broken, hit <em>Reset all</em> at the bottom.</div>
+    </div>
     <div class="code-inspect-group"><div class="code-inspect-group-title">Device</div>
       <div class="quick-edit-grid" style="grid-template-columns: 110px 1fr;">
         <label>Preset</label>
