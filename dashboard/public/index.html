@@ -5630,6 +5630,7 @@
 <div class="modal-overlay" id="repoModal" onclick="if(event.target===this)closeModal('repoModal')">
   <div class="modal modal-ctx-pick">
     <div class="modal-title" style="padding:16px 16px 0;" id="repoModalTitle">Select Repo</div>
+    <input type="text" class="ctx-pick-search" id="repoPickSearch" placeholder="Filter repos..." oninput="filterRepoPicker()">
     <div class="ctx-pick-list" id="repoPickList"></div>
     <div class="ctx-pick-footer">
       <button onclick="closeModal('repoModal');openSettings('repos');">
@@ -8348,12 +8349,16 @@ async function openSpaceModal() {
 }
 
 // Repo picker (filtered to current space)
+let _repoPickNames = [];
+
 async function openRepoModal() {
   const modal = document.getElementById('repoModal');
   const list  = document.getElementById('repoPickList');
   const title = document.getElementById('repoModalTitle');
+  const search = document.getElementById('repoPickSearch');
   if (!modal || !list) return;
   modal.classList.add('open');
+  if (search) search.value = '';
   list.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--subtext0);">Loading...</div>';
   if (title) title.textContent = activeSpace ? `Repos in "${activeSpace}"` : 'Select Repo';
   let repos = {}, spaces = {};
@@ -8363,25 +8368,13 @@ async function openRepoModal() {
       fetch('/api/spaces').then(r => r.json()).catch(() => ({})),
     ]);
   } catch (_) {}
-  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   // Filter repos to current space if one is selected
   let repoNames = Object.keys(repos);
   if (activeSpace && spaces[activeSpace] && Array.isArray(spaces[activeSpace].repos)) {
     repoNames = spaces[activeSpace].repos.filter(r => repos[r]);
   }
-  const escAttr = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
-  let html = '';
-  for (const name of repoNames) {
-    const active = (name === activeRepo) ? ' active' : '';
-    html += `<button class="ctx-pick-item${active}" data-pick-repo="${escAttr(name)}">
-      <i data-lucide="folder-git-2" style="width:15px;height:15px;"></i>
-      <span class="cpi-name">${esc(name)}</span>
-    </button>`;
-  }
-  if (!repoNames.length) {
-    html = `<div style="padding:12px 14px;font-size:11px;color:var(--subtext0);">${activeSpace ? 'No repos in this space.' : 'No repos added yet.'}</div>`;
-  }
-  list.innerHTML = html;
+  _repoPickNames = repoNames;
+  renderRepoPicker('');
   list.onclick = function(ev) {
     const btn = ev.target && ev.target.closest && ev.target.closest('[data-pick-repo]');
     if (!btn) return;
@@ -8391,7 +8384,46 @@ async function openRepoModal() {
     try { selectRepo(n); } catch (e) { console.error('selectRepo failed', e); }
     closeModal('repoModal');
   };
+  if (search) setTimeout(() => search.focus(), 50);
+}
+
+function renderRepoPicker(filter) {
+  const list = document.getElementById('repoPickList');
+  if (!list) return;
+  const f = (filter || '').toLowerCase();
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const escAttr = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+  const filtered = _repoPickNames.filter(n => !f || n.toLowerCase().includes(f));
+
+  // "No repo" row always present (unless filtering hides it) so user can clear the selection
+  const noRepoMatches = !f || 'no repo'.includes(f);
+  let html = '';
+  if (noRepoMatches) {
+    const active = !activeRepo ? ' active' : '';
+    html += `<button class="ctx-pick-item${active}" data-pick-repo="">
+      <i data-lucide="folder-x" style="width:15px;height:15px;"></i>
+      <span class="cpi-name" style="color:var(--subtext0);font-style:italic;">No repo</span>
+    </button>`;
+  }
+  for (const name of filtered) {
+    const active = (name === activeRepo) ? ' active' : '';
+    html += `<button class="ctx-pick-item${active}" data-pick-repo="${escAttr(name)}">
+      <i data-lucide="folder-git-2" style="width:15px;height:15px;"></i>
+      <span class="cpi-name">${esc(name)}</span>
+    </button>`;
+  }
+  if (!filtered.length && !noRepoMatches) {
+    html = `<div style="padding:12px 14px;font-size:11px;color:var(--subtext0);">No repos match "${esc(filter)}".</div>`;
+  } else if (!_repoPickNames.length && !f) {
+    html += `<div style="padding:12px 14px;font-size:11px;color:var(--subtext0);">${activeSpace ? 'No repos in this space.' : 'No repos added yet.'}</div>`;
+  }
+  list.innerHTML = html;
   try { lucide.createIcons({ nodes: [list] }); } catch (_) {}
+}
+
+function filterRepoPicker() {
+  const search = document.getElementById('repoPickSearch');
+  renderRepoPicker(search ? search.value : '');
 }
 
 // Branch picker
