@@ -1798,11 +1798,11 @@ function handleGitDiff(url, res) {
   let diff = '';
   if (filePath) {
     // Try staged + unstaged diff against HEAD (ignore CRLF differences on Windows)
-    diff = gitExec(repoPath, `diff --ignore-cr-at-eol HEAD - "${filePath}"`);
+    diff = gitExec(repoPath, `diff --ignore-cr-at-eol HEAD -- "${filePath}"`);
     // Try unstaged only
-    if (!diff) diff = gitExec(repoPath, `diff --ignore-cr-at-eol - "${filePath}"`);
+    if (!diff) diff = gitExec(repoPath, `diff --ignore-cr-at-eol -- "${filePath}"`);
     // Try staged only
-    if (!diff) diff = gitExec(repoPath, `diff --ignore-cr-at-eol --cached - "${filePath}"`);
+    if (!diff) diff = gitExec(repoPath, `diff --ignore-cr-at-eol --cached -- "${filePath}"`);
     // For untracked/new files, show entire content as additions
     if (!diff) {
       const fullPath = path.join(repoPath, filePath);
@@ -1884,7 +1884,7 @@ function handleCommitDiff(url, res) {
   if (!repoPath) return json(res, { error: 'Repo not found' }, 400);
   if (!hash) return json(res, { error: 'hash required' }, 400);
 
-  const pathArg = filePath ? ` - "${filePath}"` : '';
+  const pathArg = filePath ? ` -- "${filePath}"` : '';
   const diff = gitExec(repoPath, `diff --ignore-cr-at-eol ${hash}~1 ${hash}${pathArg}`);
   const stat = gitExec(repoPath, `diff --ignore-cr-at-eol --stat=999 ${hash}~1 ${hash}`);
   const msg = gitExec(repoPath, `log -1 --pretty=format:"%s" ${hash}`);
@@ -2021,16 +2021,16 @@ async function handleGitDiscard(req, res) {
     const filePath = body.path;
 
     // Check if the file is untracked (new) or tracked
-    const status = gitExec(repoPath, `status --porcelain - "${filePath}"`);
+    const status = gitExec(repoPath, `status --porcelain -- "${filePath}"`);
     const statusCode = status ? status.substring(0, 2) : '';
 
     if (statusCode.trim().startsWith('?')) {
       // Untracked file - remove it
-      gitExec(repoPath, `clean -f - "${filePath}"`);
+      gitExec(repoPath, `clean -f -- "${filePath}"`);
     } else {
       // Tracked file - unstage and restore
-      gitExec(repoPath, `reset HEAD - "${filePath}"`);
-      gitExec(repoPath, `checkout - "${filePath}"`);
+      gitExec(repoPath, `reset HEAD -- "${filePath}"`);
+      gitExec(repoPath, `checkout -- "${filePath}"`);
     }
 
     json(res, { ok: true, discarded: filePath });
