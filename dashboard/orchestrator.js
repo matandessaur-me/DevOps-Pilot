@@ -2052,10 +2052,19 @@ async function gateSpawn(res, { cli, cwd, label, wait = true }) {
   });
 }
 
-function mountOrchestrator(addRoute, json, { terminals, broadcast, repoRoot, createTerminal, getConfig, getLearnings }) {
+function mountOrchestrator(addRoute, json, { terminals, broadcast, repoRoot, createTerminal, getConfig, getLearnings, getUiContext }) {
   const workspaceDir = path.join(repoRoot, '.ai-workspace', 'orchestrator');
   const orch = new Orchestrator({ terminals, broadcast, workspaceDir, createTerminal, getConfig });
   orch.getLearnings = getLearnings || null;
+
+  // Resolve the space to attach to a new task. If the caller passed one
+  // explicitly, use it; otherwise fall back to the dashboard's active space so
+  // tasks dispatched by AIs running inside a terminal still get tagged and
+  // remain visible under the "This space" filter.
+  const resolveSpace = (passed) => {
+    if (passed !== undefined && passed !== null && passed !== '') return passed;
+    try { return (getUiContext && getUiContext().activeSpace) || null; } catch (_) { return null; }
+  };
 
   // Auto-cleanup tasks older than 1 hour every 30 minutes (preserves recent results)
   setInterval(() => orch.cleanup(60 * 60 * 1000), 30 * 60 * 1000);
@@ -2149,9 +2158,10 @@ function mountOrchestrator(addRoute, json, { terminals, broadcast, repoRoot, cre
       // The 'visible' param can override: visible=true forces PTY, visible=false forces headless.
       const cliCfg = CLI_CONFIG[cli];
       const useVisible = visible === true || (visible !== false && cliCfg && !cliCfg.pipeMode);
+      const resolvedSpace = resolveSpace(space);
       const task = useVisible
-        ? orch.spawnVisible({ cli, prompt, cwd, timeout, from, taskId, space })
-        : orch.spawnHeadless({ cli, prompt, cwd, timeout, from, taskId, model, effort, autoPermit, space });
+        ? orch.spawnVisible({ cli, prompt, cwd, timeout, from, taskId, space: resolvedSpace })
+        : orch.spawnHeadless({ cli, prompt, cwd, timeout, from, taskId, model, effort, autoPermit, space: resolvedSpace });
       json(res, orch._serializeTask(task));
     } catch (err) {
       json(res, { error: err.message }, 400);
@@ -2181,7 +2191,7 @@ function mountOrchestrator(addRoute, json, { terminals, broadcast, repoRoot, cre
     try {
       const cliCfg = CLI_CONFIG[cli];
       const useVisible = cliCfg && !cliCfg.pipeMode;
-      const inheritedSpace = space !== undefined ? space : (parent && parent.space) || null;
+      const inheritedSpace = space !== undefined ? space : ((parent && parent.space) || resolveSpace());
       let task;
       if (useVisible) {
         // Visible PTY spawn types the prompt into a live terminal character-by-character.

@@ -2991,7 +2991,7 @@ addRoute('POST', '/api/cli/pretrust', async (req, res) => {
 });
 
 // ── Mount orchestrator ───────────────────────────────────────────────────────
-const orchestrator = mountOrchestrator(addRoute, json, { terminals, broadcast, repoRoot, createTerminal, getConfig, getLearnings: () => _learningsInstance });
+const orchestrator = mountOrchestrator(addRoute, json, { terminals, broadcast, repoRoot, createTerminal, getConfig, getLearnings: () => _learningsInstance, getUiContext: getUiContextWithPath });
 const { mountJobs } = require('./jobs-scheduler');
 mountJobs(addRoute, json, { repoRoot, orchestrator, broadcast });
 console.log('  Orchestrator bus mounted (/api/orchestrator/*)');
