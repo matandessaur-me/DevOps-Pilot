@@ -96,6 +96,16 @@
 
   function render() {
     teardownNetwork();
+    // Graph + Map views need a full-bleed canvas - turn padding/scroll off
+    // for those, restore for everything else.
+    const main = $('mindMain');
+    if (main) {
+      const fullBleed = (state.view === 'graph' || state.view === 'map');
+      main.style.padding = fullBleed ? '0' : '14px 18px';
+      main.style.overflow = fullBleed ? 'hidden' : 'auto';
+      main.style.display = fullBleed ? 'flex' : '';
+      main.style.flexDirection = fullBleed ? 'column' : '';
+    }
     if (!state.graph) {
       $('mindMain').innerHTML = `
         <div style="text-align:center;padding:60px 20px;color:var(--subtext0);">
@@ -333,10 +343,10 @@
     }
 
     main.innerHTML = `
-      <div style="font-size:11px;color:var(--subtext0);margin-bottom:8px;">
+      <div style="font-size:11px;color:var(--subtext0);flex-shrink:0;padding:8px 12px;border-bottom:1px solid var(--surface0);background:var(--mantle);">
         Each circle is a community. Edges show cross-community bridges (sized by traffic). Click a circle to drill in.
       </div>
-      <div id="mindCanvasHost" style="width:100%;height:600px;border:1px solid var(--surface1);background:var(--mantle);border-radius:4px;"></div>`;
+      <div id="mindCanvasHost" style="flex:1;min-height:0;width:100%;background:var(--mantle);"></div>`;
 
     // Aggregate cross-community edge counts.
     const idCommunity = new Map();
@@ -484,7 +494,7 @@
       return;
     }
     main.innerHTML = `
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0;padding:8px 12px;border-bottom:1px solid var(--surface0);background:var(--mantle);">
         <div style="font-size:11px;color:var(--subtext0);flex:1;min-width:0;">
           Drag nodes - scroll to zoom - hover edges for relation - click node for detail. Solid = EXTRACTED, dashed = INFERRED, dotted-red = AMBIGUOUS.
         </div>
@@ -506,7 +516,7 @@
         <button class="tab-bar-btn" onclick="MindUI.fitGraph()" style="font-size:11px;" title="Fit graph to view">Fit</button>
         <button class="tab-bar-btn" onclick="MindUI.togglePhysics()" id="mindPhysicsBtn" style="font-size:11px;" title="Pause/resume layout physics">Freeze</button>
       </div>
-      <div id="mindCanvasHost" style="width:100%;height:600px;border:1px solid var(--surface1);background:var(--mantle);border-radius:4px;"></div>`;
+      <div id="mindCanvasHost" style="flex:1;min-height:0;width:100%;background:var(--mantle);"></div>`;
 
     buildNetwork();
     $('mindGraphFilter').addEventListener('change', buildNetwork);
@@ -643,38 +653,91 @@
       if (r.error) { detail.innerHTML = `<div style="color:var(--red);font-size:11px;">${r.error}</div>`; return; }
       const n = r.node;
       const neighbors = r.neighbors || [];
+      const kindColor = communityColor(n.communityId) || '#9399b2';
+      const cb = (n.createdBy || 'system').split('-')[0];
+      const cliC = cliColor(cb);
+      const created = n.createdAt ? formatTimestamp(n.createdAt) : '?';
+
       detail.innerHTML = `
-        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;">
-          <div style="font-size:13px;font-weight:600;color:var(--text);">${escapeHtml(n.label)}</div>
-          <span style="flex:1;"></span>
-          <button class="tab-bar-btn" onclick="MindUI.closeDetail()" title="Close">×</button>
+        <div class="mind-detail">
+          <div class="mind-detail-head">
+            <div class="mind-detail-title">
+              <div class="mind-detail-kind-dot" style="background:${kindColor};"></div>
+              <div class="mind-detail-label" title="${escapeHtml(n.label)}">${escapeHtml(n.label)}</div>
+            </div>
+            <button class="tab-bar-btn mind-detail-close" onclick="MindUI.closeDetail()" title="Close">×</button>
+          </div>
+
+          <div class="mind-chip-row">
+            <span class="mind-chip" style="background:${kindColor}22;color:${kindColor};">${escapeHtml(n.kind)}</span>
+            ${n.communityId != null ? `<span class="mind-chip mind-chip-link" data-cid="${escapeHtml(String(n.communityId))}" style="background:${communityColor(n.communityId)}22;color:${communityColor(n.communityId)};cursor:pointer;" title="Open community #${n.communityId}">community #${n.communityId}</span>` : ''}
+            <span class="mind-chip" style="background:${cliC}22;color:${cliC};">${escapeHtml(cb)}</span>
+            ${(n.tags || []).filter(t => t && t !== n.kind && t !== cb).slice(0, 4).map(t => `<span class="mind-chip mind-chip-tag">#${escapeHtml(t)}</span>`).join('')}
+          </div>
+
+          <div class="mind-detail-meta">
+            ${metaRow('Created', escapeHtml(created))}
+            ${n.source ? renderSource(n.source) : ''}
+            ${n.sourceLocation ? renderLocation(n.sourceLocation) : ''}
+            ${metaRow('ID', `<code class="mind-id">${escapeHtml(n.id)}</code>`, true)}
+          </div>
+
+          ${n.preview || n.detail || n.answer || n.result ? `
+            <div class="mind-detail-section">
+              <div class="mind-detail-section-title">${n.preview ? 'Preview' : n.answer ? 'Answer' : n.result ? 'Result' : 'Detail'}</div>
+              <div class="mind-detail-prose">${escapeHtml((n.preview || n.detail || n.answer || n.result || '').slice(0, 1200))}</div>
+            </div>` : ''}
+
+          <div class="mind-detail-section">
+            <div class="mind-detail-section-title">Neighbors <span class="mind-section-count">${neighbors.length}</span></div>
+            <div class="mind-neighbors">
+              ${neighbors.length === 0 ? '<div class="mind-empty">no connections</div>' : neighbors.slice(0, 60).map(nb => neighborRow(nb)).join('')}
+            </div>
+          </div>
+
+          <div class="mind-detail-actions">
+            <button class="tab-bar-btn" onclick="MindUI.askAbout('${encodeURIComponent(n.label)}')" style="flex:1;font-size:11px;">Ask Mind about this</button>
+            <button class="tab-bar-btn mind-detail-purge" onclick="MindUI.purgeNode('${encodeURIComponent(n.id)}')" title="Delete this node from the graph">Purge</button>
+          </div>
         </div>
-        <div style="font-size:11px;color:var(--subtext0);margin-bottom:10px;">
-          <div><b style="color:var(--subtext1);">id</b> <code style="color:var(--text);">${escapeHtml(n.id)}</code></div>
-          <div><b style="color:var(--subtext1);">kind</b> ${escapeHtml(n.kind)}</div>
-          ${n.source ? `<div><b style="color:var(--subtext1);">source</b> ${escapeHtml(JSON.stringify(n.source))}</div>` : ''}
-          ${n.sourceLocation ? `<div><b style="color:var(--subtext1);">location</b> ${escapeHtml(JSON.stringify(n.sourceLocation))}</div>` : ''}
-          <div><b style="color:var(--subtext1);">created by</b> ${escapeHtml(n.createdBy || '?')}</div>
-          <div><b style="color:var(--subtext1);">created at</b> ${escapeHtml(n.createdAt || '?')}</div>
-          ${n.tags && n.tags.length ? `<div><b style="color:var(--subtext1);">tags</b> ${n.tags.map(t => escapeHtml(t)).join(', ')}</div>` : ''}
-          ${n.communityId != null ? `<div><b style="color:var(--subtext1);">community</b> #${n.communityId}</div>` : ''}
-          ${n.detail ? `<div style="margin-top:6px;color:var(--text);"><b style="color:var(--subtext1);">detail</b><br>${escapeHtml(n.detail)}</div>` : ''}
-          ${n.answer ? `<div style="margin-top:6px;color:var(--text);"><b style="color:var(--subtext1);">answer</b><br>${escapeHtml(n.answer)}</div>` : ''}
-        </div>
-        <div style="font-size:11px;font-weight:600;color:var(--subtext0);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Neighbors (${neighbors.length})</div>
-        <div style="display:flex;flex-direction:column;gap:3px;">
-          ${neighbors.slice(0, 60).map(nb => `
-            <a href="#" class="mind-neighbor-link" data-id="${nb.peer?.id || ''}" style="display:flex;align-items:baseline;gap:6px;padding:4px 6px;background:var(--base);border-radius:3px;text-decoration:none;font-size:11px;color:var(--text);">
-              <span style="color:var(--subtext0);min-width:18px;">${nb.direction === 'out' ? '→' : '←'}</span>
-              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">${escapeHtml(nb.peer?.label || nb.edge.target)}</span>
-              <span style="color:var(--subtext0);font-size:10px;">${escapeHtml(nb.edge.relation)}</span>
-              <span style="color:${confColor(nb.edge.confidence)};font-size:9px;">${nb.edge.confidence[0]}</span>
-            </a>`).join('')}
-        </div>
-        <div style="display:flex;gap:6px;margin-top:10px;">
-          <button class="tab-bar-btn" onclick="MindUI.askAbout('${encodeURIComponent(n.label)}')" style="flex:1;font-size:11px;">Ask Mind about this</button>
-          <button class="tab-bar-btn" onclick="MindUI.purgeNode('${encodeURIComponent(n.id)}')" style="font-size:11px;color:var(--red);" title="Delete this node from the graph">Purge</button>
-        </div>`;
+        <style>
+          .mind-detail { display:flex; flex-direction:column; gap:14px; }
+          .mind-detail-head { display:flex; align-items:flex-start; gap:8px; padding-bottom:10px; border-bottom:1px solid var(--surface0); }
+          .mind-detail-title { flex:1; display:flex; align-items:flex-start; gap:8px; min-width:0; }
+          .mind-detail-kind-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; margin-top:5px; }
+          .mind-detail-label { font-size:13px; font-weight:600; color:var(--text); line-height:1.35; word-break:break-word; }
+          .mind-detail-close { padding:0 8px; font-size:14px; line-height:1; }
+          .mind-chip-row { display:flex; flex-wrap:wrap; gap:4px; }
+          .mind-chip { font-size:9.5px; font-weight:600; text-transform:uppercase; letter-spacing:0.4px; padding:2px 7px; border-radius:10px; }
+          .mind-chip-link:hover { filter:brightness(1.3); }
+          .mind-chip-tag { background:var(--surface0); color:var(--subtext0); font-weight:500; text-transform:none; letter-spacing:0; }
+          .mind-detail-meta { display:grid; grid-template-columns:auto 1fr; column-gap:10px; row-gap:5px; font-size:11px; }
+          .mind-meta-key { color:var(--subtext0); text-transform:uppercase; font-size:9.5px; letter-spacing:0.5px; padding-top:2px; }
+          .mind-meta-val { color:var(--text); word-break:break-all; }
+          .mind-meta-val-mono { font-family:var(--font-mono, monospace); font-size:10px; color:var(--subtext1); }
+          .mind-id { font-family:var(--font-mono, monospace); font-size:10px; background:var(--surface0); color:var(--subtext1); padding:1px 5px; border-radius:3px; word-break:break-all; }
+          .mind-path { font-family:var(--font-mono, monospace); font-size:10px; color:var(--text); background:var(--surface0); padding:2px 5px; border-radius:3px; display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:bottom; }
+          .mind-detail-section { display:flex; flex-direction:column; gap:6px; }
+          .mind-detail-section-title { font-size:10px; font-weight:700; color:var(--subtext0); text-transform:uppercase; letter-spacing:0.6px; display:flex; align-items:center; gap:6px; }
+          .mind-section-count { background:var(--surface0); color:var(--subtext0); padding:0 6px; border-radius:8px; font-weight:500; font-size:9.5px; }
+          .mind-detail-prose { font-size:11px; color:var(--text); background:var(--base); padding:8px 10px; border-radius:4px; line-height:1.5; max-height:200px; overflow:auto; white-space:pre-wrap; }
+          .mind-empty { font-size:11px; color:var(--subtext0); font-style:italic; padding:6px; }
+          .mind-neighbors { display:flex; flex-direction:column; gap:3px; max-height:280px; overflow:auto; padding-right:2px; }
+          .mind-nb-row { display:flex; align-items:center; gap:6px; padding:5px 8px; background:var(--base); border-radius:3px; font-size:11px; color:var(--text); text-decoration:none; cursor:pointer; transition:background 0.1s; border-left:2px solid transparent; }
+          .mind-nb-row:hover { background:var(--surface0); border-left-color:var(--accent); }
+          .mind-nb-arrow { color:var(--subtext0); font-size:11px; min-width:14px; text-align:center; }
+          .mind-nb-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+          .mind-nb-rel { color:var(--subtext0); font-size:10px; padding:1px 5px; background:var(--surface0); border-radius:3px; }
+          .mind-nb-conf { font-size:9px; font-weight:700; min-width:10px; text-align:center; }
+          .mind-detail-actions { display:flex; gap:6px; padding-top:8px; border-top:1px solid var(--surface0); }
+          .mind-detail-purge { font-size:11px; color:var(--red); padding:0 12px; }
+        </style>`;
+      detail.querySelectorAll('.mind-nb-row').forEach(a => {
+        a.addEventListener('click', (ev) => { ev.preventDefault(); if (a.dataset.id) showNodeDetail(a.dataset.id); });
+      });
+      detail.querySelectorAll('.mind-chip-link').forEach(a => {
+        a.addEventListener('click', (ev) => { ev.preventDefault(); if (a.dataset.cid != null) showCommunityDetail(a.dataset.cid); });
+      });
       detail.querySelectorAll('.mind-neighbor-link').forEach(a => {
         a.addEventListener('click', (ev) => { ev.preventDefault(); if (a.dataset.id) showNodeDetail(a.dataset.id); });
       });
@@ -757,6 +820,71 @@
   }
   function confColor(c) { return c === 'EXTRACTED' ? 'var(--green)' : c === 'INFERRED' ? 'var(--yellow)' : 'var(--red)'; }
   function escapeHtml(s) { if (typeof s !== 'string') s = String(s ?? ''); return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+  function metaRow(key, valueHtml, mono) {
+    return `<div class="mind-meta-key">${escapeHtml(key)}</div><div class="mind-meta-val${mono ? ' mind-meta-val-mono' : ''}">${valueHtml}</div>`;
+  }
+
+  function shortPath(p) {
+    if (!p) return '';
+    const norm = String(p).replace(/\\/g, '/');
+    const parts = norm.split('/').filter(Boolean);
+    if (parts.length <= 3) return norm;
+    return '.../' + parts.slice(-3).join('/');
+  }
+
+  // source object -> readable rows. Skips noise, formats files/refs nicely.
+  function renderSource(src) {
+    if (!src || typeof src !== 'object') return '';
+    const rows = [];
+    if (src.type) rows.push(metaRow('Source', `<span class="mind-chip" style="background:var(--surface0);color:var(--subtext1);">${escapeHtml(src.type)}</span>`));
+    if (src.cli)  rows.push(metaRow('CLI', `<span class="mind-chip" style="background:${cliColor(src.cli)}22;color:${cliColor(src.cli)};">${escapeHtml(src.cli)}</span>`));
+    if (src.file) rows.push(metaRow('File', `<span class="mind-path" title="${escapeHtml(src.file)}">${escapeHtml(shortPath(src.file))}</span>`));
+    if (src.ref && src.ref !== src.file) rows.push(metaRow('Ref', `<span title="${escapeHtml(src.ref)}">${escapeHtml(shortPath(src.ref))}</span>`));
+    if (src.cwd)  rows.push(metaRow('Repo', `<span class="mind-path" title="${escapeHtml(src.cwd)}">${escapeHtml(shortPath(src.cwd))}</span>`));
+    if (src.sessionId) rows.push(metaRow('Session', `<code class="mind-id">${escapeHtml(String(src.sessionId).slice(0, 16))}</code>`));
+    if (src.model) rows.push(metaRow('Model', escapeHtml(src.model)));
+    if (src.url)  rows.push(metaRow('URL', `<a href="${escapeHtml(src.url)}" target="_blank" rel="noopener" style="color:var(--accent);">${escapeHtml(src.url)}</a>`));
+    return rows.join('');
+  }
+
+  function renderLocation(loc) {
+    if (!loc || typeof loc !== 'object') return '';
+    const parts = [];
+    if (loc.file) parts.push(`<span class="mind-path" title="${escapeHtml(loc.file)}">${escapeHtml(shortPath(loc.file))}</span>`);
+    if (loc.line) parts.push(`<span style="color:var(--subtext0);">L${loc.line}</span>`);
+    if (loc.column) parts.push(`<span style="color:var(--subtext0);">C${loc.column}</span>`);
+    if (parts.length === 0) return '';
+    return metaRow('Location', parts.join(' '));
+  }
+
+  function neighborRow(nb) {
+    const peer = nb.peer; const e = nb.edge;
+    const id = peer?.id || e.target;
+    const arrow = nb.direction === 'out' ? '&#x2192;' : '&#x2190;';
+    const label = peer?.label || (nb.direction === 'out' ? e.target : e.source);
+    const conf = e.confidence || '';
+    const c = confColor(conf);
+    return `<div class="mind-nb-row" data-id="${escapeHtml(id)}" title="${escapeHtml(label)}">
+      <span class="mind-nb-arrow">${arrow}</span>
+      <span class="mind-nb-label">${escapeHtml(label)}</span>
+      <span class="mind-nb-rel">${escapeHtml(e.relation)}</span>
+      <span class="mind-nb-conf" style="color:${c};" title="${escapeHtml(conf)}">${conf ? conf[0] : '?'}</span>
+    </div>`;
+  }
+
+  function formatTimestamp(iso) {
+    try {
+      const d = new Date(iso);
+      const now = Date.now();
+      const diff = now - d.getTime();
+      if (diff < 60000) return 'just now';
+      if (diff < 3600000) return Math.round(diff / 60000) + 'm ago';
+      if (diff < 86400000) return Math.round(diff / 3600000) + 'h ago';
+      if (diff < 604800000) return Math.round(diff / 86400000) + 'd ago';
+      return d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch (_) { return iso; }
+  }
 
   window.MindUI = { onActivate, setView, build, update, toggleWatch, askAbout, purgeNode, closeDetail, fitGraph, togglePhysics };
 })();
