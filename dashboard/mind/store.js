@@ -68,7 +68,10 @@ function saveGraph(repoRoot, space, graph) {
     throw new Error(`mind/store: refusing to save invalid graph: ${errors.slice(0, 3).join('; ')}`);
   }
   graph.generatedAt = new Date().toISOString();
+  // Preserve any additional stats fields the engine populated (sources,
+  // buildMs, etc.) and only overlay the canonical counts.
   graph.stats = {
+    ...(graph.stats || {}),
     nodes: graph.nodes.length,
     edges: graph.edges.length,
     communities: Object.keys(graph.communities || {}).length,
