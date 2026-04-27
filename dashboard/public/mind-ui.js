@@ -770,7 +770,13 @@
       <div style="font-size:11px;color:var(--subtext0);flex-shrink:0;padding:8px 12px;border-bottom:1px solid var(--surface0);background:var(--mantle);">
         Each circle is a community. Edges show cross-community bridges (sized by traffic). Click a circle to drill in.
       </div>
-      <div id="mindCanvasHost" style="flex:1;min-height:0;width:100%;background:var(--mantle);"></div>`;
+      <div style="flex:1;min-height:0;width:100%;background:var(--mantle);position:relative;">
+        <div id="mindCanvasHost" style="position:absolute;inset:0;"></div>
+        <div id="mindGraphLoader" class="mind-loader-overlay" style="display:none;">
+          <div class="mind-spinner"></div>
+          <div class="mind-loader-text">Laying out map...</div>
+        </div>
+      </div>`;
 
     // Aggregate cross-community edge counts.
     const idCommunity = new Map();
@@ -981,7 +987,8 @@
         <button class="tab-bar-btn" onclick="MindUI.fitGraph()" style="font-size:11px;" title="Fit graph to view">Fit</button>
         <button class="tab-bar-btn" onclick="MindUI.togglePhysics()" id="mindPhysicsBtn" style="font-size:11px;" title="Pause/resume layout physics">Freeze</button>
       </div>
-      <div id="mindCanvasHost" style="flex:1;min-height:0;width:100%;background:var(--mantle);position:relative;">
+      <div style="flex:1;min-height:0;width:100%;background:var(--mantle);position:relative;">
+        <div id="mindCanvasHost" style="position:absolute;inset:0;"></div>
         <div id="mindGraphLoader" class="mind-loader-overlay" style="display:flex;">
           <div class="mind-spinner"></div>
           <div class="mind-loader-text">Preparing graph...</div>
