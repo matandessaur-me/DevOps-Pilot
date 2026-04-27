@@ -31,7 +31,7 @@ test('renderL0 includes activeRepo and space', () => {
   assert.match(out, /mind_space: global/);
 });
 
-test('renderL0 reads CLAUDE.md preamble when present', () => {
+test('renderL0 reads an AI-instructions preamble when present', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wakeup-l0-'));
   fs.writeFileSync(path.join(dir, 'CLAUDE.md'), '# Project Foo\n\nThis is the project preamble line.\n\nLater paragraph that should NOT show up.');
   try {
@@ -39,6 +39,37 @@ test('renderL0 reads CLAUDE.md preamble when present', () => {
     assert.match(out, /Project Foo/);
     assert.match(out, /preamble line/);
     assert.doesNotMatch(out, /Later paragraph/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('renderL0 strips the regen-header line so the preamble is CLI-agnostic', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wakeup-l0-strip-'));
+  // writePluginHints generates files starting with "# <FILENAME>.md - <repo>"
+  // because of {{FILENAME}} substitution. The wake-up should not surface that
+  // line — it's regen plumbing, not content.
+  fs.writeFileSync(path.join(dir, 'CLAUDE.md'),
+    '# CLAUDE.md - Symphonee\n\n**Real content:** these instructions tell the AI how to behave.\n\nMore body.');
+  try {
+    const out = renderL0({ activeRepo: 'Symphonee', activeRepoPath: dir, space: '_global' });
+    assert.doesNotMatch(out, /# CLAUDE\.md/i, 'must not surface the regen header');
+    assert.doesNotMatch(out, /\{\{FILENAME\}\}/, 'must strip raw template placeholders');
+    assert.match(out, /Real content/, 'must keep the actual instructions body');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('renderL0 picks AGENTS.md when CLAUDE.md is absent (Codex-only user)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wakeup-l0-codex-'));
+  // Simulate a user who only has Codex installed -- only AGENTS.md exists.
+  fs.writeFileSync(path.join(dir, 'AGENTS.md'),
+    '# AGENTS.md - SomeRepo\n\nThis is the AGENTS instruction body.\n');
+  try {
+    const out = renderL0({ activeRepo: 'SomeRepo', activeRepoPath: dir, space: 's' });
+    assert.doesNotMatch(out, /# AGENTS\.md/i, 'AGENTS.md regen header must also be stripped');
+    assert.match(out, /AGENTS instruction body/, 'must surface the actual body');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

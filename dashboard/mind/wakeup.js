@@ -46,6 +46,21 @@ function readFirstExisting(paths, max = 600) {
   return '';
 }
 
+// Symphonee regenerates six per-CLI instruction files from one template
+// (INSTRUCTIONS.base.md) — CLAUDE.md, AGENTS.md, GEMINI.md, GROK.md, QWEN.md,
+// .github/copilot-instructions.md. Each starts with "# <FILENAME>.md - <repo>"
+// because writePluginHints does {{FILENAME}} substitution. That header is a
+// regen artefact, not content — strip it so the wake-up doesn't claim to be
+// reading any one CLI's file when in reality the body is identical across all
+// six. A user who only runs Codex (no CLAUDE.md installed) gets exactly the
+// same preamble.
+const REGEN_HEADER = /^\s*#\s*(?:CLAUDE|AGENTS|GEMINI|GROK|QWEN|copilot-instructions)\.md\b[^\n]*\n*/i;
+
+function stripRegenHeader(text) {
+  if (!text) return text;
+  return text.replace(REGEN_HEADER, '').replace(/\{\{\s*FILENAME\s*\}\}/g, '').trim();
+}
+
 function renderL0({ activeRepo, activeRepoPath, space }) {
   const lines = ['## L0 - IDENTITY'];
   lines.push(`active_repo: ${activeRepo || '(none selected)'}`);
@@ -53,18 +68,24 @@ function renderL0({ activeRepo, activeRepoPath, space }) {
   lines.push(`mind_space: ${space || '_global'}`);
 
   if (activeRepoPath) {
+    // Try AI-instruction files in alphabetical order so no single CLI is
+    // implicitly favoured. (When Symphonee has regenerated all six, content
+    // is identical anyway — the body is the same regardless of which file
+    // we end up reading.) Fall through to README.md if none of them exist.
     const preamble = readFirstExisting([
-      path.join(activeRepoPath, 'CLAUDE.md'),
       path.join(activeRepoPath, 'AGENTS.md'),
+      path.join(activeRepoPath, 'CLAUDE.md'),
+      path.join(activeRepoPath, 'GEMINI.md'),
+      path.join(activeRepoPath, 'GROK.md'),
+      path.join(activeRepoPath, 'QWEN.md'),
+      path.join(activeRepoPath, '.github', 'copilot-instructions.md'),
       path.join(activeRepoPath, '.cursorrules'),
       path.join(activeRepoPath, 'README.md'),
-    ], 600);
+    ], 800);
     if (preamble) {
-      // Take heading + first body paragraph. Markdown READMEs / CLAUDE.md
-      // files almost always open with "# Title\n\nIntro paragraph..." — a
-      // simple "first paragraph" split would stop at the title and miss
-      // the intro that actually carries information.
-      const paras = preamble.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+      const cleaned = stripRegenHeader(preamble);
+      // Take the first body paragraphs after the regen-header strip.
+      const paras = cleaned.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
       const intro = paras.slice(0, 2).join('\n\n').slice(0, 400);
       if (intro) {
         lines.push('');
