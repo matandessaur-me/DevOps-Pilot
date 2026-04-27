@@ -81,7 +81,10 @@ async function getSession({ getSettings, getConfig } = {}) {
     const Stagehand = _loadStagehand();
     const settings = (typeof getSettings === 'function' ? getSettings() : {}) || {};
     const model = settings.model || 'anthropic/claude-sonnet-4-6';
-    const headless = settings.headless === true;
+    // Default ON: when the user hasn't explicitly saved a value, run headless
+    // so the in-app Browser tab screencast IS the only visual surface (no
+    // external Chrome window). Saved value of false opts back into headed.
+    const headless = settings.headless !== false;
 
     _exportSavedKeysToEnv(getConfig);
     const apiKey = _resolveApiKey(model, getConfig);
