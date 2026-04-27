@@ -112,7 +112,10 @@ async function _stagehandReachable(port) {
 async function _dispatchStagehand(port, body) {
   const mode = (body.mode || 'act').toLowerCase();
   const text = body.goal || body.instruction || '';
-  if (body.url && mode !== 'agent') {
+  // Always seed the page if a URL is given. The agent loop assumes there is
+  // already an active StagehandPage to inspect; calling /goto first creates
+  // it so the agent's first awaitActivePage doesn't dereference null.
+  if (body.url) {
     await _localPost(port, '/api/plugins/stagehand/goto', { url: body.url });
   }
   if (mode === 'extract') return _localPost(port, '/api/plugins/stagehand/extract', { instruction: text });
