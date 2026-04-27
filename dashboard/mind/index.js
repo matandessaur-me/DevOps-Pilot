@@ -16,6 +16,7 @@ const store = require('./store');
 const { Manifest } = require('./manifest');
 const engine = require('./engine');
 const query = require('./query');
+const { composeWakeUp, DEFAULT_BUDGET_TOKENS } = require('./wakeup');
 const { sanitizeLabel, validateUrl } = require('./security');
 const { MindWatcher } = require('./watch');
 
@@ -55,6 +56,75 @@ function mountMind(addRoute, json, ctx) {
     const space = getSpace();
     const stats = store.statsFor(repoRoot, space);
     return json(res, { space, stats });
+  });
+
+  // ── Mind-aware CLI routing suggestion ────────────────────────────────────
+  //
+  // Returns a CLI ranking based on which CLIs have previously completed
+  // similar tasks successfully. Pulls conversation/task nodes whose label
+  // overlaps with the prompt (BM25), groups by `createdBy` (the CLI), and
+  // weights by recency.
+  //
+  // This is ADVISORY. The model-router script is still authoritative for
+  // intent-based routing; this answers a different question:
+  // "for THIS specific task, who has been on it before?"
+  //
+  // Multi-CLI: every CLI Symphonee supports can appear in the ranking.
+  // If a CLI has never completed a similar task, it simply doesn't appear
+  // — that's not a vote against it, just absence of evidence.
+  addRoute('POST', '/api/mind/suggest-cli', async (req, res) => {
+    const body = await readBody(req).catch(() => ({}));
+    const { question, prompt, limit = 5 } = body;
+    const q = question || prompt;
+    if (!q) return json(res, { error: 'question or prompt required' }, 400);
+    const space = getSpace();
+    const g = store.loadGraph(repoRoot, space);
+    if (!g) return json(res, { suggestions: [], note: 'graph empty' });
+
+    const seedIds = query.bestSeeds(g, q, 20);
+    if (!seedIds.length) return json(res, { suggestions: [], note: 'no similar tasks in brain yet' });
+
+    // Among seeded nodes, look for conversation/qa/task nodes carrying a CLI.
+    const now = Date.now();
+    const halfLifeMs = 30 * 24 * 60 * 60 * 1000; // 30 days
+    const perCli = new Map();
+    for (const sid of seedIds) {
+      const n = g.nodes.find(x => x.id === sid);
+      if (!n) continue;
+      if (n.kind !== 'conversation' && n.kind !== 'drawer') continue;
+      const cli = n.createdBy;
+      if (!cli || cli === 'system' || cli === 'orchestrator' || cli === 'unknown') continue;
+      const age = n.createdAt ? Math.max(0, now - new Date(n.createdAt).getTime()) : halfLifeMs;
+      const recencyScore = Math.exp(-age / halfLifeMs);
+      const slot = perCli.get(cli) || { cli, count: 0, score: 0, latest: null, examples: [] };
+      slot.count += 1;
+      slot.score += recencyScore;
+      if (!slot.latest || (n.createdAt && n.createdAt > slot.latest)) slot.latest = n.createdAt || slot.latest;
+      if (slot.examples.length < 3) slot.examples.push({ id: n.id, label: (n.label || '').slice(0, 80), createdAt: n.createdAt });
+      perCli.set(cli, slot);
+    }
+    const suggestions = Array.from(perCli.values()).sort((a, b) => b.score - a.score).slice(0, limit);
+    return json(res, {
+      question: q.slice(0, 200),
+      suggestions,
+      note: suggestions.length ? 'advisory only; model-router still authoritative for intent-based picks' : 'no past CLI activity for similar tasks',
+    });
+  });
+
+  // ── Wake-up (L0+L1 layered context for prompt injection) ─────────────────
+  addRoute('GET', '/api/mind/wakeup', (req, res) => {
+    const space = getSpace();
+    const ui = getUiContext ? getUiContext() : {};
+    const url = new URL(req.url, 'http://x');
+    const budget = parseInt(url.searchParams.get('budget') || '', 10);
+    const question = url.searchParams.get('question') || '';
+    const g = store.loadGraph(repoRoot, space) || { nodes: [], edges: [], gods: [] };
+    const wake = composeWakeUp(g, {
+      activeRepo: ui.activeRepo, activeRepoPath: ui.activeRepoPath, space,
+      budgetTokens: Number.isFinite(budget) && budget > 0 ? budget : DEFAULT_BUDGET_TOKENS,
+      question,
+    });
+    return json(res, { space, ...wake });
   });
 
   addRoute('GET', '/api/mind/node', (req, res) => {
@@ -179,17 +249,48 @@ function mountMind(addRoute, json, ctx) {
       mode: body.mode || 'bfs',
       budget: body.budget || 2000,
       seedIds: body.seedIds || null,
+      asOf: body.asOf || null,
     });
     return json(res, result);
   });
 
   // ── Q&A feedback loop: save an answer back into the graph ────────────────
+  //
+  // Cite-grounding check: every cited node ID must (a) actually exist in the
+  // graph, and (b) have its label or a substring of its content referenced
+  // somewhere in the answer text. Otherwise the brain would happily store
+  // plausible-sounding but ungrounded text — the failure mode that erodes
+  // trust in RAG systems over time.
+  //
+  // The check is *advisory by default* — confidence on ungrounded edges
+  // downgrades to AMBIGUOUS rather than rejecting the save outright.
+  // Pass `strict: true` to reject saves with no grounded citations at all.
   addRoute('POST', '/api/mind/save-result', async (req, res) => {
     const body = await readBody(req).catch(() => ({}));
-    const { question, answer, citedNodeIds = [], createdBy = 'unknown' } = body;
+    const { question, answer, citedNodeIds = [], createdBy = 'unknown', strict = false } = body;
     if (!question || !answer) return json(res, { error: 'question and answer required' }, 400);
     const space = getSpace();
     let g = store.loadGraph(repoRoot, space) || store.emptyGraph({ space });
+
+    // Audit each citation: does the answer actually reference the node?
+    const lowerAnswer = String(answer).toLowerCase();
+    const audit = [];
+    for (const cited of citedNodeIds) {
+      const node = g.nodes.find(n => n.id === cited);
+      if (!node) { audit.push({ id: cited, status: 'unknown' }); continue; }
+      const labelHit = node.label && lowerAnswer.includes(String(node.label).toLowerCase().slice(0, 60));
+      const idHit = lowerAnswer.includes(String(cited).toLowerCase());
+      audit.push({ id: cited, status: (labelHit || idHit) ? 'grounded' : 'ungrounded' });
+    }
+    const grounded = audit.filter(a => a.status === 'grounded');
+    if (strict && citedNodeIds.length > 0 && grounded.length === 0) {
+      return json(res, {
+        error: 'no cited nodes are grounded in the answer text',
+        audit,
+        hint: 'reference each cited node by its label or id in your answer, or set strict:false to save anyway',
+      }, 400);
+    }
+
     const ts = Date.now();
     const id = `qa_${ts}_${Math.random().toString(36).slice(2, 6)}`;
     g.nodes.push({
@@ -197,19 +298,27 @@ function mountMind(addRoute, json, ctx) {
       source: { type: 'qa', ref: createdBy }, sourceLocation: null,
       createdBy, createdAt: new Date().toISOString(), tags: ['qa'],
       answer: sanitizeLabel(answer.slice(0, 4000)),
+      groundedCount: grounded.length,
+      citationCount: citedNodeIds.length,
     });
     for (const cited of citedNodeIds) {
-      if (g.nodes.find(n => n.id === cited)) {
-        g.edges.push({
-          source: id, target: cited, relation: 'derived_from',
-          confidence: 'EXTRACTED', confidenceScore: 1.0, weight: 1.0,
-          createdBy, createdAt: new Date().toISOString(),
-        });
-      }
+      const node = g.nodes.find(n => n.id === cited);
+      if (!node) continue;
+      const a = audit.find(x => x.id === cited);
+      // Ungrounded citations get edge confidence INFERRED + a lower score,
+      // so query consumers see the warning without the data being lost.
+      const isGrounded = a && a.status === 'grounded';
+      g.edges.push({
+        source: id, target: cited, relation: 'derived_from',
+        confidence: isGrounded ? 'EXTRACTED' : 'INFERRED',
+        confidenceScore: isGrounded ? 1.0 : 0.5,
+        weight: 1.0,
+        createdBy, createdAt: new Date().toISOString(),
+      });
     }
     store.saveGraph(repoRoot, space, g);
     if (broadcast) broadcast({ type: 'mind-update', payload: { kind: 'node-added', id, createdBy } });
-    return json(res, { ok: true, nodeId: id });
+    return json(res, { ok: true, nodeId: id, audit, groundedCount: grounded.length });
   });
 
   // ── Manual ingest: a user/agent pushes one artefact at a time ────────────
@@ -296,12 +405,30 @@ function mountMind(addRoute, json, ctx) {
     bootstrapField() {
       const space = getSpace();
       const stats = store.statsFor(repoRoot, space);
+      const ui = getUiContext ? getUiContext() : {};
+      // L0+L1 wake-up text bundled with the bootstrap so every CLI gets the
+      // identity + essential-story tier without a follow-up call. Cheap (no
+      // I/O beyond the graph file already cached + an optional CLAUDE.md
+      // read) and capped to ~600 tokens. CLIs that want depth use
+      // /api/mind/query as before.
+      let wakeup = null;
+      if (stats) {
+        try {
+          const g = store.loadGraph(repoRoot, space);
+          if (g) wakeup = composeWakeUp(g, {
+            activeRepo: ui.activeRepo, activeRepoPath: ui.activeRepoPath, space,
+            budgetTokens: 600,
+          });
+        } catch (_) { /* graph corrupt - skip wake-up, bootstrap still ships */ }
+      }
       return {
         enabled: !!stats,
         scope: { space, isGlobal: false },
         graphStats: stats || null,
+        wakeup,
         instructionsUrl: '/api/mind/instructions',
         queryUrl: '/api/mind/query',
+        wakeupUrl: '/api/mind/wakeup',
         message: stats
           ? 'A shared knowledge graph exists for this space. Call POST /api/mind/query before answering questions about this codebase, notes, or prior decisions. Save new findings via POST /api/mind/save-result.'
           : 'Mind graph is empty for this space. Run POST /api/mind/build to populate it.',
@@ -347,13 +474,39 @@ function mountMind(addRoute, json, ctx) {
       if (broadcast) broadcast({ type: 'mind-update', payload: { kind: 'node-added', id, createdBy: task.cli } });
     },
 
-    // For orchestrator: short hint injected as prefix into dispatched prompts
-    orchestratorHint() {
+    // For orchestrator: hint injected as prefix into dispatched prompts.
+    //
+    // Two-tier output:
+    //   - Always: a one-line metadata stamp + query/save instructions.
+    //   - When the graph has god nodes or recent conversations: append the
+    //     L0+L1 wake-up (~400-700 tokens) so the worker starts with identity
+    //     + essential-story context without making a /api/mind/wakeup call.
+    //
+    // The worker is still expected to call /api/mind/query for anything
+    // specific - the hint is the wake-up, not the answer.
+    orchestratorHint(opts = {}) {
       const space = getSpace();
       const stats = store.statsFor(repoRoot, space);
       if (!stats) return `[mind: ${space} empty]`;
       const ageMin = Math.round((Date.now() - new Date(stats.lastBuildAt).getTime()) / 60000);
-      return `[mind: ${space} nodes=${stats.nodes} edges=${stats.edges} communities=${stats.communities} staleness=${ageMin}m] Query before answering: POST http://127.0.0.1:3800/api/mind/query {"question":"..."}. Save findings: POST /api/mind/save-result {"question","answer","citedNodeIds"}.`;
+      const stamp = `[mind: ${space} nodes=${stats.nodes} edges=${stats.edges} communities=${stats.communities} staleness=${ageMin}m] Query before answering: POST http://127.0.0.1:3800/api/mind/query {"question":"..."}. Save findings: POST /api/mind/save-result {"question","answer","citedNodeIds"}.`;
+      if (opts.minimal) return stamp;
+      try {
+        const g = store.loadGraph(repoRoot, space);
+        if (!g) return stamp;
+        const ui = getUiContext ? getUiContext() : {};
+        // When the orchestrator passes the worker's task prompt as opts.question,
+        // L1 becomes the BFS sub-graph for that task. Otherwise it's the
+        // generic "god nodes + recent conversations" view.
+        const wake = composeWakeUp(g, {
+          activeRepo: ui.activeRepo, activeRepoPath: ui.activeRepoPath, space,
+          budgetTokens: opts.budgetTokens || 600,
+          question: opts.question || '',
+        });
+        return `${stamp}\n\n${wake.text}`;
+      } catch (_) {
+        return stamp;
+      }
     },
   };
 }

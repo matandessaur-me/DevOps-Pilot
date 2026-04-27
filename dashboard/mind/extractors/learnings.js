@@ -45,6 +45,11 @@ function extractLearnings({ getLearnings, createdBy = 'mind/learnings' }) {
         source: id, target: cid, relation: 'tagged_with',
         confidence: 'EXTRACTED', confidenceScore: 1.0, weight: 1.0,
         createdBy, createdAt: new Date().toISOString(),
+        // Temporal validity: a learning becomes a fact ON the day it was
+        // added. asOf queries with a date earlier than that should NOT
+        // surface it. validTo stays open since learnings have no expiry
+        // until someone marks them obsolete.
+        validFrom: l.addedAt ? new Date(l.addedAt).toISOString() : undefined,
       });
     }
 
@@ -62,6 +67,7 @@ function extractLearnings({ getLearnings, createdBy = 'mind/learnings' }) {
         source: id, target: cliId, relation: 'tagged_with',
         confidence: 'EXTRACTED', confidenceScore: 1.0, weight: 1.0,
         createdBy, createdAt: new Date().toISOString(),
+        validFrom: l.addedAt ? new Date(l.addedAt).toISOString() : undefined,
       });
     }
   }

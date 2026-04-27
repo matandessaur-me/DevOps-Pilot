@@ -321,10 +321,168 @@
       return;
     }
     if (state.view === 'dashboard') renderDashboard();
+    else if (state.view === 'wakeup') renderWakeup();
+    else if (state.view === 'query') renderQuery();
     else if (state.view === 'communities') renderCommunities();
     else if (state.view === 'hotspots') renderHotspots();
     else if (state.view === 'map') renderMap();
     else if (state.view === 'graph') renderGraph();
+  }
+
+  // ── Wake-up view ──────────────────────────────────────────────────────────
+  // Shows the exact L0+L1 text every dispatched worker sees as its prompt
+  // prefix. Useful for diagnosing "why is the worker missing context?".
+  // Includes a question input to preview task-aware L1 (the BFS sub-graph
+  // the orchestrator generates per dispatched task).
+  async function renderWakeup() {
+    const main = $('mindMain');
+    if (!main) return;
+    const cached = state.wakeup || {};
+    main.innerHTML = `
+      <div class="mind-card" style="max-width:980px;margin:0 auto;">
+        <div class="mind-card-title">Wake-up preview</div>
+        <div style="font-size:11px;color:var(--subtext0);margin-bottom:10px;line-height:1.55;">
+          The L0 + L1 prompt prefix every dispatched worker (any CLI: claude, codex, gemini, grok, qwen, copilot) receives at the start of its task. Type a sample task prompt below to preview the task-aware L1 — the BFS sub-graph the orchestrator generates per dispatched task.
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+          <input id="mindWakeupQ" type="text" placeholder="Optional: a sample task prompt to preview task-aware L1" style="flex:1;min-width:260px;padding:7px 10px;background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:12px;" value="${escapeHtml(cached.question || '')}">
+          <label style="font-size:11px;color:var(--subtext0);display:flex;align-items:center;gap:4px;" title="Token budget for the wake-up text">
+            budget
+            <input id="mindWakeupBudget" type="number" min="200" max="2000" step="100" value="${cached.budget || 600}" style="width:74px;padding:4px 6px;background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:11px;">
+          </label>
+          <button class="tab-bar-btn" onclick="MindUI._wakeupRefresh()" style="padding:5px 14px;font-size:11px;">Refresh</button>
+        </div>
+        <pre id="mindWakeupOut" style="background:var(--mantle);padding:14px;border-radius:6px;font-size:11px;line-height:1.6;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;color:var(--text);min-height:160px;border:1px solid var(--surface0);margin:0;">Loading wake-up...</pre>
+        <div id="mindWakeupMeta" style="font-size:10px;color:var(--subtext0);margin-top:8px;font-variant-numeric:tabular-nums;display:flex;flex-wrap:wrap;gap:14px;"></div>
+      </div>`;
+    await refreshWakeupOutput();
+    const qEl = $('mindWakeupQ');
+    if (qEl) qEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') refreshWakeupOutput(); });
+  }
+
+  async function refreshWakeupOutput() {
+    const q = ($('mindWakeupQ') && $('mindWakeupQ').value || '').trim();
+    const budget = parseInt(($('mindWakeupBudget') && $('mindWakeupBudget').value) || '600', 10);
+    state.wakeup = { question: q, budget };
+    const url = `/api/mind/wakeup?budget=${budget}${q ? `&question=${encodeURIComponent(q)}` : ''}`;
+    try {
+      const data = await API(url);
+      const out = $('mindWakeupOut'); const meta = $('mindWakeupMeta');
+      // Decode any legacy double-escaped entities before rendering as text.
+      // textContent (not innerHTML) means we don't need re-escaping after decoding.
+      if (out) out.textContent = decodeHtmlEntities(data.text || '(empty)');
+      if (meta) {
+        meta.innerHTML = `
+          <span>~<strong style="color:var(--text);">${data.estTokens || 0}</strong> tokens</span>
+          <span>L0: <strong style="color:var(--text);">${data.layers?.l0Chars || 0}</strong> chars</span>
+          <span>L1: <strong style="color:var(--text);">${data.layers?.l1Chars || 0}</strong> chars</span>
+          <span>${data.queryAware ? '<strong style="color:#a6e3a1;">task-aware</strong>' : '<strong style="color:var(--subtext0);">generic</strong>'}</span>`;
+      }
+    } catch (e) {
+      const out = $('mindWakeupOut');
+      if (out) out.textContent = 'Error: ' + (e.message || String(e));
+    }
+  }
+
+  // ── Search view ─────────────────────────────────────────────────────────
+  // Run a /api/mind/query interactively. The endpoint returns the most
+  // relevant nodes in the brain — it does NOT synthesize an answer. Think
+  // of this as "find context", not "ask a chatbot". An AI would then
+  // consume these nodes to compose an answer.
+  async function renderQuery() {
+    const main = $('mindMain');
+    if (!main) return;
+    const c = state.queryUI || {};
+    main.innerHTML = `
+      <div class="mind-card" style="max-width:980px;margin:0 auto;">
+        <div class="mind-card-title">Search the brain</div>
+        <div style="font-size:11px;color:var(--subtext0);margin-bottom:10px;line-height:1.55;">
+          Returns the most relevant <span style="color:var(--text);">nodes</span> for your topic — context an AI uses to answer, not an answer itself.
+          Type a topic ("browser router fallback") rather than a chat-style question. Empty results mean the brain hasn't ingested anything matching — try a build or different keywords.
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+          <input id="mindQueryQ" type="text" placeholder="Topic or keywords (e.g. 'permission modes', 'browser router fallback')..." style="flex:1;min-width:280px;padding:7px 10px;background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:12px;" value="${escapeHtml(c.question || '')}">
+          <label style="font-size:11px;color:var(--subtext0);display:flex;align-items:center;gap:4px;" title="Filter to facts that were true on this date. Half-open [validFrom, validTo).">
+            as of
+            <input id="mindQueryAsOf" type="date" value="${escapeHtml(c.asOf || '')}" style="padding:4px 6px;background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:11px;color-scheme:dark;">
+          </label>
+          <label style="font-size:11px;color:var(--subtext0);display:flex;align-items:center;gap:4px;" title="Approximate token budget for the returned sub-graph">
+            budget
+            <input id="mindQueryBudget" type="number" min="200" max="8000" step="100" value="${c.budget || 2000}" style="width:74px;padding:4px 6px;background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:11px;">
+          </label>
+          <button class="tab-bar-btn" onclick="MindUI._queryRun()" style="padding:5px 14px;font-size:11px;">Find context</button>
+        </div>
+        <div id="mindQueryOut" style="display:flex;flex-direction:column;gap:10px;"></div>
+      </div>`;
+    const qEl = $('mindQueryQ');
+    if (qEl) qEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') runQueryFromUi(); });
+    if (c.lastResult) renderQueryResult(c.lastResult);
+  }
+
+  async function runQueryFromUi() {
+    const question = ($('mindQueryQ') && $('mindQueryQ').value || '').trim();
+    if (!question) return;
+    const asOf = ($('mindQueryAsOf') && $('mindQueryAsOf').value) || null;
+    const budget = parseInt(($('mindQueryBudget') && $('mindQueryBudget').value) || '2000', 10);
+    state.queryUI = { question, asOf, budget };
+    try {
+      const data = await fetch('/api/mind/query', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, asOf: asOf || null, budget }),
+      }).then(r => r.json());
+      state.queryUI.lastResult = data;
+      renderQueryResult(data);
+    } catch (e) {
+      const out = $('mindQueryOut');
+      if (out) out.innerHTML = `<div style="color:#f38ba8;">Error: ${escapeHtml(e.message || String(e))}</div>`;
+    }
+  }
+
+  function renderQueryResult(data) {
+    const out = $('mindQueryOut');
+    if (!out) return;
+    if (!data || data.empty || !data.nodes || !data.nodes.length) {
+      const note = data && data.empty
+        ? 'The brain has nothing on that topic.'
+        : 'No matches found.';
+      out.innerHTML = `
+        <div style="background:var(--mantle);border:1px dashed var(--surface1);border-radius:6px;padding:18px;color:var(--subtext0);font-size:12px;line-height:1.6;">
+          <div style="color:var(--text);font-weight:600;margin-bottom:6px;">${escapeHtml(note)}</div>
+          <div>Try different keywords, or run a build to ingest more sources. The brain only knows what's been mined.</div>
+        </div>`;
+      return;
+    }
+    const seeds = (data.seedIds || []).slice(0, 8);
+    const nodes = (data.nodes || []).slice(0, 30);
+
+    const seedsHtml = seeds.length
+      ? seeds.map(s => `<span style="background:var(--surface0);padding:2px 8px;border-radius:10px;font-family:monospace;font-size:10px;display:inline-block;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;" title="${escapeHtml(s)}">${escapeHtml(s)}</span>`).join(' ')
+      : '<span style="font-style:italic;color:var(--subtext0);">none</span>';
+
+    out.innerHTML = `
+      <div style="background:var(--mantle);border:1px solid var(--surface0);border-radius:6px;padding:10px 14px;font-size:11px;color:var(--subtext0);">
+        <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin-bottom:6px;">
+          <span style="text-transform:uppercase;letter-spacing:0.5px;font-size:10px;">Seeds (BM25)</span>
+          <span style="flex:1;min-width:0;line-height:1.9;word-break:break-all;">${seedsHtml}</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:14px;font-variant-numeric:tabular-nums;">
+          <span><strong style="color:var(--text);">${nodes.length}</strong> nodes</span>
+          <span><strong style="color:var(--text);">${(data.edges || []).length}</strong> edges</span>
+          <span>~<strong style="color:var(--text);">${data.estTokens || 0}</strong> tokens</span>
+          <span>as of <strong style="color:var(--text);">${escapeHtml(data.asOf || 'now (timeless)')}</strong></span>
+        </div>
+      </div>
+      <div style="margin-top:8px;display:grid;grid-template-columns:1fr;gap:3px;">
+        ${nodes.map(n => `
+          <a href="#" class="mind-godlink" data-id="${escapeHtml(n.id)}" style="display:grid;grid-template-columns:120px 1fr;align-items:center;gap:10px;padding:7px 12px;background:var(--mantle);border-radius:4px;text-decoration:none;color:var(--text);font-size:12px;border:1px solid transparent;">
+            <span style="font-size:9px;color:var(--subtext0);text-transform:uppercase;letter-spacing:0.5px;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">[${escapeHtml(n.kind)}]</span>
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;" title="${escapeHtml(n.label || n.id)}">${escapeHtml(n.label || n.id)}</span>
+          </a>`).join('')}
+      </div>`;
+    out.querySelectorAll('.mind-godlink').forEach(a => a.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      showNodeDetail(a.dataset.id);
+    }));
   }
 
   // ── Dashboard view (the "dashboard into the brain") ────────────────────────
@@ -868,6 +1026,9 @@
     code: 'dot', doc: 'square', note: 'star', plugin: 'diamond',
     recipe: 'triangle', tag: 'dot', concept: 'dot', conversation: 'hexagon',
     workitem: 'box', image: 'image', paper: 'square',
+    // Drawers (verbatim user/assistant turns) get a distinctive triangleDown
+    // so they're separable from concept dots and conversation hexagons.
+    drawer: 'triangleDown',
   };
 
   function nodeSize(degree) {
@@ -1194,7 +1355,23 @@
     return n ? n.label : id;
   }
   function confColor(c) { return c === 'EXTRACTED' ? 'var(--green)' : c === 'INFERRED' ? 'var(--yellow)' : 'var(--red)'; }
-  function escapeHtml(s) { if (typeof s !== 'string') s = String(s ?? ''); return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  // Decode HTML entities that may have been written into labels by older
+  // builds (sanitizeLabel used to HTML-escape at write time, which double-
+  // escaped at render). Decode iteratively so `&amp;quot;` becomes `"`.
+  function decodeHtmlEntities(s) {
+    if (typeof s !== 'string') return '';
+    let prev = null; let out = s;
+    for (let i = 0; i < 3 && out !== prev; i++) {
+      prev = out;
+      out = out.replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" }[e]));
+    }
+    return out;
+  }
+  function escapeHtml(s) {
+    if (typeof s !== 'string') s = String(s ?? '');
+    s = decodeHtmlEntities(s);
+    return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
 
   function metaRow(key, valueHtml, mono) {
     return `<div class="mind-meta-key">${escapeHtml(key)}</div><div class="mind-meta-val${mono ? ' mind-meta-val-mono' : ''}">${valueHtml}</div>`;
@@ -1261,5 +1438,8 @@
     } catch (_) { return iso; }
   }
 
-  window.MindUI = { onActivate, setView, build, update, toggleWatch, askAbout, purgeNode, closeDetail, fitGraph, togglePhysics, clearSearch, toggleSearchOnly };
+  window.MindUI = { onActivate, setView, build, update, toggleWatch, askAbout, purgeNode, closeDetail, fitGraph, togglePhysics, clearSearch, toggleSearchOnly,
+    _wakeupRefresh: refreshWakeupOutput,
+    _queryRun: runQueryFromUi,
+  };
 })();

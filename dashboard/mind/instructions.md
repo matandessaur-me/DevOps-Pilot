@@ -48,6 +48,16 @@ relevant. Solid edges are EXTRACTED (explicit in source). Dashed are
 INFERRED (defensible deduction). Dotted-red are AMBIGUOUS (uncertain - prefer
 EXTRACTED when in doubt).
 
+Seeds are picked by BM25 over node label + tags + description, with a
+god-node prior. Pass `"asOf": "<ISO-date>"` to ask "what was true at that
+moment?" — edges with `validFrom`/`validTo` are filtered to the half-open
+interval `[validFrom, validTo)`. Timeless edges (no validity fields) always
+return. Use `asOf` for historical-state questions; otherwise omit it.
+
+For session start / wake-up context (identity + god nodes + recent
+conversations, ~600 tokens), call `GET /api/mind/wakeup?budget=600`. The
+bootstrap response also embeds this under `mind.wakeup`.
+
 ## After you answer: save the result
 
 Whatever you figured out, save it back so the next CLI - or you in the next
@@ -108,5 +118,40 @@ There is one brain per **space** (the user's `activeSpace`). The bootstrap
 payload always tells you the current space and how many nodes the brain
 contains. If `mind.enabled = false`, the brain is empty for this space -
 suggest a build but don't insist.
+
+When the bootstrap arrives with `mind.wakeup` populated, you already have
+the L0 (active repo identity + CLAUDE.md preamble) and L1 (god nodes +
+newest cross-CLI conversations) tiers in hand. Use them as the starting
+context for the session before making any query. The `/api/mind/query`
+endpoint serves L2/L3 — go there for specific questions.
+
+## Node kinds
+
+`note`, `code`, `doc`, `paper`, `image`, `workitem`, `recipe`,
+`conversation` (saved-back AI answers), `plugin`, `concept`, `tag`,
+`drawer` (verbatim user/assistant turn — never paraphrase a drawer).
+
+The `cli-drawers` build source produces drawers from any supported CLI's
+session jsonl — Claude Code, Codex, Qwen, Grok all use the same path.
+Each drawer has deterministic ID `drawer_<cli>_<sessionId>_<msgIdx>` and
+a `derived_from` edge to its parent session node.
+
+## Saving back: grounding check
+
+`POST /api/mind/save-result` now audits cited node IDs against the answer
+text. Citations whose label or id never appears in the answer are tagged
+`ungrounded`, and their `derived_from` edges land at `INFERRED` + 0.5
+confidence instead of `EXTRACTED` + 1.0. The save still succeeds — the
+brain doesn't lose data — but consumers see the warning. Pass
+`"strict": true` to reject saves with zero grounded citations.
+
+## Multi-CLI save-back hook
+
+When you (any CLI: Claude Code, Codex, Qwen, Grok, Gemini, Copilot) run
+**outside** the orchestrator, install `scripts/hooks/mind-stop-hook.sh`
+in your CLI's Stop hook config to checkpoint conversations into Mind
+every N messages. The script body is identical across CLIs; only the
+config wrapper differs. See INSTRUCTIONS.base.md "Per-CLI save-back
+hook" for per-CLI install snippets.
 
 You and every other CLI in this system share this brain. Treat it that way.

@@ -174,6 +174,10 @@ curl -s -X POST http://127.0.0.1:3800/api/mind/query \
 
 Returns `{ nodes, edges, seedIds, answer: { suggestion, summary, note } }`. Cite node IDs in your answer. Solid edges = EXTRACTED (explicit in source). Dashed = INFERRED. Dotted-red = AMBIGUOUS - prefer EXTRACTED when in doubt.
 
+Seed selection is BM25 over node label + tags + description, with a god-node prior. Substring fallback covers tokenization edge cases.
+
+**Time-aware queries.** Edges may carry optional `validFrom` / `validTo` ISO date strings. Pass `{ "asOf": "2026-04-01" }` to filter to facts that were true on that date — half-open interval `[validFrom, validTo)`. Edges without those fields are timeless and always returned. Use `asOf` when the user is asking about historical state ("what did we use BEFORE Postgres?", "as of last quarter, what was the auth flow?"); otherwise omit it.
+
 ### After you answer (always save back)
 
 ```bash
@@ -188,7 +192,7 @@ Adds your answer as a `conversation` node with `derived_from` edges to the cited
 
 Mind always ingests every repo Symphonee knows about (each `cfg.Repos` entry), tagging each node with `cwd:<repoName>`. Cross-project knowledge accumulates by default - a question about repo A can surface relevant code from repo B.
 
-- **Full build:** `POST /api/mind/build` (or `./scripts/Build-Mind.ps1` / `node scripts/build-mind.js`). Sources default to all 8: notes, learnings, cli-memory, recipes, plugins, instructions, repo-code, cli-history.
+- **Full build:** `POST /api/mind/build` (or `./scripts/Build-Mind.ps1` / `node scripts/build-mind.js`). Sources: notes, learnings, cli-memory, cli-skills, recipes, plugins, instructions, repo-code, cli-history, cli-drawers (verbatim per-message extraction).
 - **Incremental update:** `POST /api/mind/update` - skips files whose SHA256 hasn't changed.
 - **Watch mode:** `POST /api/mind/watch {"enabled":true}` - chokidar on every connected repo + notes + recipes + instructions, 3s debounce, auto-incremental rebuild.
 - **Add one artefact:** `POST /api/mind/add` with `{url|path, label, kind, createdBy}`. URLs go through SSRF guards.
@@ -196,11 +200,68 @@ Mind always ingests every repo Symphonee knows about (each `cfg.Repos` entry), t
 
 ### Other endpoints
 
-`GET /api/mind/graph` (full graph), `GET /api/mind/stats`, `GET /api/mind/node?id=`, `GET /api/mind/community?id=`, `GET /api/mind/gods`, `GET /api/mind/surprises`, `GET /api/mind/jobs?id=`, `GET /api/mind/instructions` (this section, full version), `GET /api/mind/watch`.
+- `GET /api/mind/graph` — full graph (every node + edge).
+- `GET /api/mind/stats` — counts.
+- `GET /api/mind/node?id=` — one node + its neighbours.
+- `GET /api/mind/community?id=` — one community.
+- `GET /api/mind/gods` / `GET /api/mind/surprises` / `GET /api/mind/jobs?id=`.
+- `GET /api/mind/instructions` (this section, full version).
+- `GET /api/mind/watch`.
+- `GET /api/mind/wakeup?budget=600&question=...` — layered L0+L1 wake-up text. With `question`, L1 is the BFS sub-graph for that task (task-aware). Without, L1 is god nodes + recent conversations (generic).
+- `POST /api/mind/suggest-cli {"question":"..."}` — advisory CLI ranking for a task, based on which CLI has previously completed similar work successfully. Multi-CLI by design: every supported CLI (claude, codex, gemini, grok, qwen, copilot) can appear. If a CLI has no prior similar work, it's absent from the ranking — that's not a vote against it. Use as a tie-breaker, not a hard router; the model-router script remains authoritative for intent-based picks.
 
 ### Hint injection
 
-Every prompt the orchestrator dispatches to a worker is automatically prefixed with `[mind: <space> nodes=<n> edges=<n> communities=<n> staleness=<m>m] Query before answering: ...`. So workers know the brain exists and how fresh it is even if they don't read this file.
+Every prompt the orchestrator dispatches to a worker is automatically prefixed with `[mind: <space> nodes=<n> edges=<n> communities=<n> staleness=<m>m] Query before answering: ...` followed by an L0+L1 wake-up block (active repo identity + the repo's CLAUDE.md preamble + god nodes + recent cross-CLI conversations, ~400-700 tokens). So a dispatched worker starts with both the metadata stamp AND the essential-story context — no extra round trip needed for "where am I, what's been going on lately?". For specific questions, the worker still calls `/api/mind/query`. Callers that want only the short stamp pass `orchestratorHint({ minimal: true })`.
+
+### Node kinds
+
+`note`, `code`, `doc`, `paper`, `image`, `workitem`, `recipe`, `conversation` (what a CLI saved back via `/api/mind/save-result`), `plugin`, `concept`, `tag`, `drawer` (verbatim user/assistant turn — never paraphrase, the node text IS the source of truth).
+
+The `cli-drawers` build source produces drawer nodes from any supported CLI's session jsonl (Claude Code, Codex, Qwen, Grok). Each drawer is one user or assistant turn with deterministic ID `drawer_<cli>_<sessionId>_<msgIdx>` and a `derived_from` edge back to its parent session node. Sweeper-pattern: idempotent on its own writes, resume-safe on crash, mtime-gated on incremental builds.
+
+### Save-back grounding
+
+`POST /api/mind/save-result` audits each `citedNodeIds` entry against the answer text. Citations whose label/id appears nowhere in the answer are tagged `ungrounded` and their derived_from edges land at INFERRED + 0.5 confidence instead of EXTRACTED + 1.0. The save still succeeds — the brain doesn't lose data — but query consumers see the warning. Pass `"strict": true` to reject saves that have zero grounded citations. Returned audit shape: `{ ok, nodeId, audit: [{id, status: "grounded"|"ungrounded"|"unknown"}], groundedCount }`.
+
+### Source adapters (for plugin authors only)
+
+A plugin can push its own data into Mind by registering a source adapter that implements the contract in `dashboard/mind/extractors/base.js`:
+
+```js
+const { register, BaseSourceAdapter } = require('./dashboard/mind/extractors/base');
+
+class MyAdapter extends BaseSourceAdapter {
+  static get name()           { return 'my-plugin'; }
+  static get adapterVersion() { return '1.0.0'; }
+  describeSchema() { return { fields: { ... }, version: '1.0.0' }; }
+  async * ingest({ repoRoot, space, manifest }) {
+    yield { nodes: [...], edges: [...], scanned: N };
+  }
+}
+register(new MyAdapter());
+```
+
+The engine pulls registered adapters after the hardcoded extractors on every build. An adapter that throws is logged in the build summary and skipped — one bad plugin must not break the build.
+
+### Per-CLI save-back hook (for non-orchestrator sessions)
+
+When the orchestrator dispatches a task, the resulting conversation is saved back to Mind automatically via `_broadcastTaskUpdate`. But when a user runs a CLI **directly** — not through the orchestrator — those conversations don't reach Mind on their own. To close that loop for ANY supported CLI, install the shared Stop hook:
+
+```
+scripts/hooks/mind-stop-hook.sh
+```
+
+It reads a Stop event JSON from stdin (every supported CLI uses the same shape: `{session_id, stop_hook_active, transcript_path}`) and POSTs the latest user/assistant exchange to `/api/mind/save-result` every N user messages. The script body is identical across CLIs; only the hook config wrapper differs:
+
+- **Claude Code** — `.claude/settings.local.json` `hooks.Stop`.
+- **Codex** — `~/.codex/hooks.json` `Stop`.
+- **Qwen Code** — `~/.qwen/hooks.json` `Stop` (same shape as Codex).
+- **Grok / Gemini / Copilot** — check that CLI's hook docs for the wrapper; the script body is the same.
+
+Env vars the hook honors: `MIND_HOOK_INTERVAL` (default 10 messages), `MIND_HOOK_CLI` (the name to record — set per CLI: `claude`, `codex`, `qwen`, `grok`, `gemini`, `copilot`), `MIND_HOOK_VERBOSE=1` (block + show a checkpoint message), `MIND_HOOK_URL` (defaults to localhost:3800).
+
+The full script header has copy-paste install snippets for each CLI.
 
 ### What you must NOT do
 

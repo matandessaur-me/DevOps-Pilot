@@ -3029,7 +3029,7 @@ console.log('  Mind mounted (/api/mind/*) - shared knowledge graph');
 // with the brain's current state (node count, staleness, query URL), and
 // every completed task gets saved back as a shared conversation node.
 if (orchestrator) {
-  orchestrator.getMindHint = () => mind.orchestratorHint();
+  orchestrator.getMindHint = (opts) => mind.orchestratorHint(opts || {});
   orchestrator.saveTaskToMind = (task) => mind.saveTaskToMind(task);
 }
 

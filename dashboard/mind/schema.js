@@ -15,6 +15,9 @@ const SCHEMA_VERSION = 1;
 const NODE_KINDS = new Set([
   'note', 'code', 'doc', 'paper', 'image', 'workitem',
   'recipe', 'conversation', 'plugin', 'concept', 'tag',
+  // 'drawer' = verbatim user/assistant turn (or any literal content snippet).
+  // Verbatim-always: never paraphrase; the node text IS the source of truth.
+  'drawer',
 ]);
 
 const CONFIDENCE_LABELS = new Set(['EXTRACTED', 'INFERRED', 'AMBIGUOUS']);
@@ -65,10 +68,50 @@ function validateEdge(e, nodeIds) {
   if (typeof e.confidenceScore !== 'number' || e.confidenceScore < 0 || e.confidenceScore > 1) {
     return `edge ${e.source}->${e.target}: confidenceScore out of range`;
   }
+  // Optional temporal validity. Edges without these fields are timeless and
+  // always visible. With them, a query passing { asOf: <ISO> } can ask
+  // "what was true on that date?" — old facts that have since been
+  // invalidated stay in the graph but stop showing up for newer asOf times.
+  if (e.validFrom !== undefined && e.validFrom !== null) {
+    if (typeof e.validFrom !== 'string' || Number.isNaN(Date.parse(e.validFrom))) {
+      return `edge ${e.source}->${e.target}: validFrom must be ISO date string`;
+    }
+  }
+  if (e.validTo !== undefined && e.validTo !== null) {
+    if (typeof e.validTo !== 'string' || Number.isNaN(Date.parse(e.validTo))) {
+      return `edge ${e.source}->${e.target}: validTo must be ISO date string`;
+    }
+    if (e.validFrom && Date.parse(e.validTo) <= Date.parse(e.validFrom)) {
+      return `edge ${e.source}->${e.target}: validTo must be > validFrom`;
+    }
+  }
   if (nodeIds && (!nodeIds.has(e.source) || !nodeIds.has(e.target))) {
     return null; // dangling edges allowed during merge; build pass filters them
   }
   return null;
+}
+
+/**
+ * Check whether a temporal edge is valid at a given moment.
+ * Edges without validFrom/validTo are timeless (always valid).
+ * Returns true when no asOf is provided, or when asOf parses cleanly and falls
+ * inside [validFrom, validTo). Half-open: a fact starts on validFrom inclusive
+ * and ends on validTo exclusive — the moment validTo says "obsolete" the
+ * edge is no longer returned.
+ */
+function isEdgeValidAt(edge, asOf) {
+  if (!asOf) return true;
+  const cutoff = Date.parse(asOf);
+  if (Number.isNaN(cutoff)) return true;
+  if (edge.validFrom) {
+    const start = Date.parse(edge.validFrom);
+    if (!Number.isNaN(start) && cutoff < start) return false;
+  }
+  if (edge.validTo) {
+    const end = Date.parse(edge.validTo);
+    if (!Number.isNaN(end) && cutoff >= end) return false;
+  }
+  return true;
 }
 
 function validateGraph(g) {
@@ -125,6 +168,7 @@ module.exports = {
   validateNode,
   validateEdge,
   validateGraph,
+  isEdgeValidAt,
   makeNode,
   makeEdge,
 };
