@@ -39,6 +39,7 @@
     graph: null,
     selectedNode: null,
     watchEnabled: false,
+    graphBuildSeq: 0,      // increments per graph rebuild so stale completions are ignored
     network: null,         // vis.Network instance
     visNodes: null,        // vis.DataSet for nodes
     visEdges: null,        // vis.DataSet for edges
@@ -194,20 +195,9 @@
   // then focus the current cursor. buildNetwork() reads state.search.
   function paintGraphSearch(focusId) {
     if (!state.graph) return;
-    const loader = $('mindGraphLoader');
-    if (loader) loader.style.display = 'flex';
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        try {
-          buildNetwork();
-          const target = focusId || state.matches[state.matchIndex];
-          if (target && state.network) {
-            try { state.network.focus(target, { scale: 1.2, animation: { duration: 350, easingFunction: 'easeInOutQuad' } }); } catch (_) {}
-          }
-        } finally {
-          if (loader) loader.style.display = 'none';
-        }
-      }, 0);
+    buildNetworkAsync({
+      focusId: focusId || state.matches[state.matchIndex],
+      loaderText: state.prefs.graphCap === 'all' ? 'Refreshing full graph...' : 'Refreshing graph...',
     });
   }
 
@@ -290,6 +280,26 @@
   function setWatch(on) {
     state.watchEnabled = on;
     const b = $('mindWatchBtn'); if (b) b.textContent = `Watch: ${on ? 'on' : 'off'}`;
+  }
+
+  function showGraphLoader(text) {
+    const loader = $('mindGraphLoader');
+    if (!loader) return;
+    const textEl = loader.querySelector('.mind-loader-text');
+    if (textEl) textEl.textContent = text || 'Laying out graph...';
+    loader.style.display = 'flex';
+  }
+
+  function hideGraphLoader() {
+    const loader = $('mindGraphLoader');
+    if (loader) loader.style.display = 'none';
+  }
+
+  function focusGraphNode(focusId) {
+    if (!focusId || !state.network) return;
+    try {
+      state.network.focus(focusId, { scale: 1.2, animation: { duration: 350, easingFunction: 'easeInOutQuad' } });
+    } catch (_) {}
   }
 
   // ── View routing ───────────────────────────────────────────────────────────
@@ -972,9 +982,9 @@
         <button class="tab-bar-btn" onclick="MindUI.togglePhysics()" id="mindPhysicsBtn" style="font-size:11px;" title="Pause/resume layout physics">Freeze</button>
       </div>
       <div id="mindCanvasHost" style="flex:1;min-height:0;width:100%;background:var(--mantle);position:relative;">
-        <div id="mindGraphLoader" class="mind-loader-overlay" style="display:none;">
+        <div id="mindGraphLoader" class="mind-loader-overlay" style="display:flex;">
           <div class="mind-spinner"></div>
-          <div class="mind-loader-text">Laying out graph...</div>
+          <div class="mind-loader-text">Preparing graph...</div>
         </div>
       </div>`;
 
@@ -986,30 +996,40 @@
     if (capEl) capEl.value = state.prefs.graphCap;
     updatePhysicsBtnLabel();
 
-    buildNetworkAsync();
+    buildNetworkAsync({ loaderText: state.prefs.graphCap === 'all' ? 'Loading full graph...' : 'Laying out graph...' });
     filterEl.addEventListener('change', () => {
       state.prefs.graphFilter = filterEl.value;
       savePrefs();
-      buildNetworkAsync();
+      buildNetworkAsync({ loaderText: state.prefs.graphCap === 'all' ? 'Refreshing full graph...' : 'Refreshing graph...' });
     });
     capEl.addEventListener('change', () => {
       state.prefs.graphCap = capEl.value;
       savePrefs();
-      buildNetworkAsync();
+      buildNetworkAsync({ loaderText: capEl.value === 'all' ? 'Loading full graph...' : 'Laying out graph...' });
     });
   }
 
-  // Wraps buildNetwork() so the loader overlay actually paints before the
-  // synchronous DataSet construction + vis.Network init blocks the main thread.
-  // Without the rAF + setTimeout chain the browser batches the style change
-  // with the heavy work and the user sees a frozen screen for top 2000/5000.
-  function buildNetworkAsync() {
-    const loader = $('mindGraphLoader');
-    if (loader) loader.style.display = 'flex';
+  // Wraps buildNetwork() so the loader overlay paints before the synchronous
+  // DataSet construction + vis.Network init blocks the main thread, then stays
+  // visible until the first stabilization pass is done.
+  function buildNetworkAsync({ focusId = null, loaderText = 'Laying out graph...' } = {}) {
+    const seq = ++state.graphBuildSeq;
+    showGraphLoader(loaderText);
     requestAnimationFrame(() => {
       setTimeout(() => {
-        try { buildNetwork(); } finally {
-          if (loader) loader.style.display = 'none';
+        if (seq !== state.graphBuildSeq) return;
+        try {
+          buildNetwork({
+            seq,
+            onReady: () => {
+              if (seq !== state.graphBuildSeq) return;
+              focusGraphNode(focusId);
+              hideGraphLoader();
+            },
+          });
+        } catch (err) {
+          hideGraphLoader();
+          throw err;
         }
       }, 0);
     });
@@ -1035,10 +1055,13 @@
     return Math.min(40, Math.max(8, 8 + Math.sqrt(degree) * 3));
   }
 
-  function buildNetwork() {
+  function buildNetwork({ seq = state.graphBuildSeq, onReady = null } = {}) {
     const g = state.graph;
     const host = $('mindCanvasHost');
-    if (!host || !g) return;
+    if (!host || !g) {
+      if (typeof onReady === 'function') onReady();
+      return;
+    }
 
     const filter = $('mindGraphFilter')?.value || 'all';
     const capRaw = $('mindGraphCap')?.value || '1000';
@@ -1137,21 +1160,31 @@
       edges: { selectionWidth: 1.5 },
     });
 
+    const finishBuild = () => {
+      if (seq !== state.graphBuildSeq) return;
+      try {
+        state.network.setOptions({ physics: { stabilization: { enabled: false }, enabled: state.prefs.physicsEnabled !== false } });
+      } catch (_) {}
+      updatePhysicsBtnLabel();
+      if (typeof onReady === 'function') requestAnimationFrame(onReady);
+    };
+    let buildFinished = false;
+    const fallbackMs = capRaw === 'all' ? 15000 : 5000;
+    const fallbackTimer = setTimeout(finalizeOnce, fallbackMs);
+    function finalizeOnce() {
+      if (buildFinished) return;
+      buildFinished = true;
+      clearTimeout(fallbackTimer);
+      finishBuild();
+    }
+
     state.network.on('click', (params) => {
       if (params.nodes && params.nodes.length) {
         state.selectedNode = params.nodes[0];
         showNodeDetail(params.nodes[0]);
       }
     });
-    state.network.on('stabilizationIterationsDone', () => {
-      // Pin the first stabilization end so the user can interact without
-      // the whole graph re-flowing on every click. If the user previously
-      // froze physics, honour that on the rebuilt network too.
-      try {
-        state.network.setOptions({ physics: { stabilization: { enabled: false }, enabled: state.prefs.physicsEnabled !== false } });
-      } catch (_) {}
-      updatePhysicsBtnLabel();
-    });
+    state.network.once('stabilizationIterationsDone', finalizeOnce);
   }
 
   function updatePhysicsBtnLabel() {
