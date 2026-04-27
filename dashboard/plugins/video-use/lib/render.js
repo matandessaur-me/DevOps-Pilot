@@ -118,7 +118,13 @@ function _buildSrt(edl, transcriptDir) {
   const cues = [];
   let outOffset = 0;
   for (const seg of edl.segments) {
-    const transcriptPath = path.join(transcriptDir, seg.source + '.json');
+    let transcriptPath = path.join(transcriptDir, seg.source + '.json');
+    if (!fs.existsSync(transcriptPath)) {
+      // Fallback: try raw source ID if it already ends in .json or is just the stem
+      const altPath = path.join(transcriptDir, seg.source);
+      if (fs.existsSync(altPath)) transcriptPath = altPath;
+    }
+
     if (fs.existsSync(transcriptPath)) {
       try {
         const tjson = JSON.parse(fs.readFileSync(transcriptPath, 'utf8'));

@@ -139,6 +139,72 @@ async function transcribeWithElevenLabs(getConfig, audioWav, opts = {}) {
   });
 }
 
+// ───────────────────────── OpenAI Whisper API ────────────────────────────────
+async function transcribeWithOpenAI(getConfig, audioWav, opts = {}) {
+  const cfg = (getConfig && getConfig()) || {};
+  const apiKey = cfg.WhisperKey || (cfg.AiApiKeys && cfg.AiApiKeys.OPENAI_API_KEY);
+  if (!apiKey) throw new Error('WhisperKey or OPENAI_API_KEY not configured');
+
+  const boundary = '----symphonee-' + Date.now();
+  const fileName = path.basename(audioWav);
+  const fileBuf = fs.readFileSync(audioWav);
+
+  const fields = {
+    model: 'whisper-1',
+    response_format: 'verbose_json',
+    'timestamp_granularities[]': 'word',
+  };
+  if (opts.language) fields.language = opts.language;
+
+  const parts = [];
+  for (const [k, v] of Object.entries(fields)) {
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
+  }
+  parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: audio/wav\r\n\r\n`));
+  parts.push(fileBuf);
+  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+  const body = Buffer.concat(parts);
+
+  return await new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'api.openai.com',
+      path: '/v1/audio/transcriptions',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': body.length,
+      },
+      timeout: 1800000,
+    }, (resp) => {
+      let chunks = [];
+      resp.on('data', (c) => chunks.push(c));
+      resp.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        if (resp.statusCode !== 200) return reject(new Error(`OpenAI ${resp.statusCode}: ${text.slice(0, 400)}`));
+        try {
+          const parsed = JSON.parse(text);
+          resolve(_normalizeOpenAI(parsed));
+        } catch (e) { reject(new Error('OpenAI returned non-JSON: ' + text.slice(0, 200))); }
+      });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+function _normalizeOpenAI(raw) {
+  const words = [];
+  const ws = raw.words || [];
+  for (const w of ws) {
+    const text = (w.word || '').trim();
+    if (!text) continue;
+    words.push({ type: 'word', text, start: Number(w.start || 0), end: Number(w.end || 0) });
+  }
+  return { words, provider: 'openai-whisper' };
+}
+
 // ───────────────────────── Public API ────────────────────────────────────────
 async function transcribeOne(getConfig, video, editDir, opts = {}) {
   if (!fs.existsSync(video)) throw new Error('video not found: ' + video);
@@ -166,6 +232,8 @@ async function transcribeOne(getConfig, video, editDir, opts = {}) {
       } else {
         result = await transcribeWithWhisperPython(getConfig, audioWav, opts);
       }
+    } else if (provider === 'openai') {
+      result = await transcribeWithOpenAI(getConfig, audioWav, opts);
     } else if (provider === 'elevenlabs') {
       result = await transcribeWithElevenLabs(getConfig, audioWav, opts);
     } else {
@@ -176,8 +244,13 @@ async function transcribeOne(getConfig, video, editDir, opts = {}) {
         result = await transcribeWithWhisperPython(getConfig, audioWav, opts);
       } else {
         const cfg = (getConfig && getConfig()) || {};
-        if (cfg.ElevenLabsApiKey) result = await transcribeWithElevenLabs(getConfig, audioWav, opts);
-        else throw new Error('No transcription provider available. Install whisper-cli or whisper, or set ElevenLabsApiKey.');
+        if (cfg.WhisperKey || (cfg.AiApiKeys && cfg.AiApiKeys.OPENAI_API_KEY)) {
+          result = await transcribeWithOpenAI(getConfig, audioWav, opts);
+        } else if (cfg.ElevenLabsApiKey) {
+          result = await transcribeWithElevenLabs(getConfig, audioWav, opts);
+        } else {
+          throw new Error('No transcription provider available. Install whisper-cli or whisper, or set WhisperKey / ElevenLabsApiKey.');
+        }
       }
     }
     _writeJson(outPath, result);
