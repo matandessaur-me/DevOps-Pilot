@@ -17183,12 +17183,26 @@ function closeStagehandScreencast() {
 function handleBrowserRouterDispatch(msg) {
   if (!msg) return;
   _markAutomationActive();
-  // Only auto-navigate on the start of a run. Don't yank the user back to
-  // the Browser tab when the run completes -- they may have moved on.
-  if (!msg.phase || msg.phase === 'start') _focusAutomationBrowser();
-  if (msg.driver === 'stagehand' && (!msg.phase || msg.phase === 'start')) {
+  // Start: switch to Automation -> Browser so the user watches the run live.
+  if (!msg.phase || msg.phase === 'start') {
+    _focusAutomationBrowser();
+    if (msg.driver === 'stagehand') {
+      const overlay = document.getElementById('stagehandScreencastOverlay');
+      if (overlay && overlay.style.display === 'none') overlay.style.display = 'block';
+    }
+  }
+  // End/error: bring the user back to the Terminal so they can see the
+  // final result printed by whatever called the router. Hide the screencast
+  // overlay too so it doesn't keep showing the last frame.
+  if (msg.phase === 'end' || msg.phase === 'error') {
+    try {
+      if (typeof switchTab === 'function') switchTab('terminal');
+    } catch (_) {}
     const overlay = document.getElementById('stagehandScreencastOverlay');
-    if (overlay && overlay.style.display === 'none') overlay.style.display = 'block';
+    if (overlay) overlay.style.display = 'none';
+    // Stop the Chromium-side screencast so we're not paying for frames the
+    // user can no longer see.
+    fetch('/api/plugins/stagehand/screencast/stop', { method: 'POST' }).catch(() => {});
   }
 }
 
