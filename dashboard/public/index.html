@@ -4792,8 +4792,7 @@
           <button id="mindSearchOnlyBtn" type="button" onclick="MindUI.toggleSearchOnly()"
             title="When on, hide non-matching nodes instead of dimming them"
             style="background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;color:var(--subtext0);cursor:pointer;font-size:11px;padding:3px 8px;flex-shrink:0;">Search only: off</button>
-          <button class="tab-bar-btn" onclick="MindUI.build()" title="Rebuild the brain from all sources">Rebuild</button>
-          <button class="tab-bar-btn" onclick="MindUI.update()" title="Incremental update (only changed files)">Update</button>
+          <button class="tab-bar-btn" onclick="MindUI.build()" title="Build or rebuild the brain from all sources">Build</button>
           <button class="tab-bar-btn" id="mindWatchBtn" onclick="MindUI.toggleWatch()" title="Watch the active repo and auto-update">Watch: off</button>
         </div>
         <div class="mind-tabs" role="tablist">
@@ -11600,6 +11599,9 @@ function launchAiWith(cli) {
     const st = getTermAi(termId);
     st.cli = cli;
     st.launched = true;
+    try {
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'term-ai-state', termId, cli, launched: true }));
+    } catch (_) {}
     const inst = termInstances.get(termId);
     // Update tab label
     const tabEl = termId === 'main'
@@ -11641,6 +11643,9 @@ function stopAi(termId) {
   }, 1000);
   st.launched = false;
   st.cli = null;
+  try {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'term-ai-state', termId: tid, cli: null, launched: false }));
+  } catch (_) {}
   const inst = termInstances.get(tid);
   // Restore tab label
   const shellLabel = getShellLabel(tid);
@@ -11680,6 +11685,9 @@ function resumeAiSession() {
   const st = getTermAi(activeTermId);
   st.cli = activeCli;
   st.launched = true;
+  try {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'term-ai-state', termId: activeTermId, cli: activeCli, launched: true }));
+  } catch (_) {}
   const cfg = CLI_CONFIG[activeCli];
   const tabEl = activeTermId === 'main'
     ? document.getElementById('mainTermTab')

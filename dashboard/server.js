@@ -2678,6 +2678,7 @@ function handleHealthCheck(res) {
 
 // ── Multi-PTY management ────────────────────────────────────────────────────
 const terminals = new Map(); // termId -> { pty, cols, rows }
+const termAiMeta = new Map(); // termId -> { cli, launched, updatedAt }
 let defaultCols = 120, defaultRows = 30;
 
 function findShell() {
@@ -2704,6 +2705,7 @@ function createTerminal(termId, cols = 120, rows = 30, cwd = repoRoot) {
     try { terminals.get(termId).pty.kill(); } catch (_) {}
     terminals.delete(termId);
   }
+  termAiMeta.delete(termId);
 
   const ptyProcess = pty.spawn(shellPath, ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-NoLogo', '-NoExit'], {
     name: 'xterm-256color',
@@ -2724,6 +2726,7 @@ function createTerminal(termId, cols = 120, rows = 30, cwd = repoRoot) {
   ptyProcess.onData(data => broadcast({ type: 'output', termId, data }));
   ptyProcess.onExit(() => {
     terminals.delete(termId);
+    termAiMeta.delete(termId);
     broadcast({ type: 'term-exited', termId });
   });
 
@@ -2737,6 +2740,7 @@ function killTerminal(termId) {
     try { t.pty.kill(); } catch (_) {}
     terminals.delete(termId);
   }
+  termAiMeta.delete(termId);
 }
 
 // ── AI CLI detection (process tree) ─────────────────────────────────────────
@@ -2878,6 +2882,13 @@ wss.on('connection', (ws) => {
         }
         case 'restart': {
           createTerminal(termId, msg.cols || defaultCols, msg.rows || defaultRows);
+          break;
+        }
+        case 'term-ai-state': {
+          const cli = typeof msg.cli === 'string' ? msg.cli.trim() : '';
+          const launched = msg.launched !== false;
+          if (!cli || !launched) termAiMeta.delete(termId);
+          else termAiMeta.set(termId, { cli, launched: true, updatedAt: Date.now() });
           break;
         }
       }
@@ -3088,7 +3099,15 @@ try {
 // ── Mount apps agent (desktop control) ──────────────────────────────────────
 try {
   const { mountAppsRoutes } = require('./apps-agent');
-  mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate });
+  mountAppsRoutes(addRoute, json, {
+    getConfig,
+    broadcast,
+    permGate,
+    resolveTermCli: (termId) => {
+      const meta = termAiMeta.get(String(termId || ''));
+      return meta && meta.cli ? meta.cli : null;
+    },
+  });
   console.log('  Apps agent mounted (/api/apps/*)');
 } catch (e) {
   console.log('  Apps agent skipped:', e.message);

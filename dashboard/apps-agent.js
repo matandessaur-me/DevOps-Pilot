@@ -16,6 +16,16 @@ const recipes = require('./apps-recipes');
 const recipeRunner = require('./apps-recipe-runner');
 const recorder = require('./apps-recorder');
 
+const PROVIDER_ORDER = ['anthropic', 'openai', 'gemini', 'grok', 'qwen'];
+const CLI_PROVIDER_MAP = {
+  claude: 'anthropic',
+  codex: 'openai',
+  gemini: 'gemini',
+  grok: 'grok',
+  qwen: 'qwen',
+  copilot: 'openai',
+};
+
 async function runSessionForEntry({ entry, session, task, driver, model, broadcast, recipe, inputs, stepThrough }) {
   session._providerEntry = entry;
   session._model = model || (entry && entry.adapter && entry.adapter.defaultModel);
@@ -68,7 +78,137 @@ function readBody(req) {
   });
 }
 
-function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}) {
+function normalizeProviderKey(value) {
+  const key = String(value || '').trim().toLowerCase();
+  if (!key) return null;
+  if (key === 'google') return 'gemini';
+  if (key === 'xai') return 'grok';
+  return key;
+}
+
+function mapCliToProvider(cli) {
+  const key = String(cli || '').trim().toLowerCase();
+  return key ? (CLI_PROVIDER_MAP[key] || null) : null;
+}
+
+function isProviderExhaustionError(message) {
+  const text = String(message || '').toLowerCase();
+  if (!text) return false;
+  return /insufficient_quota|quota exceeded|quota has been exceeded|credit balance is too low|out of credits|out of credit|rate limit|rate-limit|429|resource exhausted|billing|purchase credits/.test(text);
+}
+
+function headerValue(req, name) {
+  if (!req || !req.headers) return null;
+  const raw = req.headers[name];
+  if (Array.isArray(raw)) return raw[0] || null;
+  return raw || null;
+}
+
+function resolveCallerContext({ req, body, resolveTermCli }) {
+  const explicitProvider = normalizeProviderKey(body && body.provider);
+  const explicitCli = String((body && body.cli) || headerValue(req, 'x-symphonee-cli') || '').trim().toLowerCase() || null;
+  const termId = String((body && body.termId) || headerValue(req, 'x-symphonee-term-id') || '').trim() || null;
+  const termCli = !explicitCli && termId && typeof resolveTermCli === 'function'
+    ? String(resolveTermCli(termId) || '').trim().toLowerCase() || null
+    : null;
+  const cli = explicitCli || termCli || null;
+  return { cli, termId, preferredProvider: explicitProvider || mapCliToProvider(cli) || null };
+}
+
+function buildProviderAttempts({ registry, preferredProvider, model }) {
+  const ordered = PROVIDER_ORDER.filter(k => registry && registry[k]);
+  if (preferredProvider && registry && registry[preferredProvider]) {
+    const idx = ordered.indexOf(preferredProvider);
+    if (idx > 0) {
+      ordered.splice(idx, 1);
+      ordered.unshift(preferredProvider);
+    } else if (idx === -1) {
+      ordered.unshift(preferredProvider);
+    }
+  }
+  return ordered
+    .filter((key, index) => ordered.indexOf(key) === index && registry[key])
+    .map((key, index) => ({
+      key,
+      entry: registry[key],
+      model: index === 0 && model ? model : registry[key].adapter.defaultModel,
+    }));
+}
+
+async function runSessionWithFallback({
+  attempts,
+  session,
+  task,
+  driver,
+  broadcast,
+  recipe,
+  inputs,
+  stepThrough,
+  notify,
+}) {
+  let last = null;
+  for (let i = 0; i < attempts.length; i++) {
+    const attempt = attempts[i];
+    if (typeof broadcast === 'function') {
+      broadcast({
+        type: 'apps-agent-step',
+        sessionId: session.id,
+        kind: 'provider_attempt',
+        provider: attempt.key,
+        label: attempt.entry.adapter.label,
+        model: attempt.model,
+        attempt: i + 1,
+        total: attempts.length,
+        at: Date.now(),
+      });
+    }
+    const result = await runSessionForEntry({
+      entry: attempt.entry,
+      session,
+      task,
+      driver,
+      model: attempt.model,
+      broadcast,
+      recipe,
+      inputs,
+      stepThrough,
+    });
+    last = { result, entry: attempt.entry, model: attempt.model, key: attempt.key };
+    if (result && result.ok) return last;
+
+    const message = (result && (result.error || result.message)) || 'Unknown provider error';
+    const shouldRetry = isProviderExhaustionError(message) && i + 1 < attempts.length;
+    if (!shouldRetry) break;
+
+    const next = attempts[i + 1];
+    if (typeof broadcast === 'function') {
+      broadcast({
+        type: 'apps-agent-step',
+        sessionId: session.id,
+        kind: 'provider_fallback',
+        from: attempt.key,
+        to: next.key,
+        message,
+        at: Date.now(),
+      });
+    }
+    if (typeof notify === 'function') {
+      notify(
+        'Apps provider exhausted',
+        `${attempt.entry.adapter.label} ran out of credits/quota or was rate-limited. Retrying with ${next.entry.adapter.label}.`
+      );
+    }
+    session.stopped = false;
+    driver.resetStopped();
+  }
+  if (last && typeof notify === 'function') {
+    const reason = last.result && (last.result.error || last.result.message);
+    notify('Apps automation failed', reason ? `No provider could complete this run: ${reason}` : 'No provider could complete this run.');
+  }
+  return last || { result: { ok: false, error: 'No provider attempts were available.' }, entry: null, model: null, key: null };
+}
+
+function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate, resolveTermCli } = {}) {
   const isIncognito = () => (getConfig && getConfig().IncognitoMode === true);
   const buildRegistry = () => {
     const aiKeys = Object.assign({}, (getConfig && getConfig().AiApiKeys) || {});
@@ -76,6 +216,11 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
       if (!aiKeys[k] && process.env[k]) aiKeys[k] = process.env[k];
     }
     return chat.buildProviderRegistry(aiKeys);
+  };
+  const notify = (title, body) => {
+    if (typeof broadcast === 'function') {
+      broadcast({ type: 'notification', title, body, icon: 'monitor', source: 'apps-agent' });
+    }
   };
 
   addRoute('POST', '/api/apps/windows', async (req, res) => {
@@ -158,7 +303,6 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
 
     const appName = String(body.app || body.appName || '').trim();
     const goal = String(body.goal || '').trim();
-    const provider = body.provider || null;
     const model = body.model || null;
     const waitMs = body.waitMs === 0 ? 0 : Math.max(1000, Math.min(Number(body.waitMs) || 600000, 1800000));
     if (!appName) return json(res, { error: 'app required (name to match against /api/apps/installed)' }, 400);
@@ -230,14 +374,14 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     }
 
     const registry = buildRegistry();
-    const entry = chat.pickProvider(registry, provider);
-    if (!entry) {
+    const caller = resolveCallerContext({ req, body, resolveTermCli });
+    const attempts = buildProviderAttempts({ registry, preferredProvider: caller.preferredProvider, model });
+    if (!attempts.length) {
       return json(res, {
         error: 'No AI provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, XAI_API_KEY, or DASHSCOPE_API_KEY.',
         providers: Object.keys(registry),
       }, 400);
     }
-    const resolvedModel = model || entry.adapter.defaultModel;
 
     const task = [
       `Goal: ${goal}`,
@@ -247,48 +391,36 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     ].join('\n');
 
     session._providerRegistry = registry;
-    const runPromise = runSessionForEntry({ entry, session, task, driver, model: resolvedModel, broadcast });
+    const runPromise = runSessionWithFallback({ attempts, session, task, driver, broadcast, notify });
 
     if (waitMs === 0) {
-      json(res, { ok: true, sessionId, hwnd, app: session.app, title: session.title, provider: entry.adapter.kind, model: resolvedModel, mode: 'fire-and-forget' });
+      json(res, {
+        ok: true,
+        sessionId,
+        hwnd,
+        app: session.app,
+        title: session.title,
+        provider: attempts[0].entry.adapter.kind,
+        model: attempts[0].model,
+        mode: 'fire-and-forget'
+      });
       runPromise.catch(e => {
         if (typeof broadcast === 'function') broadcast({ type: 'apps-agent-step', sessionId: session.id, kind: 'error', message: e.message, at: Date.now() });
       });
       return;
     }
 
-    // Synchronous mode: block until the session emits done | error | stopped,
-    // or waitMs elapses. We tap into the broadcast bus by wrapping it once.
-    const terminal = await new Promise((resolve) => {
-      const timeout = setTimeout(() => resolve({ kind: 'timeout' }), waitMs);
-      const origBroadcast = broadcast;
-      // Wrap in-place; restore in finally branch.
-      const wrapper = (msg) => {
-        try { origBroadcast(msg); } catch (_) {}
-        if (msg && msg.type === 'apps-agent-step' && msg.sessionId === sessionId) {
-          if (msg.kind === 'done' || msg.kind === 'error' || msg.kind === 'stopped') {
-            clearTimeout(timeout);
-            resolve(msg);
-          }
-        }
-      };
-      // Replace broadcast in the closure used by runSessionForEntry. The
-      // function uses the captured `broadcast` variable from registerAppsRoutes
-      // arguments, so monkey-patching won't reach it - instead, install a
-      // session-scoped listener via the session object's hooks the chat
-      // module already supports.
-      session._terminalListener = (event) => {
-        if (event.kind === 'done' || event.kind === 'error' || event.kind === 'stopped') {
-          clearTimeout(timeout);
-          resolve({ kind: event.kind, summary: event.summary, message: event.message });
-          session._terminalListener = null;
-        }
-      };
-      runPromise.catch(e => {
-        clearTimeout(timeout);
-        resolve({ kind: 'error', message: e.message });
-      });
-    });
+    const terminal = await Promise.race([
+      runPromise.then((outcome) => {
+        const result = outcome && outcome.result ? outcome.result : null;
+        const entry = outcome && outcome.entry ? outcome.entry : attempts[0].entry;
+        const usedModel = outcome && outcome.model ? outcome.model : attempts[0].model;
+        if (!result) return { kind: 'error', message: 'Unknown apps automation failure', provider: entry.adapter.kind, model: usedModel };
+        if (result.ok) return { kind: 'done', summary: result.summary || null, provider: entry.adapter.kind, model: usedModel };
+        return { kind: 'error', message: result.error || result.message || 'Unknown apps automation failure', provider: entry.adapter.kind, model: usedModel };
+      }).catch(e => ({ kind: 'error', message: e.message })),
+      new Promise((resolve) => setTimeout(() => resolve({ kind: 'timeout' }), waitMs)),
+    ]);
 
     json(res, {
       ok: terminal.kind === 'done',
@@ -296,8 +428,8 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
       hwnd,
       app: session.app,
       title: session.title,
-      provider: entry.adapter.kind,
-      model: resolvedModel,
+      provider: terminal.provider || attempts[0].entry.adapter.kind,
+      model: terminal.model || attempts[0].model,
       terminal: terminal.kind,
       summary: terminal.summary || null,
       error: terminal.message || null,
@@ -352,16 +484,25 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     }
 
     const registry = buildRegistry();
-    const entry = chat.pickProvider(registry, body.provider);
-    if (!entry) {
+    const caller = resolveCallerContext({ req, body, resolveTermCli });
+    const attempts = buildProviderAttempts({ registry, preferredProvider: caller.preferredProvider, model: body.model || null });
+    if (!attempts.length) {
       return json(res, {
         error: 'No AI provider configured. Set one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, XAI_API_KEY, or DASHSCOPE_API_KEY in Settings -> AI Keys.',
         providers: Object.keys(registry),
       }, 400);
     }
-    const model = body.model || entry.adapter.defaultModel;
+    const firstAttempt = attempts[0];
 
-    json(res, { ok: true, sessionId, provider: entry.adapter.kind, label: entry.adapter.label, model, title: session.title, recipe: recipe ? { id: recipe.id, name: recipe.name } : null });
+    json(res, {
+      ok: true,
+      sessionId,
+      provider: firstAttempt.entry.adapter.kind,
+      label: firstAttempt.entry.adapter.label,
+      model: firstAttempt.model,
+      title: session.title,
+      recipe: recipe ? { id: recipe.id, name: recipe.name } : null
+    });
 
     if (recipe && typeof broadcast === 'function') {
       broadcast({ type: 'apps-agent-step', sessionId, kind: 'recipe_started', recipeId: recipe.id, name: recipe.name, stepCount: recipe.steps.length, at: Date.now() });
@@ -380,7 +521,7 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     session._providerRegistry = registry;
     const runInputs = (body.inputs && typeof body.inputs === 'object') ? body.inputs : null;
     const stepThrough = !!body.stepThrough;
-    runSessionForEntry({ entry, session, task, driver, model, broadcast, recipe, inputs: runInputs, stepThrough })
+    runSessionWithFallback({ attempts, session, task, driver, broadcast, recipe, inputs: runInputs, stepThrough, notify })
       .catch(e => {
         if (typeof broadcast === 'function') {
           broadcast({ type: 'apps-agent-step', sessionId: session.id, kind: 'error', message: e.message, at: Date.now() });
@@ -487,11 +628,19 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
     session._dontRetryNoted = null;
 
     const registry = buildRegistry();
-    const entry = chat.pickProvider(registry, body.provider);
-    if (!entry) return json(res, { error: 'No AI provider configured.' }, 400);
-    const model = body.model || entry.adapter.defaultModel;
+    const caller = resolveCallerContext({ req, body, resolveTermCli });
+    const attempts = buildProviderAttempts({ registry, preferredProvider: caller.preferredProvider, model: body.model || null });
+    if (!attempts.length) return json(res, { error: 'No AI provider configured.' }, 400);
+    const firstAttempt = attempts[0];
 
-    json(res, { ok: true, sessionId, provider: entry.adapter.kind, label: entry.adapter.label, model, title: session.title });
+    json(res, {
+      ok: true,
+      sessionId,
+      provider: firstAttempt.entry.adapter.kind,
+      label: firstAttempt.entry.adapter.label,
+      model: firstAttempt.model,
+      title: session.title
+    });
 
     const followUp = [
       `Follow-up task: ${goal}`,
@@ -501,12 +650,12 @@ function mountAppsRoutes(addRoute, json, { getConfig, broadcast, permGate } = {}
 
     // Append the new goal as a user turn on the existing message history so
     // prior context (what worked, what didn't) carries over.
-    const adapter = entry.adapter;
+    const adapter = firstAttempt.entry.adapter;
     if (adapter.kind === 'gemini') session.messages.push({ role: 'user', parts: [{ text: followUp }] });
     else session.messages.push({ role: 'user', content: followUp });
 
     session._providerRegistry = registry;
-    runSessionForEntry({ entry, session, task: followUp, driver, model, broadcast })
+    runSessionWithFallback({ attempts, session, task: followUp, driver, broadcast, notify })
       .catch(e => {
         if (typeof broadcast === 'function') {
           broadcast({ type: 'apps-agent-step', sessionId: session.id, kind: 'error', message: e.message, at: Date.now() });
