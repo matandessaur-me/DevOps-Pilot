@@ -93,7 +93,10 @@ module.exports = function register(ctx) {
     if (!url || typeof url !== 'string') return json(res, { ok: false, error: 'Missing field: url' }, 400);
     try {
       const sh = await session.getSession({ getSettings, getConfig });
-      const page = sh.context.pages()[0] || await sh.context.newPage();
+      // Prefer the StagehandPage wrapper -- it's what the agent loop's
+      // awaitActivePage tracks. Falling back to the raw context page leaves
+      // stagehand.activePage null and breaks the agent on first step.
+      const page = sh.page || sh.context.pages()[0] || await sh.context.newPage();
       await page.goto(url);
       json(res, { ok: true, url: page.url() });
     } catch (e) { _err(json, res, e); }
@@ -106,7 +109,7 @@ module.exports = function register(ctx) {
     try {
       const sh = await session.getSession({ getSettings, getConfig });
       if (body.url) {
-        const page = sh.context.pages()[0] || await sh.context.newPage();
+        const page = sh.page || sh.context.pages()[0] || await sh.context.newPage();
         await page.goto(body.url);
       }
       _ensureAutoCast();
