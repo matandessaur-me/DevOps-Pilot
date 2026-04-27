@@ -32,9 +32,9 @@
     },
     {
       "key": "headless",
-      "label": "Run Chromium headless",
+      "label": "Run Chromium headless (recommended -- the session renders into the in-app Browser tab via screencast; turn off only if you need to see the external Chrome window)",
       "type": "boolean",
-      "default": false
+      "default": true
     }
   ],
   "contributions": {
