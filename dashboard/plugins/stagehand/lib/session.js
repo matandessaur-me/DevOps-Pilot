@@ -4,10 +4,10 @@
  * One Stagehand instance per Symphonee process, lazy-initialised on the
  * first call. The `env` is HARD-LOCKED to "LOCAL" -- there is no path that
  * routes through Browserbase cloud, so a misconfigured key cannot trigger
- * paid usage. We accept a model identifier from plugin settings (defaults
- * to anthropic/claude-sonnet-4-6); the user's existing API key for that
- * provider must already be in the environment, same contract Symphonee's
- * model router uses.
+ * paid usage. The model identifier (anthropic/claude-..., openai/gpt-...,
+ * google/gemini-...) is read from plugin settings; the matching API key is
+ * pulled from Symphonee's saved AiApiKeys (config.AiApiKeys.<NAME>) with a
+ * fallback to process.env so existing env-based setups keep working.
  *
  * The Stagehand package is required lazily so installing Symphonee never
  * pulls down the @browserbasehq/stagehand tree by default. If it isn't
@@ -19,6 +19,27 @@
 let _stagehand = null;          // resolved Stagehand instance (post-init)
 let _initPromise = null;        // in-flight init, so concurrent calls don't double-launch
 let _StagehandCtor = null;      // cached class reference
+
+// Map a model identifier to (a) the Symphonee AiApiKeys field name and
+// (b) the Stagehand modelClientOptions key. Stagehand routes the model based
+// on the provider prefix in the model string ("anthropic/...", "openai/...",
+// "google/..."), and accepts an apiKey via modelClientOptions.
+function _providerForModel(model) {
+  const m = String(model || '').toLowerCase();
+  if (m.startsWith('anthropic/') || m.startsWith('claude')) return { configKey: 'ANTHROPIC_API_KEY', envKey: 'ANTHROPIC_API_KEY' };
+  if (m.startsWith('openai/') || m.startsWith('gpt') || m.startsWith('o1') || m.startsWith('o3') || m.startsWith('o4')) return { configKey: 'OPENAI_API_KEY', envKey: 'OPENAI_API_KEY' };
+  if (m.startsWith('google/') || m.startsWith('gemini')) return { configKey: 'GEMINI_API_KEY', envKey: 'GEMINI_API_KEY' };
+  if (m.startsWith('xai/') || m.startsWith('grok')) return { configKey: 'XAI_API_KEY', envKey: 'XAI_API_KEY' };
+  return { configKey: 'ANTHROPIC_API_KEY', envKey: 'ANTHROPIC_API_KEY' };
+}
+
+function _resolveApiKey(model, getConfig) {
+  const { configKey, envKey } = _providerForModel(model);
+  let cfg = {};
+  try { cfg = (typeof getConfig === 'function' ? getConfig() : {}) || {}; } catch (_) {}
+  const saved = (cfg.AiApiKeys && cfg.AiApiKeys[configKey]) || null;
+  return saved || process.env[envKey] || null;
+}
 
 function _loadStagehand() {
   if (_StagehandCtor) return _StagehandCtor;
@@ -39,7 +60,7 @@ function _loadStagehand() {
  * Returns the singleton Stagehand instance, initialising it on first call.
  * `getSettings` is the plugin context's getConfig-like helper.
  */
-async function getSession({ getSettings } = {}) {
+async function getSession({ getSettings, getConfig } = {}) {
   if (_stagehand) return _stagehand;
   if (_initPromise) return _initPromise;
 
@@ -49,9 +70,21 @@ async function getSession({ getSettings } = {}) {
     const model = settings.model || 'anthropic/claude-sonnet-4-6';
     const headless = settings.headless === true;
 
+    const apiKey = _resolveApiKey(model, getConfig);
+    const provider = _providerForModel(model);
+    if (!apiKey) {
+      const err = new Error(
+        'No API key for model "' + model + '". Add ' + provider.configKey +
+        ' in Settings -> AI Keys, or set the ' + provider.envKey + ' environment variable.'
+      );
+      err.code = 'STAGEHAND_NO_API_KEY';
+      throw err;
+    }
+
     const sh = new Stagehand({
       env: 'LOCAL',           // hard-locked -- never "BROWSERBASE"
       model,
+      modelClientOptions: { apiKey },
       verbose: 0,
       localBrowserLaunchOptions: { headless },
     });

@@ -23,7 +23,9 @@ const mindLog = require('./lib/mind-log');
 const screencast = require('./lib/screencast');
 
 function _err(json, res, e, status) {
-  const code = e && e.code === 'STAGEHAND_NOT_INSTALLED' ? 501 : (status || 500);
+  let code = status || 500;
+  if (e && e.code === 'STAGEHAND_NOT_INSTALLED') code = 501;
+  else if (e && e.code === 'STAGEHAND_NO_API_KEY') code = 400;
   json(res, { ok: false, error: e && e.message || String(e), code: e && e.code }, code);
 }
 
@@ -49,7 +51,7 @@ module.exports = function register(ctx) {
     if (_autoCastTried) return;
     _autoCastTried = true;
     try {
-      const sh = await session.getSession({ getSettings });
+      const sh = await session.getSession({ getSettings, getConfig });
       await screencast.startScreencast(sh, { broadcast });
     } catch (_) { _autoCastTried = false; }
   }
@@ -68,7 +70,7 @@ module.exports = function register(ctx) {
   ctx.addRoute('POST', '/screencast/start', async (req, res) => {
     let body; try { body = await readBody(req); } catch (e) { return json(res, { ok: false, error: 'Invalid JSON' }, 400); }
     try {
-      const sh = await session.getSession({ getSettings });
+      const sh = await session.getSession({ getSettings, getConfig });
       const r = await screencast.startScreencast(sh, {
         broadcast,
         format: body.format || 'jpeg',
@@ -90,7 +92,7 @@ module.exports = function register(ctx) {
     const url = body && body.url;
     if (!url || typeof url !== 'string') return json(res, { ok: false, error: 'Missing field: url' }, 400);
     try {
-      const sh = await session.getSession({ getSettings });
+      const sh = await session.getSession({ getSettings, getConfig });
       const page = sh.context.pages()[0] || await sh.context.newPage();
       await page.goto(url);
       json(res, { ok: true, url: page.url() });
@@ -102,7 +104,7 @@ module.exports = function register(ctx) {
     const instruction = body && body.instruction;
     if (!instruction) return json(res, { ok: false, error: 'Missing field: instruction' }, 400);
     try {
-      const sh = await session.getSession({ getSettings });
+      const sh = await session.getSession({ getSettings, getConfig });
       if (body.url) {
         const page = sh.context.pages()[0] || await sh.context.newPage();
         await page.goto(body.url);
@@ -120,7 +122,7 @@ module.exports = function register(ctx) {
     const instruction = body && body.instruction;
     if (!instruction) return json(res, { ok: false, error: 'Missing field: instruction' }, 400);
     try {
-      const sh = await session.getSession({ getSettings });
+      const sh = await session.getSession({ getSettings, getConfig });
       const opts = {};
       if (body.schema && typeof body.schema === 'object') {
         // We don't take a Zod object over the wire -- pass the raw prompt and
@@ -140,7 +142,7 @@ module.exports = function register(ctx) {
     const instruction = body && body.instruction;
     if (!instruction) return json(res, { ok: false, error: 'Missing field: instruction' }, 400);
     try {
-      const sh = await session.getSession({ getSettings });
+      const sh = await session.getSession({ getSettings, getConfig });
       _ensureAutoCast();
       const result = await sh.observe(instruction);
       const url = await _currentUrl(sh);
@@ -155,7 +157,7 @@ module.exports = function register(ctx) {
     if (!task) return json(res, { ok: false, error: 'Missing field: task' }, 400);
     const maxSteps = Number.isFinite(body.maxSteps) ? Math.min(50, Math.max(1, body.maxSteps)) : 10;
     try {
-      const sh = await session.getSession({ getSettings });
+      const sh = await session.getSession({ getSettings, getConfig });
       const agent = sh.agent ? sh.agent() : null;
       if (!agent || typeof agent.execute !== 'function') {
         return json(res, { ok: false, error: 'Agent loop not available in this Stagehand build' }, 501);
