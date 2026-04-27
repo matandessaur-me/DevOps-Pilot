@@ -5528,8 +5528,7 @@
             </div>
             <div class="modal-field">
               <label class="plugin-setting-toggle" style="display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none;">
-                <input id="settingsBrowserRouterPreferStagehand" type="checkbox" style="position:absolute;opacity:0;width:0;height:0;pointer-events:none;">
-                <span class="plugin-setting-track" style="position:relative;display:inline-block;width:36px;height:20px;background:var(--surface1);border-radius:999px;transition:background 0.15s ease;"><span class="plugin-setting-thumb" style="position:absolute;top:2px;left:2px;width:16px;height:16px;background:#fff;border-radius:50%;transition:transform 0.15s ease,background 0.15s ease;box-shadow:0 1px 2px rgba(0,0,0,0.3);"></span></span>
+                <span class="sy-switch"><input id="settingsBrowserRouterPreferStagehand" type="checkbox"><span class="plugin-setting-track"></span></span>
                 <span style="font-size:12px;color:var(--subtext0);" data-toggle-label="off">Off</span>
                 <span style="font-size:12px;color:var(--text);">Prefer Stagehand for ambiguous short verb-noun phrases (advanced)</span>
               </label>
@@ -5556,8 +5555,7 @@
             </div>
             <div class="modal-field">
               <label class="plugin-setting-toggle" style="display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none;">
-                <input id="settingsStagehandHeadless" type="checkbox" style="position:absolute;opacity:0;width:0;height:0;pointer-events:none;">
-                <span class="plugin-setting-track" style="position:relative;display:inline-block;width:36px;height:20px;background:var(--surface1);border-radius:999px;transition:background 0.15s ease;"><span class="plugin-setting-thumb" style="position:absolute;top:2px;left:2px;width:16px;height:16px;background:#fff;border-radius:50%;transition:transform 0.15s ease,background 0.15s ease;box-shadow:0 1px 2px rgba(0,0,0,0.3);"></span></span>
+                <span class="sy-switch"><input id="settingsStagehandHeadless" type="checkbox"><span class="plugin-setting-track"></span></span>
                 <span style="font-size:12px;color:var(--subtext0);" data-toggle-label="off">Off</span>
                 <span style="font-size:12px;color:var(--text);">Run Chromium headless (recommended -- the in-app screencast is your view; turn off only to see the external Chrome window)</span>
               </label>
@@ -5758,6 +5756,28 @@
                 <input type="checkbox" id="settingsIncognitoMode" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;" onchange="checkSettingsNeedRestart()">
                 <span style="font-size:12px;color:var(--text);">Enable incognito mode</span>
               </label>
+            </div>
+          </div>
+          <div class="settings-section" id="settingsSection-videoUse" style="display:none;">
+            <div class="settings-section-title">Video Use</div>
+            <div class="settings-section-desc">Video tooling and transcription settings live here because they are local machine/runtime preferences rather than plugin navigation.</div>
+            <div class="modal-field">
+              <label>ElevenLabs API Key</label>
+              <div style="font-size:11px;color:var(--subtext0);margin-bottom:4px;">Optional. If set, transcription uses ElevenLabs Scribe. Otherwise Video Use falls back to local Whisper when available.</div>
+              <div style="display:flex;gap:0;">
+                <input id="pluginSetting_video-use_ElevenLabsApiKey" type="password" placeholder="Optional ElevenLabs key" data-plugin="video-use" data-key="ElevenLabsApiKey" class="plugin-setting-input" style="border-radius:var(--radius) 0 0 var(--radius);flex:1;">
+                <button type="button" onclick="toggleSecretField('pluginSetting_video-use_ElevenLabsApiKey',this)" style="background:var(--surface0);border:1px solid var(--surface1);border-left:none;border-radius:0 var(--radius) var(--radius) 0;padding:0 10px;cursor:pointer;color:var(--subtext0);display:flex;align-items:center;" title="Show/hide"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button>
+              </div>
+            </div>
+            <div class="modal-field">
+              <label>ffmpeg executable</label>
+              <div style="font-size:11px;color:var(--subtext0);margin-bottom:4px;">Default `ffmpeg` assumes it is already on your PATH.</div>
+              <input id="pluginSetting_video-use_FfmpegPath" type="text" placeholder="ffmpeg" data-plugin="video-use" data-key="FfmpegPath" class="plugin-setting-input">
+            </div>
+            <div class="modal-field">
+              <label>ffprobe executable</label>
+              <div style="font-size:11px;color:var(--subtext0);margin-bottom:4px;">Default `ffprobe` assumes it is already on your PATH.</div>
+              <input id="pluginSetting_video-use_FfprobePath" type="text" placeholder="ffprobe" data-plugin="video-use" data-key="FfprobePath" class="plugin-setting-input">
             </div>
           </div>
           <!--
@@ -25341,11 +25361,11 @@ async function refreshPluginActivation() {
 // Render plugin settings fields in the Settings > Plugins tab
 function renderPluginSettings(plugins) {
   var container = document.getElementById('pluginSettingsContainer');
-  // Hide browser-router-managed plugins from the generic Plugins list -- their
-  // settings live under Settings -> Browser instead. They're not user-installed
-  // plugins, they're core drivers.
-  var BROWSER_DRIVER_IDS = { 'stagehand': true, 'browser-use': true };
-  plugins = (plugins || []).filter(function (p) { return p && !BROWSER_DRIVER_IDS[p.id]; });
+  void refreshSpecialSettingsPanels(plugins);
+  // Hide plugins whose settings live on purpose-built settings tabs instead of
+  // the generic Plugins list.
+  var SPECIAL_SETTINGS_PLUGIN_IDS = { 'stagehand': true, 'browser-use': true, 'video-use': true };
+  plugins = (plugins || []).filter(function (p) { return p && !SPECIAL_SETTINGS_PLUGIN_IDS[p.id]; });
   if (!plugins.length) { container.innerHTML = '<div style="color:var(--subtext0);padding:12px;">No plugins installed.</div>'; return; }
 
   // Vertical nav column + settings panel (matching main settings pattern)
@@ -25387,10 +25407,11 @@ function renderPluginSettings(plugins) {
     for (var j = 0; j < settings.length; j++) {
       var s = settings[j];
       var fieldId = 'pluginSetting_' + p.id + '_' + s.key;
+      var isSecret = !!(s.secret || s.sensitive);
       nav += '<div class="modal-field">';
       nav += '<label>' + (s.label || s.key) + '</label>';
       if (s.description) nav += '<div style="font-size:11px;color:var(--subtext0);margin-bottom:4px;">' + s.description + '</div>';
-      if (s.secret) {
+      if (isSecret) {
         nav += '<div style="display:flex;gap:0;">';
         nav += '<input id="' + fieldId + '" type="password" placeholder="' + (s.placeholder || '') + '" data-plugin="' + p.id + '" data-key="' + s.key + '" class="plugin-setting-input" style="border-radius:var(--radius) 0 0 var(--radius);flex:1;">';
         nav += '<button type="button" onclick="toggleSecretField(\'' + fieldId + '\',this)" style="background:var(--surface0);border:1px solid var(--surface1);border-left:none;border-radius:0 var(--radius) var(--radius) 0;padding:0 10px;cursor:pointer;color:var(--subtext0);display:flex;align-items:center;" title="Show/hide"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button>';
@@ -25405,8 +25426,7 @@ function renderPluginSettings(plugins) {
           + ' class="plugin-setting-input"></select>';
       } else if (s.type === 'boolean') {
         nav += '<label class="plugin-setting-toggle" style="display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none;">';
-        nav += '<input id="' + fieldId + '" type="checkbox" data-plugin="' + p.id + '" data-key="' + s.key + '" class="plugin-setting-input plugin-setting-bool" style="position:absolute;opacity:0;width:0;height:0;pointer-events:none;">';
-        nav += '<span class="plugin-setting-track" style="position:relative;display:inline-block;width:36px;height:20px;background:var(--surface1);border-radius:999px;transition:background 0.15s ease;"><span class="plugin-setting-thumb" style="position:absolute;top:2px;left:2px;width:16px;height:16px;background:#fff;border-radius:50%;transition:transform 0.15s ease,background 0.15s ease;box-shadow:0 1px 2px rgba(0,0,0,0.3);"></span></span>';
+        nav += '<span class="sy-switch"><input id="' + fieldId + '" type="checkbox" data-plugin="' + p.id + '" data-key="' + s.key + '" class="plugin-setting-input plugin-setting-bool"><span class="plugin-setting-track"></span></span>';
         nav += '<span style="font-size:12px;color:var(--subtext0);" data-toggle-label="off">Off</span>';
         nav += '</label>';
       } else {
@@ -25475,10 +25495,33 @@ function renderPluginSettings(plugins) {
           if (el.tagName === 'SELECT' && el.value !== cfg[s.key]) {
             el.dataset.pendingValue = cfg[s.key];
           }
-        } else if (s.secret && cfg[s.key + 'Set']) el.placeholder = '(configured)';
+        } else if ((s.secret || s.sensitive) && cfg[s.key + 'Set']) el.placeholder = '(configured)';
       });
     }).catch(function () {});
   });
+}
+
+async function refreshSpecialSettingsPanels(plugins) {
+  var installed = Array.isArray(plugins) ? plugins : [];
+  var videoSection = document.getElementById('settingsSection-videoUse');
+  if (!videoSection) return;
+  var hasVideoUse = installed.some(function (p) { return p && p.id === 'video-use'; });
+  videoSection.style.display = hasVideoUse ? '' : 'none';
+  videoSection.querySelectorAll('.plugin-setting-input').forEach(function (el) { el.disabled = !hasVideoUse; });
+  if (!hasVideoUse) return;
+  try {
+    var res = await fetch('/api/plugins/video-use/config', { cache: 'no-store' });
+    var cfg = res.ok ? await res.json() : {};
+    var elevenLabsEl = document.getElementById('pluginSetting_video-use_ElevenLabsApiKey');
+    var ffmpegEl = document.getElementById('pluginSetting_video-use_FfmpegPath');
+    var ffprobeEl = document.getElementById('pluginSetting_video-use_FfprobePath');
+    if (elevenLabsEl) {
+      elevenLabsEl.value = cfg.ElevenLabsApiKey || '';
+      elevenLabsEl.placeholder = cfg.ElevenLabsApiKeySet ? '(configured)' : 'Optional ElevenLabs key';
+    }
+    if (ffmpegEl) ffmpegEl.value = cfg.FfmpegPath || 'ffmpeg';
+    if (ffprobeEl) ffprobeEl.value = cfg.FfprobePath || 'ffprobe';
+  } catch (_) {}
 }
 
 // Drives the visual state of the boolean plugin-setting toggle: track color,
@@ -25487,12 +25530,8 @@ function _syncPluginToggleVisual(input) {
   if (!input) return;
   var label = input.closest('label.plugin-setting-toggle');
   if (!label) return;
-  var track = label.querySelector('.plugin-setting-track');
-  var thumb = label.querySelector('.plugin-setting-thumb');
   var text = label.querySelector('[data-toggle-label]');
   var on = !!input.checked;
-  if (track) track.style.background = on ? 'var(--green)' : 'var(--surface1)';
-  if (thumb) thumb.style.transform = on ? 'translateX(16px)' : 'translateX(0)';
   if (text) { text.textContent = on ? 'On' : 'Off'; text.dataset.toggleLabel = on ? 'on' : 'off'; }
 }
 
@@ -25916,6 +25955,7 @@ async function savePluginSettings() {
   var inputs = document.querySelectorAll('.plugin-setting-input');
   var byPlugin = {};
   inputs.forEach(function (el) {
+    if (el.disabled) return;
     var pid = el.dataset.plugin;
     var key = el.dataset.key;
     if (!pid || !key) return;
