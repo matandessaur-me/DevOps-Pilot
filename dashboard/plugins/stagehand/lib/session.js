@@ -41,6 +41,19 @@ function _resolveApiKey(model, getConfig) {
   return saved || process.env[envKey] || null;
 }
 
+// The Stagehand SDK uses two code paths: act/extract/observe accept the key
+// via modelClientOptions, but the agent() loop creates its own provider client
+// that reads from process.env only. Mirror every saved AiApiKey into env so
+// both paths see them. Idempotent.
+function _exportSavedKeysToEnv(getConfig) {
+  let cfg = {};
+  try { cfg = (typeof getConfig === 'function' ? getConfig() : {}) || {}; } catch (_) { return; }
+  const saved = cfg.AiApiKeys || {};
+  for (const k of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'XAI_API_KEY', 'DASHSCOPE_API_KEY']) {
+    if (saved[k] && !process.env[k]) process.env[k] = saved[k];
+  }
+}
+
 function _loadStagehand() {
   if (_StagehandCtor) return _StagehandCtor;
   try {
@@ -70,6 +83,7 @@ async function getSession({ getSettings, getConfig } = {}) {
     const model = settings.model || 'anthropic/claude-sonnet-4-6';
     const headless = settings.headless === true;
 
+    _exportSavedKeysToEnv(getConfig);
     const apiKey = _resolveApiKey(model, getConfig);
     const provider = _providerForModel(model);
     if (!apiKey) {
