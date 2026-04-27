@@ -565,12 +565,17 @@ class Orchestrator extends EventEmitter {
     const cfg = HEADLESS_FLAGS[cli];
     if (!cfg) throw new Error(`Unknown CLI: "${cli}". Use: ${Object.keys(HEADLESS_FLAGS).join(', ')}`);
 
-    // Mind hint: prepend a short status line so the worker knows the shared
-    // brain exists, how fresh it is, and how to query / contribute. Single
-    // line, ASCII only. Skipped silently if Mind is not available.
+    // Mind hint: prepend the metadata stamp + L0+L1 wake-up. Pass the
+    // worker's own prompt to the hint so L1 becomes the BFS sub-graph
+    // for THIS task instead of generic god-nodes. Skipped silently if
+    // Mind is not available.
     if (typeof this.getMindHint === 'function' && _retryAttempt === 0) {
       try {
-        const hint = this.getMindHint();
+        // Pass the prompt as the question so L1 is task-aware. The hint
+        // function accepts an opts object; legacy callers without args still work.
+        const hint = (this.getMindHint.length >= 1)
+          ? this.getMindHint({ question: typeof prompt === 'string' ? prompt : '' })
+          : this.getMindHint();
         if (hint && typeof prompt === 'string' && !prompt.startsWith('[mind:')) {
           prompt = `${hint}\n\n${prompt}`;
         }

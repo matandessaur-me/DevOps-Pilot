@@ -25,6 +25,8 @@ const { extractPlugins } = require('./extractors/plugins');
 const { extractInstructions } = require('./extractors/instructions');
 const { extractRepoCode } = require('./extractors/repo-code');
 const { extractCliHistory } = require('./extractors/cli-history');
+const { extractCliDrawers } = require('./extractors/cli-drawers');
+const adapterRegistry = require('./extractors/base');
 
 async function runBuild({ repoRoot, space, sources = [], incremental = false, ctx = {}, onProgress = () => {} }) {
   const t0 = Date.now();
@@ -39,8 +41,8 @@ async function runBuild({ repoRoot, space, sources = [], incremental = false, ct
 
   if (sources.includes('notes')) {
     onProgress('Extracting notes...');
-    const f = extractNotes({ repoRoot, notesNamespace, notesRoot });
-    fragments.push(f); summary.notes = { scanned: f.scanned, nodes: f.nodes.length, edges: f.edges.length };
+    const f = extractNotes({ repoRoot, notesNamespace, notesRoot, manifest, incremental });
+    fragments.push(f); summary.notes = { scanned: f.scanned, skippedUnchanged: f.skippedUnchanged, nodes: f.nodes.length, edges: f.edges.length };
   }
 
   if (sources.includes('learnings')) {
@@ -63,8 +65,8 @@ async function runBuild({ repoRoot, space, sources = [], incremental = false, ct
 
   if (sources.includes('recipes')) {
     onProgress('Extracting recipes...');
-    const f = extractRecipes({ repoRoot });
-    fragments.push(f); summary.recipes = { scanned: f.scanned, nodes: f.nodes.length, edges: f.edges.length };
+    const f = extractRecipes({ repoRoot, manifest, incremental });
+    fragments.push(f); summary.recipes = { scanned: f.scanned, skippedUnchanged: f.skippedUnchanged, nodes: f.nodes.length, edges: f.edges.length };
   }
 
   if (sources.includes('plugins')) {
@@ -75,8 +77,8 @@ async function runBuild({ repoRoot, space, sources = [], incremental = false, ct
 
   if (sources.includes('instructions')) {
     onProgress('Extracting instructions...');
-    const f = extractInstructions({ repoRoot });
-    fragments.push(f); summary.instructions = { scanned: f.scanned, nodes: f.nodes.length, edges: f.edges.length };
+    const f = extractInstructions({ repoRoot, manifest, incremental });
+    fragments.push(f); summary.instructions = { scanned: f.scanned, skippedUnchanged: f.skippedUnchanged, nodes: f.nodes.length, edges: f.edges.length };
   }
 
   if (sources.includes('repo-code')) {
@@ -111,9 +113,44 @@ async function runBuild({ repoRoot, space, sources = [], incremental = false, ct
 
   if (sources.includes('cli-history')) {
     onProgress('Extracting CLI session history (claude / codex / gemini / grok / qwen / copilot)...');
-    const f = extractCliHistory({ activeRepoPath, allRepos: !!ctx.cliHistoryAllRepos });
+    const f = extractCliHistory({ activeRepoPath, allRepos: !!ctx.cliHistoryAllRepos, manifest, incremental });
     fragments.push(f);
-    summary.cliHistory = { scanned: f.scanned, skippedOtherRepo: f.skippedOtherRepo, perCli: f.perCli, nodes: f.nodes.length, edges: f.edges.length };
+    summary.cliHistory = { scanned: f.scanned, skippedOtherRepo: f.skippedOtherRepo, skippedUnchanged: f.skippedUnchanged, perCli: f.perCli, nodes: f.nodes.length, edges: f.edges.length };
+  }
+
+  if (sources.includes('cli-drawers')) {
+    onProgress('Extracting verbatim CLI message drawers (claude / codex / qwen / grok)...');
+    const f = extractCliDrawers({ activeRepoPath, allRepos: !!ctx.cliHistoryAllRepos, manifest, incremental });
+    fragments.push(f);
+    summary.cliDrawers = { scanned: f.scanned, skippedUnchanged: f.skippedUnchanged, skippedOtherRepo: f.skippedOtherRepo, drawers: f.drawersEmitted, nodes: f.nodes.length, edges: f.edges.length };
+  }
+
+  // Third-party source adapters registered via dashboard/mind/extractors/base.js.
+  // Plugins call `mindExtractors.register(adapter)` and the engine pulls
+  // their fragments after the hardcoded ones. An adapter that throws is
+  // logged and skipped — one bad plugin must not break the build.
+  const adapters = adapterRegistry.list();
+  if (adapters.length) {
+    summary.adapters = {};
+    for (const a of adapters) {
+      const adapterName = a.name || (a.constructor && a.constructor.name) || 'unknown';
+      onProgress(`Extracting from registered adapter: ${adapterName}...`);
+      try {
+        const adapterCtx = { repoRoot, space, activeRepoPath, manifest, ui, ctx };
+        const totals = { nodes: 0, edges: 0, scanned: 0, skippedUnchanged: 0 };
+        for await (const f of a.ingest(adapterCtx)) {
+          if (!f) continue;
+          fragments.push(f);
+          totals.nodes += (f.nodes || []).length;
+          totals.edges += (f.edges || []).length;
+          totals.scanned += f.scanned || 0;
+          totals.skippedUnchanged += f.skippedUnchanged || 0;
+        }
+        summary.adapters[adapterName] = { ...totals, version: a.constructor?.adapterVersion || a.adapterVersion || '0.0.0' };
+      } catch (err) {
+        summary.adapters[adapterName] = { error: err.message };
+      }
+    }
   }
 
   manifest.flushSync();

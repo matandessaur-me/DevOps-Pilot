@@ -233,7 +233,7 @@ function cwdMatchesRepo(cwd, activeRepoPath) {
 
 // ---- main extractor --------------------------------------------------------
 
-function extractCliHistory({ activeRepoPath, allRepos = false, maxPerCli = DEFAULT_MAX_PER_CLI, createdBy = 'mind/cli-history' }) {
+function extractCliHistory({ activeRepoPath, allRepos = false, maxPerCli = DEFAULT_MAX_PER_CLI, createdBy = 'mind/cli-history', manifest = null, incremental = false }) {
   const collectors = [
     collectClaude, collectCodex, collectGemini, collectGrok, collectQwen, collectCopilot,
   ];
@@ -265,8 +265,26 @@ function extractCliHistory({ activeRepoPath, allRepos = false, maxPerCli = DEFAU
   const seenRepo = new Set();
   let scanned = 0;
   let skippedOtherRepo = 0;
+  let skippedUnchanged = 0;
+
+  // Idempotent-sweeper pattern: skip session files whose mtime hasn't advanced
+  // since the last extract. Session jsonls are append-only, so an unchanged
+  // mtime means none of our deterministic IDs (clisess_<cli>_<sessionId>)
+  // would change. The Manifest already tracks lastExtractedAt for repo-code;
+  // we reuse it here keyed by the session file path.
+  const manifestKey = (s) => `cli-history:${s.file}`;
 
   for (const s of kept) {
+    // Mtime skip is ONLY safe on incremental builds, where the existing
+    // graph still carries the nodes for this session. On a full rebuild,
+    // skipping means losing those nodes -- so we always re-extract.
+    if (incremental && manifest) {
+      const prev = manifest.get(manifestKey(s));
+      if (prev && prev.mtimeMs === s.mtime) {
+        skippedUnchanged++;
+        continue;
+      }
+    }
     const text = readHead(s.file, SCAN_BYTES_PER_FILE);
     if (!text) continue;
     const records = parseJsonl(text);
@@ -331,9 +349,12 @@ function extractCliHistory({ activeRepoPath, allRepos = false, maxPerCli = DEFAU
     }
 
     scanned++;
+    if (manifest) {
+      manifest.set(manifestKey(s), { sha256: '', lastExtractedAt: Date.now(), contributors: [], mtimeMs: s.mtime });
+    }
   }
 
-  return { nodes, edges, scanned, skippedOtherRepo, perCli: Object.fromEntries(perCliCount) };
+  return { nodes, edges, scanned, skippedOtherRepo, skippedUnchanged, perCli: Object.fromEntries(perCliCount) };
 }
 
 module.exports = { extractCliHistory };

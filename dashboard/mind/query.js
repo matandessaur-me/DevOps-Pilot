@@ -1,36 +1,78 @@
 /**
- * Query the graph: BFS from seed nodes (or from the best label match for the
+ * Query the graph: BFS from seed nodes (or from the best label/BM25 match for the
  * question) until a token budget is hit. Returns the sub-graph plus a
  * suggested-answer scaffold the calling AI fills in and saves back via
  * /api/mind/save-result.
+ *
+ * Seed selection is hybrid: BM25 over (label + tags + description + answer)
+ * with a god-node prior. Substring matching is kept as a fallback when BM25
+ * yields nothing — that should be rare since BM25 finds anything substring
+ * does, but the fallback covers tokenization edge cases (e.g. all query
+ * terms shorter than the BM25 token regex's 2-char floor).
+ *
+ * Temporal awareness: pass { asOf: ISO-date } to ask "what was true at that
+ * moment?". Edges with validFrom/validTo are filtered through
+ * schema.isEdgeValidAt during BFS and in the final sub-graph projection.
+ * Edges without those fields are timeless and always visible.
  */
 
 const { normLabel } = require('./ids');
+const { bm25Scores } = require('./bm25');
+const { isEdgeValidAt } = require('./schema');
 
 const APPROX_TOKENS_PER_NODE = 30;
 const APPROX_TOKENS_PER_EDGE = 8;
+
+function nodeSearchableText(n) {
+  const parts = [n.label || '', ...(n.tags || [])];
+  if (typeof n.description === 'string') parts.push(n.description);
+  if (typeof n.answer === 'string') parts.push(n.answer);
+  if (typeof n.summary === 'string') parts.push(n.summary);
+  return parts.join(' ');
+}
 
 function bestSeeds(graph, question, max = 3) {
   if (!question) return graph.nodes.slice(0, max).map(n => n.id);
   const q = normLabel(question);
   if (!q) return graph.nodes.slice(0, max).map(n => n.id);
-  const tokens = q.split(/\s+/).filter(t => t.length > 2);
+
+  const docs = graph.nodes.map(nodeSearchableText);
+  const raw = bm25Scores(q, docs);
+  const maxBm = Math.max(...raw, 0);
+
+  if (maxBm > 0) {
+    const godSet = new Set((graph.gods || []).map(g => (typeof g === 'string' ? g : g && g.id)).filter(Boolean));
+    const scored = graph.nodes.map((n, i) => {
+      const base = raw[i] / maxBm;
+      // God prior boosts existing matches; it must NOT create matches.
+      // Otherwise an unrelated god (e.g. "route.ts" while the user asks
+      // about cooking recipes) would lead the seed list and pollute L1.
+      const godBoost = (base > 0 && godSet.has(n.id)) ? 0.15 : 0;
+      return { id: n.id, score: base + godBoost };
+    }).filter(r => r.score > 0);
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, max).map(r => r.id);
+  }
+
+  // Fallback: substring scoring on label + tags. Reaches BM25's blind spots
+  // (single-letter tokens, exotic punctuation that the token regex strips).
+  const tokens = q.split(/\s+/).filter(t => t.length >= 1);
   if (tokens.length === 0) return graph.nodes.slice(0, max).map(n => n.id);
-  const scored = graph.nodes.map(n => {
+  const fallback = graph.nodes.map(n => {
     const lbl = normLabel(n.label || n.id);
-    let score = 0;
-    for (const t of tokens) if (lbl.includes(t)) score += 1;
-    // Boost by tag matches and god-node priors
-    for (const tag of (n.tags || [])) for (const t of tokens) if (normLabel(tag).includes(t)) score += 0.5;
-    return { id: n.id, score };
+    let s = 0;
+    for (const t of tokens) if (lbl.includes(t)) s += 1;
+    for (const tag of (n.tags || [])) for (const t of tokens) if (normLabel(tag).includes(t)) s += 0.5;
+    return { id: n.id, score: s };
   }).filter(r => r.score > 0);
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, max).map(r => r.id);
+  fallback.sort((a, b) => b.score - a.score);
+  return fallback.slice(0, max).map(r => r.id);
 }
 
-function buildAdjacency(edges) {
+function buildAdjacency(edges, asOf) {
   const adj = new Map();
   for (const e of edges) {
+    if (asOf && !isEdgeValidAt(e, asOf)) continue;
     if (!adj.has(e.source)) adj.set(e.source, []);
     if (!adj.has(e.target)) adj.set(e.target, []);
     adj.get(e.source).push({ peer: e.target, edge: e });
@@ -39,7 +81,7 @@ function buildAdjacency(edges) {
   return adj;
 }
 
-function runQuery(graph, { question = '', mode = 'bfs', budget = 2000, seedIds = null } = {}) {
+function runQuery(graph, { question = '', mode = 'bfs', budget = 2000, seedIds = null, asOf = null } = {}) {
   if (!graph || !graph.nodes.length) {
     return { question, empty: true, nodes: [], edges: [], answer: null };
   }
@@ -48,8 +90,8 @@ function runQuery(graph, { question = '', mode = 'bfs', budget = 2000, seedIds =
     return { question, empty: true, nodes: [], edges: [], answer: null };
   }
 
-  const adj = buildAdjacency(graph.edges);
-  const visitedNodes = new Map(); // id -> node
+  const adj = buildAdjacency(graph.edges, asOf);
+  const visitedNodes = new Map();
   const visitedEdges = new Set();
   const queue = [];
   for (const id of seeds) {
@@ -62,7 +104,6 @@ function runQuery(graph, { question = '', mode = 'bfs', budget = 2000, seedIds =
     const { id, depth } = (mode === 'dfs') ? queue.pop() : queue.shift();
     if (depth > 4) continue;
     const neighbors = adj.get(id) || [];
-    // Sort neighbors so EXTRACTED edges are explored before INFERRED before AMBIGUOUS.
     neighbors.sort((a, b) => confRank(a.edge) - confRank(b.edge));
     for (const { peer, edge } of neighbors) {
       const ekey = edgeKey(edge);
@@ -81,11 +122,14 @@ function runQuery(graph, { question = '', mode = 'bfs', budget = 2000, seedIds =
 
   const subNodes = Array.from(visitedNodes.values());
   const subIds = new Set(subNodes.map(n => n.id));
-  const subEdges = graph.edges.filter(e => subIds.has(e.source) && subIds.has(e.target));
+  const subEdges = graph.edges.filter(e =>
+    subIds.has(e.source) && subIds.has(e.target) && (!asOf || isEdgeValidAt(e, asOf))
+  );
 
   return {
     question,
     seedIds: seeds,
+    asOf: asOf || null,
     nodes: subNodes,
     edges: subEdges,
     estTokens: tokenEst,
@@ -112,4 +156,4 @@ function scaffoldAnswer(question, nodes, edges) {
   };
 }
 
-module.exports = { runQuery, bestSeeds };
+module.exports = { runQuery, bestSeeds, nodeSearchableText };

@@ -321,10 +321,138 @@
       return;
     }
     if (state.view === 'dashboard') renderDashboard();
+    else if (state.view === 'wakeup') renderWakeup();
+    else if (state.view === 'query') renderQuery();
     else if (state.view === 'communities') renderCommunities();
     else if (state.view === 'hotspots') renderHotspots();
     else if (state.view === 'map') renderMap();
     else if (state.view === 'graph') renderGraph();
+  }
+
+  // ── Wake-up view ──────────────────────────────────────────────────────────
+  // Shows the exact L0+L1 text every dispatched worker sees as its prompt
+  // prefix. Useful for diagnosing "why is the worker missing context?".
+  // Includes a question input to preview task-aware L1 (the BFS sub-graph
+  // the orchestrator generates per dispatched task).
+  async function renderWakeup() {
+    const main = $('mindMain');
+    if (!main) return;
+    const cached = state.wakeup || {};
+    main.innerHTML = `
+      <div class="mind-card" style="max-width:920px;margin:0 auto;">
+        <div class="mind-card-title" style="display:flex;align-items:center;justify-content:space-between;">
+          <span>Wake-up preview</span>
+          <span style="font-size:10px;color:var(--subtext0);font-weight:normal;">What every dispatched worker sees as the prompt prefix</span>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+          <input id="mindWakeupQ" type="text" placeholder="Optional: a sample task prompt -- preview task-aware L1 for it" style="flex:1;min-width:260px;padding:6px 10px;background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:12px;" value="${escapeHtml(cached.question || '')}">
+          <label style="font-size:11px;color:var(--subtext0);display:flex;align-items:center;gap:4px;">
+            budget
+            <input id="mindWakeupBudget" type="number" min="200" max="2000" step="100" value="${cached.budget || 600}" style="width:64px;padding:4px 6px;background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:11px;">
+          </label>
+          <button class="tab-bar-btn" onclick="MindUI._wakeupRefresh()" style="padding:5px 12px;font-size:11px;">Refresh</button>
+        </div>
+        <pre id="mindWakeupOut" style="background:var(--mantle);padding:14px;border-radius:6px;font-size:11px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:var(--text);min-height:140px;border:1px solid var(--surface0);">Loading wake-up...</pre>
+        <div id="mindWakeupMeta" style="font-size:10px;color:var(--subtext0);margin-top:6px;font-variant-numeric:tabular-nums;"></div>
+      </div>`;
+    await refreshWakeupOutput();
+    const qEl = $('mindWakeupQ');
+    if (qEl) qEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') refreshWakeupOutput(); });
+  }
+
+  async function refreshWakeupOutput() {
+    const q = ($('mindWakeupQ') && $('mindWakeupQ').value || '').trim();
+    const budget = parseInt(($('mindWakeupBudget') && $('mindWakeupBudget').value) || '600', 10);
+    state.wakeup = { question: q, budget };
+    const url = `/api/mind/wakeup?budget=${budget}${q ? `&question=${encodeURIComponent(q)}` : ''}`;
+    try {
+      const data = await API(url);
+      const out = $('mindWakeupOut'); const meta = $('mindWakeupMeta');
+      if (out) out.textContent = data.text || '(empty)';
+      if (meta) meta.textContent = `~${data.estTokens || 0} tokens · L0 ${data.layers?.l0Chars || 0}ch · L1 ${data.layers?.l1Chars || 0}ch · queryAware=${!!data.queryAware}`;
+    } catch (e) {
+      const out = $('mindWakeupOut');
+      if (out) out.textContent = 'Error: ' + (e.message || String(e));
+    }
+  }
+
+  // ── Query view ──────────────────────────────────────────────────────────
+  // Run a /api/mind/query interactively. Shows seed IDs (BM25) and the
+  // BFS sub-graph. Includes the asOf input so temporal queries can be
+  // exercised from the UI without curl.
+  async function renderQuery() {
+    const main = $('mindMain');
+    if (!main) return;
+    const c = state.queryUI || {};
+    main.innerHTML = `
+      <div class="mind-card" style="max-width:920px;margin:0 auto;">
+        <div class="mind-card-title">Ask the brain</div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+          <input id="mindQueryQ" type="text" placeholder="Ask something the brain might know..." style="flex:1;min-width:280px;padding:6px 10px;background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:12px;" value="${escapeHtml(c.question || '')}">
+          <label style="font-size:11px;color:var(--subtext0);display:flex;align-items:center;gap:4px;" title="Half-open [validFrom, validTo) over edges with temporal validity">
+            asOf
+            <input id="mindQueryAsOf" type="date" value="${escapeHtml(c.asOf || '')}" style="padding:4px 6px;background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:11px;">
+          </label>
+          <label style="font-size:11px;color:var(--subtext0);display:flex;align-items:center;gap:4px;">
+            budget
+            <input id="mindQueryBudget" type="number" min="200" max="8000" step="100" value="${c.budget || 2000}" style="width:74px;padding:4px 6px;background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:11px;">
+          </label>
+          <button class="tab-bar-btn" onclick="MindUI._queryRun()" style="padding:5px 12px;font-size:11px;">Query</button>
+        </div>
+        <div id="mindQueryOut" style="display:flex;flex-direction:column;gap:10px;"></div>
+      </div>`;
+    const qEl = $('mindQueryQ');
+    if (qEl) qEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') runQueryFromUi(); });
+    if (c.lastResult) renderQueryResult(c.lastResult);
+  }
+
+  async function runQueryFromUi() {
+    const question = ($('mindQueryQ') && $('mindQueryQ').value || '').trim();
+    if (!question) return;
+    const asOf = ($('mindQueryAsOf') && $('mindQueryAsOf').value) || null;
+    const budget = parseInt(($('mindQueryBudget') && $('mindQueryBudget').value) || '2000', 10);
+    state.queryUI = { question, asOf, budget };
+    try {
+      const data = await fetch('/api/mind/query', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, asOf: asOf || null, budget }),
+      }).then(r => r.json());
+      state.queryUI.lastResult = data;
+      renderQueryResult(data);
+    } catch (e) {
+      const out = $('mindQueryOut');
+      if (out) out.innerHTML = `<div style="color:#f38ba8;">Error: ${escapeHtml(e.message || String(e))}</div>`;
+    }
+  }
+
+  function renderQueryResult(data) {
+    const out = $('mindQueryOut');
+    if (!out) return;
+    if (!data || data.empty) {
+      out.innerHTML = `<div style="color:var(--subtext0);font-style:italic;padding:8px;">No matches in the brain for that query.</div>`;
+      return;
+    }
+    const seeds = (data.seedIds || []).slice(0, 8);
+    const nodes = (data.nodes || []).slice(0, 25);
+    out.innerHTML = `
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:10px 14px;font-size:11px;">
+        <div style="color:var(--subtext0);">seed ids</div>
+        <div style="font-family:monospace;font-size:10px;line-height:1.6;">${seeds.length ? seeds.map(s => `<span style="background:var(--surface0);padding:1px 6px;border-radius:3px;margin-right:6px;">${escapeHtml(s)}</span>`).join('') : '<span style="font-style:italic;">none</span>'}</div>
+        <div style="color:var(--subtext0);">sub-graph</div>
+        <div>${nodes.length} nodes / ${(data.edges || []).length} edges · est ${data.estTokens || 0} tokens · asOf ${data.asOf || '(timeless)'}</div>
+      </div>
+      <div style="margin-top:8px;">
+        ${nodes.map(n => `
+          <a href="#" class="mind-godlink" data-id="${n.id}" style="display:flex;align-items:baseline;gap:8px;padding:6px 10px;background:var(--mantle);border-radius:4px;text-decoration:none;color:var(--text);font-size:12px;margin-bottom:4px;">
+            <span style="font-size:9px;color:var(--subtext0);text-transform:uppercase;width:60px;flex-shrink:0;">[${escapeHtml(n.kind)}]</span>
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">${escapeHtml(n.label || n.id)}</span>
+          </a>`).join('')}
+      </div>`;
+    // Wire godlink click-through to the node detail panel.
+    out.querySelectorAll('.mind-godlink').forEach(a => a.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      showNodeDetail(a.dataset.id);
+    }));
   }
 
   // ── Dashboard view (the "dashboard into the brain") ────────────────────────
@@ -868,6 +996,9 @@
     code: 'dot', doc: 'square', note: 'star', plugin: 'diamond',
     recipe: 'triangle', tag: 'dot', concept: 'dot', conversation: 'hexagon',
     workitem: 'box', image: 'image', paper: 'square',
+    // Drawers (verbatim user/assistant turns) get a distinctive triangleDown
+    // so they're separable from concept dots and conversation hexagons.
+    drawer: 'triangleDown',
   };
 
   function nodeSize(degree) {
@@ -1261,5 +1392,8 @@
     } catch (_) { return iso; }
   }
 
-  window.MindUI = { onActivate, setView, build, update, toggleWatch, askAbout, purgeNode, closeDetail, fitGraph, togglePhysics, clearSearch, toggleSearchOnly };
+  window.MindUI = { onActivate, setView, build, update, toggleWatch, askAbout, purgeNode, closeDetail, fitGraph, togglePhysics, clearSearch, toggleSearchOnly,
+    _wakeupRefresh: refreshWakeupOutput,
+    _queryRun: runQueryFromUi,
+  };
 })();

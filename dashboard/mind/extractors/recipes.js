@@ -18,15 +18,23 @@ const SEARCH_DIRS = (repoRoot) => [
   path.join(os.homedir(), '.symphonee', 'recipes'),
 ];
 
-function extractRecipes({ repoRoot, createdBy = 'mind/recipes' }) {
+function extractRecipes({ repoRoot, createdBy = 'mind/recipes', manifest = null, incremental = false }) {
   const nodes = []; const edges = [];
-  let scanned = 0;
+  let scanned = 0; let skippedUnchanged = 0;
   for (const dir of SEARCH_DIRS(repoRoot)) {
     if (!fs.existsSync(dir)) continue;
     for (const f of fs.readdirSync(dir).filter(x => x.endsWith('.md'))) {
       const full = path.join(dir, f);
+      let mtimeMs = 0;
+      try { mtimeMs = fs.statSync(full).mtimeMs; } catch (_) {}
+      const key = `recipes:${full}`;
+      if (incremental && manifest) {
+        const prev = manifest.get(key);
+        if (prev && prev.mtimeMs === mtimeMs) { skippedUnchanged++; continue; }
+      }
       let body; try { body = fs.readFileSync(full, 'utf8'); } catch (_) { continue; }
       scanned++;
+      if (manifest) manifest.set(key, { sha256: '', lastExtractedAt: Date.now(), contributors: [], mtimeMs });
       const { fm } = parseFrontmatter(body);
       const stem = f.replace(/\.md$/i, '');
       const id = `recipe_${makeIdFromLabel(stem)}`;
@@ -67,7 +75,7 @@ function extractRecipes({ repoRoot, createdBy = 'mind/recipes' }) {
       }
     }
   }
-  return { nodes, edges, scanned };
+  return { nodes, edges, scanned, skippedUnchanged };
 }
 
 module.exports = { extractRecipes };

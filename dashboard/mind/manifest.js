@@ -59,11 +59,13 @@ class Manifest {
 
   get(filePath) { return this.entries.get(filePath) || null; }
 
-  set(filePath, { sha256, lastExtractedAt, contributors }) {
+  set(filePath, entry) {
+    const { sha256, lastExtractedAt, contributors, ...rest } = entry || {};
     this.entries.set(filePath, {
-      sha256,
+      sha256: sha256 || '',
       lastExtractedAt: lastExtractedAt || Date.now(),
       contributors: contributors || [],
+      ...rest,
     });
     this._scheduleFlush();
   }
