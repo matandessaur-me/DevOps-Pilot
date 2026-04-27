@@ -1222,14 +1222,15 @@ async function _runThreadInner({ thread, task, agent, providerEntry, model, broa
         const msg = e.message || '';
         if (thread.stopped && isAbortError(e)) {
           emit({ kind: 'stopped' });
-          return { ok: true, stopped: true };
+          thread.lastResult = { ok: true, kind: 'stopped', stopped: true, finishedAt: Date.now() };
+          return thread.lastResult;
         }
         if (msg.includes('429')) {
           saveBrowserLearning('Rate limit hit mid-task. Reduce steps: prefer direct URL navigation over multi-step UI clicks. Use Haiku model for browser tasks.');
         }
         emit({ kind: 'error', message: providerEntry.adapter.label + ' API error: ' + msg });
-        thread.running = false;
-        return { ok: false, error: msg };
+        thread.lastResult = { ok: false, kind: 'error', error: providerEntry.adapter.label + ' API error: ' + msg, finishedAt: Date.now() };
+        return thread.lastResult;
       } finally {
         thread.abortController = null;
       }
