@@ -11600,6 +11600,9 @@ function launchAiWith(cli) {
     const st = getTermAi(termId);
     st.cli = cli;
     st.launched = true;
+    try {
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'term-ai-state', termId, cli, launched: true }));
+    } catch (_) {}
     const inst = termInstances.get(termId);
     // Update tab label
     const tabEl = termId === 'main'
@@ -11641,6 +11644,9 @@ function stopAi(termId) {
   }, 1000);
   st.launched = false;
   st.cli = null;
+  try {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'term-ai-state', termId: tid, cli: null, launched: false }));
+  } catch (_) {}
   const inst = termInstances.get(tid);
   // Restore tab label
   const shellLabel = getShellLabel(tid);
@@ -11680,6 +11686,9 @@ function resumeAiSession() {
   const st = getTermAi(activeTermId);
   st.cli = activeCli;
   st.launched = true;
+  try {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'term-ai-state', termId: activeTermId, cli: activeCli, launched: true }));
+  } catch (_) {}
   const cfg = CLI_CONFIG[activeCli];
   const tabEl = activeTermId === 'main'
     ? document.getElementById('mainTermTab')
