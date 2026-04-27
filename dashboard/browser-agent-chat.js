@@ -1138,8 +1138,28 @@ function saveBrowserLearning(summary) {
 }
 
 // ── Runner ────────────────────────────────────────────────────────────────
-async function runThread({ thread, task, agent, providerEntry, model, broadcast, credentials }) {
+async function runThread(args) {
+  const { thread, broadcast } = args;
   thread.running = true;
+  // Outer guard so ANY throw between here and the main loop's own try/catch
+  // still lands in thread.lastResult instead of silently rejecting up to the
+  // /chat handler's `.catch(() => {})`. The router polls lastResult to know
+  // when the run is over, so leaving it null = it never sees the result.
+  try {
+    return await _runThreadInner(args);
+  } catch (e) {
+    if (typeof broadcast === 'function') {
+      try { broadcast({ type: 'browser-agent-step', threadId: thread.id, kind: 'error', message: e && e.message || String(e), at: Date.now() }); } catch (_) {}
+    }
+    thread.lastResult = { ok: false, kind: 'error', error: e && e.message || String(e), finishedAt: Date.now() };
+    return thread.lastResult;
+  } finally {
+    thread.running = false;
+    pruneThreads();
+  }
+}
+
+async function _runThreadInner({ thread, task, agent, providerEntry, model, broadcast, credentials }) {
   const emit = (step) => {
     if (typeof broadcast === 'function') {
       broadcast({ type: 'browser-agent-step', threadId: thread.id, ...step, at: Date.now() });
@@ -1154,7 +1174,6 @@ async function runThread({ thread, task, agent, providerEntry, model, broadcast,
   try { await agent.launch({}); } catch (e) {
     emit({ kind: 'error', message: 'Failed to open browser: ' + e.message });
     thread.lastResult = { ok: false, kind: 'error', error: 'Failed to open browser: ' + e.message, finishedAt: Date.now() };
-    thread.running = false;
     return thread.lastResult;
   }
 
@@ -1293,10 +1312,8 @@ async function runThread({ thread, task, agent, providerEntry, model, broadcast,
     emit({ kind: 'error', message: e.message });
     thread.lastResult = { ok: false, kind: 'error', error: e.message, finishedAt: Date.now() };
     return thread.lastResult;
-  } finally {
-    thread.running = false;
-    pruneThreads();
   }
+  // running=false + pruneThreads moved to outer runThread wrapper.
 }
 
 // ── Routes ─────────────────────────────────────────────────────────────────
