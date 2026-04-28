@@ -6466,6 +6466,9 @@ requestAnimationFrame(fitTerminalNow);
           break;
         }
         case 'term-started':
+          if (msg.termId && msg.cwd && termInstances.has(msg.termId)) {
+            termInstances.get(msg.termId).cwd = msg.cwd;
+          }
           document.getElementById('statusDot').className = 'status-dot connected';
           document.getElementById('connectionStatus').textContent = 'Connected';
           syncAiControls();
@@ -6481,6 +6484,15 @@ requestAnimationFrame(fitTerminalNow);
             // Main already created in HTML
           }
           break;
+        case 'term-cwd': {
+          const tid = msg.termId || 'main';
+          const inst = termInstances.get(tid);
+          if (inst) inst.cwd = msg.cwd || inst.cwd || '';
+          if (tid === activeTermId && msg.repo && msg.repo !== activeRepo) {
+            selectRepo(msg.repo);
+          }
+          break;
+        }
         case 'term-spawned': {
           // Orchestrator spawned a visible terminal - create tab for it
           const tid = msg.termId;

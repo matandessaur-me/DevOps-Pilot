@@ -2699,6 +2699,48 @@ function broadcast(msg) {
   }
 }
 
+function _normFsPath(p) {
+  return String(p || '').replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
+}
+
+function _repoForPath(cwd) {
+  const cfg = getConfig();
+  const repos = cfg.Repos || {};
+  const nCwd = _normFsPath(cwd);
+  let best = null;
+  let bestLen = -1;
+  for (const [name, repoPath] of Object.entries(repos)) {
+    const nRepo = _normFsPath(repoPath);
+    if (!nRepo) continue;
+    if ((nCwd === nRepo || nCwd.startsWith(nRepo + '\\')) && nRepo.length > bestLen) {
+      best = name;
+      bestLen = nRepo.length;
+    }
+  }
+  return best;
+}
+
+function _handleTerminalCwd(termId, cwd) {
+  if (!cwd) return;
+  const t = terminals.get(termId);
+  if (t) t.cwd = cwd;
+  broadcast({ type: 'term-cwd', termId, cwd, repo: _repoForPath(cwd) });
+}
+
+function _cwdPromptHookCommand() {
+  return [
+    "try {",
+    "  if (-not $global:__SymphoneeCwdPromptInstalled) {",
+    "    $global:__SymphoneeCwdPromptInstalled = $true",
+    "    function global:prompt {",
+    "      try { [Console]::Write(\"$([char]27)]777;cwd=$((Get-Location).ProviderPath)$([char]7)\") } catch {}",
+    "      \"PS $((Get-Location).Path)> \"",
+    "    }",
+    "  }",
+    "} catch {}",
+  ].join(' ');
+}
+
 function createTerminal(termId, cols = 120, rows = 30, cwd = repoRoot) {
   // Kill existing if same ID
   if (terminals.has(termId)) {
@@ -2707,7 +2749,7 @@ function createTerminal(termId, cols = 120, rows = 30, cwd = repoRoot) {
   }
   termAiMeta.delete(termId);
 
-  const ptyProcess = pty.spawn(shellPath, ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-NoLogo', '-NoExit'], {
+  const ptyProcess = pty.spawn(shellPath, ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-NoLogo', '-NoExit', '-Command', _cwdPromptHookCommand()], {
     name: 'xterm-256color',
     cols, rows,
     cwd,
@@ -2721,9 +2763,16 @@ function createTerminal(termId, cols = 120, rows = 30, cwd = repoRoot) {
     },
   });
 
-  terminals.set(termId, { pty: ptyProcess, cols, rows });
+  terminals.set(termId, { pty: ptyProcess, cols, rows, cwd });
 
-  ptyProcess.onData(data => broadcast({ type: 'output', termId, data }));
+  ptyProcess.onData(data => {
+    try {
+      const re = /\x1b\]777;cwd=([^\x07]*)\x07/g;
+      let m;
+      while ((m = re.exec(data)) !== null) _handleTerminalCwd(termId, m[1]);
+    } catch (_) {}
+    broadcast({ type: 'output', termId, data });
+  });
   ptyProcess.onExit(() => {
     terminals.delete(termId);
     termAiMeta.delete(termId);
@@ -2841,7 +2890,14 @@ addRoute('POST', '/api/term/detect-ai', async (req, res) => {
     for (const id of termIds) {
       const t = terminals.get(id);
       if (!t || !t.pty || !t.pty.pid) continue;
-      byTerm[id] = _detectAiUnder(tree, t.pty.pid) || null;
+      const detected = _detectAiUnder(tree, t.pty.pid) || null;
+      byTerm[id] = detected;
+      if (detected) {
+        termAiMeta.set(id, { cli: detected, launched: true, updatedAt: Date.now(), source: 'process-detect' });
+      } else {
+        const existing = termAiMeta.get(id);
+        if (existing && existing.source === 'process-detect') termAiMeta.delete(id);
+      }
     }
     return json(res, { ok: true, byTerm });
   } catch (e) {
