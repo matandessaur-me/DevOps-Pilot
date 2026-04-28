@@ -119,7 +119,7 @@ async function runBuild({ repoRoot, space, sources = [], incremental = false, ct
   }
 
   if (sources.includes('cli-drawers')) {
-    onProgress('Extracting verbatim CLI message drawers (claude / codex / qwen / grok)...');
+    onProgress('Extracting verbatim CLI message drawers (claude / codex / qwen / grok / copilot)...');
     const f = extractCliDrawers({ activeRepoPath, allRepos: !!ctx.cliHistoryAllRepos, manifest, incremental });
     fragments.push(f);
     summary.cliDrawers = { scanned: f.scanned, skippedUnchanged: f.skippedUnchanged, skippedOtherRepo: f.skippedOtherRepo, drawers: f.drawersEmitted, nodes: f.nodes.length, edges: f.edges.length };

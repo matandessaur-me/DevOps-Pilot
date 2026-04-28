@@ -218,7 +218,7 @@ Every prompt the orchestrator dispatches to a worker is automatically prefixed w
 
 `note`, `code`, `doc`, `paper`, `image`, `workitem`, `recipe`, `conversation` (what a CLI saved back via `/api/mind/save-result`), `plugin`, `concept`, `tag`, `drawer` (verbatim user/assistant turn — never paraphrase, the node text IS the source of truth).
 
-The `cli-drawers` build source produces drawer nodes from any supported CLI's session jsonl (Claude Code, Codex, Qwen, Grok). Each drawer is one user or assistant turn with deterministic ID `drawer_<cli>_<sessionId>_<msgIdx>` and a `derived_from` edge back to its parent session node. Sweeper-pattern: idempotent on its own writes, resume-safe on crash, mtime-gated on incremental builds.
+The `cli-drawers` build source produces drawer nodes from supported CLI session logs (Claude Code, Codex, Qwen, Grok, Copilot). Each drawer is one user or assistant turn with deterministic ID `drawer_<cli>_<sessionId>_<msgIdx>` and a `derived_from` edge back to its parent session node. Sweeper-pattern: idempotent on its own writes, resume-safe on crash, mtime-gated on incremental builds.
 
 ### Save-back grounding
 

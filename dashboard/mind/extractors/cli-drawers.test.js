@@ -105,3 +105,33 @@ test('drawer cap: messages beyond maxMsgsPerSession are dropped (newest kept)', 
     fs.rmSync(tmpHome, { recursive: true, force: true });
   }
 });
+
+test('drawer extraction includes Copilot session-state events', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mind-drawers-copilot-'));
+  const sessionDir = path.join(tmpHome, '.copilot', 'session-state', 'copilot-session-1');
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const sessionFile = path.join(sessionDir, 'events.jsonl');
+  const lines = [
+    { data: { context: { cwd: tmpHome }, prompt: 'copilot user prompt' }, timestamp: '2026-04-01T00:00:00Z' },
+    { data: { message: { role: 'assistant', content: 'copilot assistant reply' } }, timestamp: '2026-04-01T00:00:01Z' },
+  ];
+  fs.writeFileSync(sessionFile, lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+
+  const realHomedir = os.homedir;
+  os.homedir = () => tmpHome;
+  try {
+    const r = extractCliDrawers({ activeRepoPath: tmpHome });
+    assert.equal(r.scanned, 1);
+    assert.equal(r.drawersEmitted, 2);
+    assert.ok(r.nodes.some(n => n.id === 'drawer_copilot_copilot_session_1_0'));
+    assert.ok(r.nodes.some(n => n.id === 'drawer_copilot_copilot_session_1_1'));
+    assert.ok(r.nodes.some(n => n.content === 'copilot user prompt' && n.role === 'user'));
+    assert.ok(r.nodes.some(n => n.content === 'copilot assistant reply' && n.role === 'assistant'));
+    for (const e of r.edges) {
+      assert.equal(e.target, 'clisess_copilot_copilot_session_1');
+    }
+  } finally {
+    os.homedir = realHomedir;
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+});

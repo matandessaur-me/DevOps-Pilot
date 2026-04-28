@@ -25,6 +25,7 @@ const { MindWatcher } = require('./watch');
 // In-memory job table for build/update progress. Jobs are ephemeral; the
 // canonical graph on disk is the system of record.
 const jobs = new Map();
+const DEFAULT_BUILD_SOURCES = ['notes', 'learnings', 'cli-memory', 'cli-skills', 'recipes', 'plugins', 'instructions', 'repo-code', 'cli-history', 'cli-drawers'];
 function makeJobId() { return 'mj_' + Math.random().toString(36).slice(2, 10); }
 
 function readBody(req) {
@@ -207,7 +208,7 @@ function mountMind(addRoute, json, ctx) {
   addRoute('POST', '/api/mind/build', async (req, res) => {
     const body = await readBody(req).catch(() => ({}));
     const space = getSpace();
-    const sources = body.sources || ['notes', 'learnings', 'cli-memory', 'cli-skills', 'recipes', 'plugins', 'instructions', 'repo-code', 'cli-history'];
+    const sources = body.sources || DEFAULT_BUILD_SOURCES;
     const jobId = makeJobId();
     const job = { id: jobId, kind: 'build', space, sources, status: 'running', startedAt: Date.now(), progress: [] };
     jobs.set(jobId, job);
@@ -237,7 +238,7 @@ function mountMind(addRoute, json, ctx) {
     // Incremental: same engine, but engine consults manifest to skip unchanged
     const body = await readBody(req).catch(() => ({}));
     const space = getSpace();
-    const sources = body.sources || ['notes', 'learnings', 'cli-memory', 'cli-skills', 'recipes', 'plugins', 'instructions', 'repo-code', 'cli-history'];
+    const sources = body.sources || DEFAULT_BUILD_SOURCES;
     const jobId = makeJobId();
     const job = { id: jobId, kind: 'update', space, sources, status: 'running', startedAt: Date.now(), progress: [] };
     jobs.set(jobId, job);
@@ -367,7 +368,7 @@ function mountMind(addRoute, json, ctx) {
     try {
       const result = await engine.runBuild({
         repoRoot, space,
-        sources: ['notes', 'learnings', 'cli-memory', 'cli-skills', 'recipes', 'plugins', 'instructions', 'repo-code', 'cli-history'],
+        sources: DEFAULT_BUILD_SOURCES,
         incremental: true, ctx,
         onProgress: (msg) => job.progress.push({ ts: Date.now(), msg }),
       });

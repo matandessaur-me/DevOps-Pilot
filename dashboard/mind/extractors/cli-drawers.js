@@ -151,6 +151,13 @@ function collectAll() {
       if (f.endsWith('.jsonl')) sessions.push({ cli: 'grok', file: path.join(grokRoot, f) });
     }
   }
+  const copilotRoot = path.join(home, '.copilot', 'session-state');
+  if (fs.existsSync(copilotRoot)) {
+    for (const sid of safeReaddir(copilotRoot)) {
+      const events = path.join(copilotRoot, sid, 'events.jsonl');
+      if (fs.existsSync(events)) sessions.push({ cli: 'copilot', file: events, sessionId: sid });
+    }
+  }
   return sessions;
 }
 
@@ -196,7 +203,7 @@ function extractCliDrawers({
       continue;
     }
 
-    const sessionId = path.basename(s.file).replace(/\.jsonl$/i, '').slice(0, 80);
+    const sessionId = (s.sessionId || path.basename(s.file).replace(/\.jsonl$/i, '')).slice(0, 80);
     const sessionNodeId = `clisess_${s.cli}_${normalizeId(sessionId)}`.slice(0, 120);
     const sessionMtimeIso = new Date(s.mtime || Date.now()).toISOString();
 

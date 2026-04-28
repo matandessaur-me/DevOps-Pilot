@@ -131,8 +131,8 @@ endpoint serves L2/L3 — go there for specific questions.
 `conversation` (saved-back AI answers), `plugin`, `concept`, `tag`,
 `drawer` (verbatim user/assistant turn — never paraphrase a drawer).
 
-The `cli-drawers` build source produces drawers from any supported CLI's
-session jsonl — Claude Code, Codex, Qwen, Grok all use the same path.
+The `cli-drawers` build source produces drawers from supported CLI session
+logs: Claude Code, Codex, Qwen, Grok, Copilot.
 Each drawer has deterministic ID `drawer_<cli>_<sessionId>_<msgIdx>` and
 a `derived_from` edge to its parent session node.
 
