@@ -7644,8 +7644,9 @@ let filesMode = 'view'; // view, diff, edit
 function populateFilesRepoSelect() {
   const select = document.getElementById('filesRepoSelect');
   const repos = configData.Repos || {};
+  const repoNames = _repoNamesForSpace(repos, window._spacesCache || {}, activeSpace);
   select.innerHTML = '<option value="">Select repo...</option>';
-  for (const name of Object.keys(repos)) {
+  for (const name of repoNames) {
     const opt = document.createElement('option');
     opt.value = name;
     opt.textContent = name;
@@ -12780,10 +12781,10 @@ async function viewWorkItem(id) {
         </div>
       </div>
       <div style="margin-top:20px;padding:14px;background:var(--surface0);border-radius:var(--radius-lg);border:1px solid var(--surface1);">
-        ${configData.Repos && Object.keys(configData.Repos).length > 0 ? `
+        ${configData.Repos && _repoNamesForSpace(configData.Repos, window._spacesCache || {}, activeSpace).length > 0 ? `
           <div style="display:flex;align-items:center;gap:10px;">
             <select id="startWorkRepo" onchange="selectRepo(this.value)" style="padding:7px 10px;background:var(--base);border:1px solid var(--surface1);border-radius:var(--radius);color:var(--text);font:12px var(--font-ui);outline:none;flex:1;">
-              ${Object.keys(configData.Repos).map(r => `<option value="${esc(r)}"${r === activeRepo ? ' selected' : ''}>${esc(r)}</option>`).join('')}
+              ${_repoNamesForSpace(configData.Repos, window._spacesCache || {}, activeSpace).map(r => `<option value="${esc(r)}"${r === activeRepo ? ' selected' : ''}>${esc(r)}</option>`).join('')}
             </select>
             <button class="btn btn-primary" onclick="startWorking(${wi.id})" style="flex-shrink:0;width:auto;padding:7px 16px;"><i data-lucide="play"></i> Start Working</button>
           </div>
@@ -13573,7 +13574,7 @@ function _mentionItems(query, repos) {
       out.push({ type: 'skill', slug: s.slug, label: s.slug, desc: 'SKILL', hint: s.description || '' });
     }
   });
-  Object.keys(repos || {}).forEach(name => {
+  _repoNamesForSpace(repos || {}, window._spacesCache || {}, activeSpace).forEach(name => {
     if (!q || name.toLowerCase().includes(q)) {
       out.push({ type: 'repo', slug: name, label: name, desc: 'REPO' });
     }
@@ -20354,12 +20355,26 @@ document.addEventListener('DOMContentLoaded', () => { setTimeout(_refreshSpaceSw
 let activeSpace = localStorage.getItem('symphonee-space') || '';
 let activeRepo  = localStorage.getItem('symphonee-repo')  || '';
 
+function _repoNamesForSpace(repos, spaces, spaceName) {
+  const repoNames = Object.keys(repos || {});
+  if (!spaceName) return repoNames;
+  const members = spaces && spaces[spaceName] && Array.isArray(spaces[spaceName].repos)
+    ? spaces[spaceName].repos
+    : [];
+  return members.filter(r => Object.prototype.hasOwnProperty.call(repos || {}, r));
+}
+
 async function loadRepoList() {
   try {
     const [repos, spaces] = await Promise.all([
       fetch('/api/repos').then(r => r.json()).catch(() => ({})),
       fetch('/api/spaces').then(r => r.json()).catch(() => ({})),
     ]);
+    window._spacesCache = spaces || {};
+    if (configData) {
+      configData.Repos = repos || {};
+      configData.Spaces = spaces || {};
+    }
     const repoNames = Object.keys(repos);
     const spaceNames = Object.keys(spaces);
 
@@ -20379,6 +20394,18 @@ async function loadRepoList() {
     if (activeSpace && !spaces[activeSpace]) { activeSpace = ''; localStorage.removeItem('symphonee-space'); }
     if (activeRepo && !repoNames.includes(activeRepo)) { activeRepo = ''; localStorage.removeItem('symphonee-repo'); }
 
+    const activeSpaceRepos = _repoNamesForSpace(repos, spaces, activeSpace);
+    if (activeSpace && activeRepo && !activeSpaceRepos.includes(activeRepo)) {
+      activeRepo = '';
+      filesCurrentRepo = '';
+      localStorage.removeItem('symphonee-repo');
+    }
+    if (activeSpace && !activeRepo && activeSpaceRepos.length === 1) {
+      activeRepo = activeSpaceRepos[0];
+      filesCurrentRepo = activeRepo;
+      localStorage.setItem('symphonee-repo', activeRepo);
+    }
+
     // If an activeRepo is set and belongs to a space, snap to that space on
     // very first boot only (i.e. when the user has no stored space preference
     // at all). After that, spaces and repos are fully independent - an
@@ -20393,6 +20420,9 @@ async function loadRepoList() {
     loadRepoList._snappedOwnerOnce = true;
 
     if (activeRepo) filesCurrentRepo = activeRepo;
+    if (!activeRepo && filesCurrentRepo) filesCurrentRepo = '';
+
+    try { populateFilesRepoSelect(); } catch (_) {}
 
     // Keep the header chip in sync.
     try { _refreshSpaceSwitcher(); } catch (_) {}
@@ -23088,7 +23118,7 @@ let _cmdSelectedIdx = 0;
 let _cmdFiltered = [];
 
 function getCmdActions() {
-  const repos = configData.Repos ? Object.keys(configData.Repos) : [];
+  const repos = configData.Repos ? _repoNamesForSpace(configData.Repos, window._spacesCache || {}, activeSpace) : [];
   const isIncognito = configData.IncognitoMode === true;
   // Palette feature flags derive from provider contributions, not plugin ids,
   // so a Jira or GitLab plugin unlocks the same surfaces without core edits.
@@ -23781,9 +23811,10 @@ async function openRepoMapModal() {
   document.body.appendChild(overlay);
   try {
     const repos = await fetch('/api/repos').then(r => r.json());
+    const spaces = window._spacesCache || await fetch('/api/spaces').then(r => r.json()).catch(() => ({}));
     const ctx = await fetch('/api/ui/context').then(r => r.json());
     const sel = document.getElementById('repoMapRepo');
-    sel.innerHTML = Object.keys(repos || {}).map(n => `<option value="${escapeHtml(n)}" ${n===ctx.activeRepo?'selected':''}>${escapeHtml(n)}${n===ctx.activeRepo?' (active)':''}</option>`).join('');
+    sel.innerHTML = _repoNamesForSpace(repos || {}, spaces || {}, activeSpace).map(n => `<option value="${escapeHtml(n)}" ${n===ctx.activeRepo?'selected':''}>${escapeHtml(n)}${n===ctx.activeRepo?' (active)':''}</option>`).join('');
   } catch (_) {}
   if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
   // Mount Monaco
