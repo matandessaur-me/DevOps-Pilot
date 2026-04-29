@@ -2727,20 +2727,6 @@ function _handleTerminalCwd(termId, cwd) {
   broadcast({ type: 'term-cwd', termId, cwd, repo: _repoForPath(cwd) });
 }
 
-function _cwdPromptHookCommand() {
-  return [
-    "try {",
-    "  if (-not $global:__SymphoneeCwdPromptInstalled) {",
-    "    $global:__SymphoneeCwdPromptInstalled = $true",
-    "    function global:prompt {",
-    "      try { [Console]::Write(\"$([char]27)]777;cwd=$((Get-Location).ProviderPath)$([char]7)\") } catch {}",
-    "      \"PS $((Get-Location).Path)> \"",
-    "    }",
-    "  }",
-    "} catch {}",
-  ].join(' ');
-}
-
 function createTerminal(termId, cols = 120, rows = 30, cwd = repoRoot) {
   // Kill existing if same ID
   if (terminals.has(termId)) {
@@ -2749,7 +2735,7 @@ function createTerminal(termId, cols = 120, rows = 30, cwd = repoRoot) {
   }
   termAiMeta.delete(termId);
 
-  const ptyProcess = pty.spawn(shellPath, ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-NoLogo', '-NoExit', '-Command', _cwdPromptHookCommand()], {
+  const ptyProcess = pty.spawn(shellPath, ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-NoLogo', '-NoExit'], {
     name: 'xterm-256color',
     cols, rows,
     cwd,
@@ -2766,11 +2752,6 @@ function createTerminal(termId, cols = 120, rows = 30, cwd = repoRoot) {
   terminals.set(termId, { pty: ptyProcess, cols, rows, cwd });
 
   ptyProcess.onData(data => {
-    try {
-      const re = /\x1b\]777;cwd=([^\x07]*)\x07/g;
-      let m;
-      while ((m = re.exec(data)) !== null) _handleTerminalCwd(termId, m[1]);
-    } catch (_) {}
     broadcast({ type: 'output', termId, data });
   });
   ptyProcess.onExit(() => {
@@ -2780,6 +2761,7 @@ function createTerminal(termId, cols = 120, rows = 30, cwd = repoRoot) {
   });
 
   broadcast({ type: 'term-started', termId, cwd, isNew: true });
+  _handleTerminalCwd(termId, cwd);
   return ptyProcess;
 }
 
