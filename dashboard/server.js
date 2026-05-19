@@ -16,6 +16,7 @@ const { gitAsync, gitSync } = require('./utils/git-async');
 const { SWRCache } = require('./utils/swr-cache');
 const { atomicWriteSync } = require('./utils/atomic-write');
 const { BusyGuard } = require('./utils/busy-guard');
+const instructionAudit = require('./instruction-audit');
 
 // Core-owned SWR caches. ADO/GitHub caches moved into their plugins in v0.4.0;
 // core keeps git-branch cache + a general-purpose plugin cache.
@@ -690,10 +691,18 @@ const server = http.createServer(async (req, res) => {
           const mindInstr = fs.readFileSync(path.join(__dirname, 'mind', 'instructions.md'), 'utf8');
           instructions = instructions + '\n\n---\n\n' + mindInstr;
         } catch (_) {}
+        // Instruction-coherence audit. Every CLI sees this on bootstrap so
+        // it can warn the user if the instruction system has degraded.
+        // Cached from the last writePluginHints / boot run; cheap on miss.
+        let auditField = instructionAudit.getCached();
+        if (!auditField) {
+          try { auditField = instructionAudit.run({ repoRoot }); } catch (_) { auditField = null; }
+        }
         // Compose payload
         const payload = {
           context, instructions, plugins, learnings, permissions: permissionsData,
           mind: mindField,
+          instructionsAudit: auditField,
           loadedAt: new Date().toISOString(),
           features: {
             orchestrateMode: true,
@@ -708,6 +717,7 @@ const server = http.createServer(async (req, res) => {
           pluginCount: plugins.length, learningCount: learnings.length,
           features: payload.features, instructionsLen: instructions.length,
           mindNodes: mindField?.graphStats?.nodes || 0,
+          auditOk: auditField ? auditField.ok : null,
         });
         const crypto = require('crypto');
         payload.checksum = 'b' + crypto.createHash('sha256').update(stable).digest('hex').slice(0, 10);
@@ -3124,6 +3134,18 @@ function writePluginHints() {
       atomicWriteSync(out, content);
     } catch (err) { console.error(`  [writePluginHints] failed to generate ${filename}:`, err.message); }
   }
+  // After (re)generating instruction files, re-run the instruction-coherence
+  // audit so /api/bootstrap reflects the latest state. Broadcast on failure
+  // so the dashboard can show a toast.
+  try {
+    const audit = instructionAudit.run({ repoRoot });
+    if (!audit.ok) {
+      console.warn(`  [audit] FAILED: ${audit.failedChecks.join(', ')}`);
+      try { broadcast({ type: 'instructions-audit', audit }); } catch (_) {}
+    } else {
+      console.log(`  [audit] PASS - ${audit.checks.length} checks, ${audit.ranAt}`);
+    }
+  } catch (e) { console.warn('  [audit] error running audit:', e.message); }
 }
 
 // ── Pre-trust folder for a CLI (called from the frontend before launching) ─
@@ -3398,6 +3420,21 @@ writePluginHints();
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: e.message }));
     }
+  });
+  // Coherence audit. GET returns the cached result; POST forces a refresh.
+  // Every /api/bootstrap response also embeds the cached audit so every CLI
+  // sees the audit state at session start. This is the self-healing chain.
+  addRoute('GET', '/api/instructions/audit', (req, res) => {
+    let result = instructionAudit.getCached();
+    if (!result) { try { result = instructionAudit.run({ repoRoot }); } catch (e) { return json(res, { error: e.message }, 500); } }
+    return json(res, result);
+  });
+  addRoute('POST', '/api/instructions/audit', async (req, res) => {
+    try {
+      const result = instructionAudit.run({ repoRoot });
+      try { broadcast({ type: 'instructions-audit', audit: result }); } catch (_) {}
+      return json(res, result);
+    } catch (e) { return json(res, { error: e.message }, 500); }
   });
   // Individual: /api/instructions/{name} serves a single file
   addRoute('__PREFIX__', '/api/instructions', (req, res, url, subpath) => {

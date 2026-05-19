@@ -20,7 +20,7 @@ From **PowerShell PTY** (NEVER use `curl -s` -- that's an alias for `Invoke-WebR
 Invoke-RestMethod http://127.0.0.1:3800/api/bootstrap
 ```
 
-Returns `{ context, instructions, plugins, learnings, permissions, mind, checksum, loadedAt }` in a single response. The `mind` field tells you whether the shared knowledge graph (see "Mind" section below) is populated for this space - check it before answering questions.
+Returns `{ context, instructions, plugins, learnings, permissions, mind, instructionsAudit, checksum, loadedAt }` in a single response. The `mind` field tells you whether the shared knowledge graph (see "Mind" section below) is populated for this space - check it before answering questions. The `instructionsAudit` field reports the live coherence state of the instruction system - see Phase 6.6.
 
 Legacy fallback (only if `/api/bootstrap` is unreachable): five parallel requests (bash syntax shown; swap to `Invoke-RestMethod` in PowerShell).
 ```bash
@@ -51,6 +51,32 @@ Know `permissions.settings.mode` (`review`, `edit`, `trusted`, or `bypass`). Bef
 
 `learnings` is the accumulated list of mistakes past sessions made. Do NOT repeat any of them. If you are about to do something similar, check the list first.
 
+### Phase 6.6 - Verify instruction coherence
+
+Read `bootstrap.instructionsAudit`. Shape:
+
+```
+{
+  ok: true|false,
+  ranAt: "<ISO timestamp>",
+  checks: [
+    { name: "hallucinated-urls",        ok, summary, details },
+    { name: "required-inline-phrases",  ok, summary, details },
+    { name: "baseline-atoms",           ok, summary, details },
+    { name: "generated-file-sizes",     ok, summary, details }
+  ],
+  failedChecks: ["..."],   // names of failing checks, empty when ok
+  failedAtoms: ["..."],    // baseline atoms now missing from the corpus
+  missingPhrases: ["..."], // recognition-time triggers missing from the template
+  hallucinatedUrls: ["..."],
+  oversizedFiles: [{ file, size }]
+}
+```
+
+**If `instructionsAudit.ok === false`, tell the user in your first reply.** The instruction system has degraded; downstream behaviour cannot be trusted. Surface `failedChecks` and the specific missing items so the user can fix or regenerate the baseline. Re-run on demand via `POST /api/instructions/audit`.
+
+Self-healing chain: when content is edited and an atom drops out of the corpus, the audit fails with the exact identification. Recovery: restore the atom, OR run `pwsh ./scripts/Audit-Instructions.ps1 -UpdateBaseline` to regenerate the baseline if the removal is intentional.
+
 ### Phase 6.5 - Consult Mind (shared knowledge graph + memory)
 
 If `bootstrap.mind.enabled` is true, the brain is populated. Three different consultation modes — pick by the SHAPE of the user's question:
@@ -77,6 +103,7 @@ Only now answer the user. Prefer scripts (`./scripts/*.ps1` and `./scripts/*.js`
 - [ ] I checked the plugin keywords against the active repo and the user's task.
 - [ ] I scanned the learnings for anything relevant to the task.
 - [ ] I checked `bootstrap.mind.enabled` and consulted the brain by the right surface: `query` for code structure, `recall` for prior work / past decisions, `teach` when the user is teaching me something durable.
+- [ ] I checked `bootstrap.instructionsAudit.ok`. If false, I surfaced the failing checks to the user before proceeding.
 
 If any box is unchecked: stop and finish Phases 1-6.5 before replying.
 
