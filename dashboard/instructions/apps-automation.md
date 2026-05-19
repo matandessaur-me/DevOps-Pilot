@@ -216,3 +216,61 @@ draft my standup doc" actually possible — the COM/stealth call runs at
   `POST /api/jobs` with a schedule string?
 
 If you forgot, reload this section: `GET /api/instructions/apps-automation`.
+
+## All endpoints (catalog)
+
+Single source of truth for every Apps URL. Every endpoint is Windows-specific.
+
+**Read-only discovery (ungated)**
+- `POST /api/apps/windows` — visible top-level windows: `{ windows: [{hwnd, title, processName, rect, isMinimized}] }`.
+- `POST /api/apps/installed` — launchable apps found on disk: `{ apps: [{id, name, path}] }`.
+- `GET  /api/apps/screenshot?hwnd=<n>` — one-off window capture (base64 + mimeType + width + height).
+- `GET  /api/apps/memory?app=<name>` — saved per-app instructions (user notes / DOs / DONTs).
+- `GET  /api/apps/recipes?app=<name>` — saved automations for that app.
+- `GET  /api/apps/recipes/history?app=<name>` — recent run outcomes.
+- `GET  /api/apps/status` — provider list (Anthropic / OpenAI / Gemini) + current session.
+
+**Launch + control**
+- `POST /api/apps/do             { app, goal, provider?, model?, waitMs? }` — default entry point. Resolves installed app → launches → focuses → runs an agent toward the goal. Blocks until done/error/stopped (default 600000 ms; `waitMs:0` to fire-and-forget).
+- `POST /api/apps/launch         { id?, path?, name?, sandbox? }` — low-level launch only, no agent. `sandbox:true` for stealth UI mode.
+- `POST /api/apps/session/start  { goal, hwnd, app, provider?, recipeId?, inputs?, stepThrough? }` — start agent against a window you already have.
+- `POST /api/apps/session/stop   { sessionId }` — halt a running session. Always runs regardless of permission mode.
+- `POST /api/apps/session/answer { sessionId, answer }` — respond to an `ask_user` prompt.
+- `POST /api/apps/session/inject { sessionId, message }` — queue a mid-run user turn (NOT for answering ask_user; use /answer for that). Capped at 4000 chars and 50 injections per session.
+- `POST /api/apps/session/debug  { sessionId, action: 'resume'|'disable-step-through' }` — control step-through pausing.
+- `POST /api/apps/panic` — stop everything, drop topmost pins. Always runs regardless of permission mode.
+
+**Office COM (Word / Excel / PowerPoint / Outlook)**
+- `POST /api/apps/com/word/write`, `POST /api/apps/com/word/read` — Word document I/O.
+- `POST /api/apps/com/excel/write`, `POST /api/apps/com/excel/read` — Excel cell I/O.
+- See "Office (Word / Excel)" section above for full call shapes.
+
+**Sandbox (stealth UI mode)**
+- `POST /api/apps/sandbox/peek    { hwnd }` — show on-screen briefly for user verification.
+- `POST /api/apps/sandbox/unpeek  { hwnd }` — send back off-screen.
+- `POST /api/apps/sandbox/release { hwnd, restore? }` — stop tracking.
+- `GET  /api/apps/sandbox/list` — what's currently sandboxed.
+
+**Recipes (saved automations)**
+- `POST /api/apps/recipes              { app, recipe: { name, description?, variables?, inputs?, verify?, steps[] } }` — create or update. Steps each: `{verb, target?, text?, notes?}`.
+- `DELETE /api/apps/recipes?app=<name>&id=<id>` — remove.
+- `POST /api/apps/recipes/generate     { description, app?, screenshotBase64?, mimeType? }` — natural-language to DSL via Anthropic (+ web_search). Returns `{draft: {name, description, steps[]}}`.
+- `POST /api/apps/recipes/import       { app, payload }` — import an export JSON blob.
+- `GET  /api/apps/recipes/export?app=<name>&ids=<csv>?` — export selected or all recipes.
+- `POST /api/apps/recipes/from-session { sessionId, name, description? }` — convert the action log of a running session into a replayable recipe.
+
+Recipe DSL verbs: `CLICK TYPE PRESS WAIT WAIT_UNTIL FIND VERIFY SCROLL DRAG IF ELSE ENDIF REPEAT ENDREPEAT`. Stored per-app as JSON under `dashboard/app-recipes/<app>.json`.
+
+**Tests (regression harness, REST only)**
+- `GET  /api/apps/tests?app=<name>` — list tests.
+- `POST /api/apps/tests            { app, test: { name, macro (recipeId), inputs?, expected? } }` — save. `expected` supports `outcome`, `elementsPresent[]`, `elementsAbsent[]`.
+- `DELETE /api/apps/tests?app=<name>&id=<id>` — remove.
+- `POST /api/apps/tests/run        { app, testId, hwnd }` — run. Emits `test_pass` / `test_fail` on the WebSocket. Requires ANTHROPIC_API_KEY for the vision locator.
+
+**Scheduling**
+- `POST /api/jobs` — wrap any of the above in a cron-scheduled job (see "Scheduling" section above).
+
+**Reference**
+- `GET  /api/instructions/apps-automation` — this document.
+
+**Permissions:** most mutating endpoints go through permGate (ask in edit/review, auto-approve in trusted/bypass). `session/stop` and `panic` always run. `recipes/generate`, `tests/run`, `session/start`, and `session/inject` are blocked in Incognito. Read endpoints are ungated.

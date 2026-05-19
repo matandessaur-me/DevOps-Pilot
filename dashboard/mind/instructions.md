@@ -234,3 +234,63 @@ relative paths or tsconfig aliases) plus a sample of unresolved specs. Low
 quality means tsconfig paths are missing or extraExtensions need configuring.
 
 You and every other CLI in this system share this brain. Treat it that way.
+
+## All endpoints (catalog)
+
+Single source of truth for every Mind URL. Refer here when an inline section above describes a behaviour without naming the route.
+
+**Query + memory**
+- `POST /api/mind/query        { question, budget?, asOf?, hybrid? }` — BFS sub-graph for a question.
+- `POST /api/mind/recall       { question, since?, until?, repo?, kinds?, limit? }` — time-ranged memory + conversation retrieval.
+- `POST /api/mind/teach        { title, body, kindOfMemory, tags, scope?, createdBy }` — write a memory card directly.
+- `POST /api/mind/save-result  { question, answer, citedNodeIds, createdBy, strict? }` — save the answer back; auto-extracts memory cards from teaching language.
+- `POST /api/mind/suggest-cli  { question }` — advisory CLI ranking based on prior successful work.
+
+**Code understanding**
+- `POST /api/mind/impact       { target, depth=3 }` — blast radius (what files break if I change X).
+- `POST /api/mind/flow         { entrypoint, depth=5 }` — forward call tree from an entrypoint.
+- `POST /api/mind/symbol       { name, file? }` — 360-degree view (callers + callees).
+- `POST /api/mind/symbols      { file?, query?, limit? }` — list / search symbols.
+- `POST /api/mind/entrypoints  {}` — auto-detected entrypoints.
+- `POST /api/mind/circular     {}` — circular file dependencies (Tarjan SCC).
+
+**Semantic search + embeddings**
+- `POST /api/mind/search-semantic { q, k=10 }` — dense-only ranked nodes via cosine similarity.
+- `POST /api/mind/embed        { provider? }` — embed the whole graph (async; broadcasts embed-progress / -complete / -failed events).
+- `GET  /api/mind/health` — embeddings + vectors store status.
+
+**Context artifacts**
+- `POST /api/mind/artifacts/list   {}` — declared artefacts + indexed status.
+- `POST /api/mind/artifacts/search { q, name? }` — hybrid search restricted to artefact nodes.
+
+**Build + watch + ingest**
+- `POST /api/mind/build        {}` — full rebuild (notes, learnings, cli-memory, cli-skills, recipes, plugins, instructions, repo-code, cli-history, cli-drawers).
+- `POST /api/mind/update       {}` — incremental update (skips files whose SHA256 hasn't changed).
+- `POST /api/mind/watch        { enabled: true|false }` — chokidar on every connected repo + notes + recipes + instructions, 3s debounce, auto-incremental rebuild.
+- `GET  /api/mind/watch` — current watch state.
+- `POST /api/mind/add          { url|path, label, kind, createdBy }` — add one artefact. URLs go through SSRF guards.
+- `DELETE /api/mind/node       { id }` — purge a hallucinated node.
+
+**Graph inspection**
+- `GET  /api/mind/graph` — full graph (every node + edge).
+- `GET  /api/mind/stats` — counts.
+- `GET  /api/mind/node?id=` — one node + its neighbours.
+- `GET  /api/mind/community?id=` — one community.
+- `GET  /api/mind/gods` — central god nodes.
+- `GET  /api/mind/surprises` — surprising edges.
+- `GET  /api/mind/jobs?id=` — job status.
+- `GET  /api/mind/wakeup?budget=600&question=...` — layered L0+L1 wake-up text. With `question`, L1 is the BFS sub-graph for that task. Without, L1 leads with the user's memory cards for the active repo, then god nodes, then recent conversations.
+
+**Visualisation**
+- `POST /api/mind/visualize    { mode: "mermaid" | "interactive", focus?, layout? }` — mermaid returns text; interactive writes a Cytoscape HTML viewer to OS temp dir and returns the path.
+
+**Lock + quality**
+- `GET  /api/mind/lock` — current lock state per space (build / update / watch / embed).
+- `POST /api/mind/lock/clear` — force-clear a stuck lock (terminates orphan PID on Windows / SIGTERM elsewhere).
+- `GET  /api/mind/checkpoint` — last completed phase if a build is in progress.
+- `GET  /api/mind/quality` — `resolvedPct` of import edges + sample of unresolved specs.
+
+**Reference**
+- `GET  /api/mind/instructions` — this document.
+
+`/api/mind/build` and `/api/mind/update` return HTTP 409 with `holderPid` when an operation is already running. Don't retry — wait for the in-flight job's `mind-update` WebSocket completion event.

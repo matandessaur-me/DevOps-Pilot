@@ -110,3 +110,23 @@ Routes to **browser-use** at confidence 0.95 -- sub-second, zero LLM tokens.
   "result": { ... }
 }
 ```
+
+## All endpoints (catalog)
+
+Single source of truth for every Browser URL.
+
+**Router (default entry)**
+- `POST /api/browser/router/run { goal?, action?, params?, url?, mode?, schema?, prefer?, sandboxed? }` — task dispatcher; returns `{ ok, driver, decision, fallbacks, result }`.
+
+**Direct driver routes (when you genuinely need to pin a driver)**
+- `/api/browser/*` and `/api/plugins/browser-use/*` — typed / recipe automation (browser-use driver, deterministic, no LLM tokens).
+- `/api/browser/agent/*` — in-app agent (LLM tool-use loop on the live in-app webview; user watches live).
+- `/api/plugins/stagehand/*` — sandboxed headless Chromium with screencast view.
+
+**Saved accounts**
+- `GET /api/browser/accounts` — list saved login accounts the agent can attach to a session.
+
+**Reference**
+- `GET /api/instructions/browser-router` — this document.
+
+POST endpoints blocked in Incognito.
