@@ -1,0 +1,229 @@
+# Audit baseline - atoms that must remain reachable in the corpus
+# (INSTRUCTIONS.base.md + the three /api/instructions reference docs).
+#
+# Generated from the deletion diff of commit f36ccc3 (the INSTRUCTIONS.base.md
+# trim) plus subsequent restorations. Each line is one atom: a backtick-
+# quoted identifier, schema, env var, file path, or endpoint shape.
+#
+# Audit-Instructions.ps1 verifies every atom below is findable in the corpus
+# (whitespace-insensitive substring match). If you intentionally remove an
+# atom, regenerate this file with:
+#
+#   pwsh ./scripts/Audit-Instructions.ps1 -UpdateBaseline
+#
+# Lines starting with # are comments.
+
+_broadcastTaskUpdate
+"<N> days|weeks|months|years|hours ago"
+"last month"
+"last week"
+"strict": true
+"yesterday"
+["memory", "conversation", "drawer"]
+[mind: <space> nodes=<n> edges=<n> communities=<n> staleness=<m>m] Query before answering: ...
+[validFrom, validTo)
+{ "asOf": "2026-04-01" }
+{ nodes, edges, seedIds, answer: { suggestion, summary, note } }
+{ ok, nodeId, audit: [{id, status: "grounded"|"ungrounded"|"unknown"}], groundedCount }
+{ ok, nodeId, node, edges }
+{app, goal, provider?, model?, waitMs?}
+{app, payload}
+{app, recipe: {name, description?, variables?, inputs?, verify?, steps[]}}
+{app, test: {name, macro (recipeId), inputs?, expected?}}
+{app, testId, hwnd}
+{description, app?, screenshotBase64?, mimeType?}
+{draft: {name, description, steps[]}}
+{goal, hwnd, app, provider?, recipeId?, inputs?, stepThrough?}
+{id?, path?, name?}
+{session_id, stop_hook_active, transcript_path}
+{sessionId, action: 'resume'|'disable-step-through'}
+{sessionId, answer}
+{sessionId, message}
+{sessionId, name, description?}
+{sessionId}
+{url|path, label, kind, createdBy}
+{verb, target?, text?, notes?}
+/api/apps/com/*
+/api/apps/do
+/api/apps/launch
+/api/apps/launch { sandbox: true }
+/api/browser/*
+/api/browser/agent/*
+/api/browser/router/*
+/api/browser/router/run
+/api/instructions/browser-router
+/api/mind/build
+/api/mind/query
+/api/mind/recall
+/api/mind/save-result
+/api/mind/teach
+/api/mind/update
+/api/plugins/browser-use/*
+/api/plugins/stagehand/*
+/installed
+/launch
+/session/start
+/windows
+<repoRoot>/.symphonee/context-artifacts.json
+<repoRoot>/.symphonee/mind/spaces/<space>/graph.json
+~/.codex/hooks.json
+~/.qwen/hooks.json
+AMBIGUOUS
+app
+apps-agent-step
+artifact
+ask_user
+asOf
+body
+cfg.Repos
+citedNodeIds
+claude
+cli-drawers
+CLICK TYPE PRESS WAIT WAIT_UNTIL FIND VERIFY SCROLL DRAG IF ELSE ENDIF REPEAT ENDREPEAT
+code
+codex
+concept
+conversation
+copilot
+curl -s http://127.0.0.1:3800/api/browser/accounts
+cwd_*
+cwd:<repoName>
+dashboard/app-recipes/<app>.json
+dashboard/mind/extractors/base.js
+DELETE /api/apps/recipes?app=<name>&id=<id>
+DELETE /api/apps/tests?app=<name>&id=<id>
+DELETE /api/mind/node {"id":"..."}
+derived_from
+description
+doc
+done
+drawer
+drawer_<cli>_<sessionId>_<msgIdx>
+elementsAbsent[]
+elementsPresent[]
+entity
+entity_dyob
+error
+EXTRACTED
+gemini
+GET  /api/mind/health
+GET /api/apps/memory?app=<name>
+GET /api/apps/recipes?app=<name>
+GET /api/apps/recipes/export?app=<name>&ids=<csv>?
+GET /api/apps/recipes/history?app=<name>
+GET /api/apps/screenshot?hwnd=<n>
+GET /api/apps/status
+GET /api/apps/tests?app=<name>
+GET /api/instructions/apps-automation
+GET /api/mind/checkpoint
+GET /api/mind/community?id=
+GET /api/mind/gods
+GET /api/mind/graph
+GET /api/mind/instructions
+GET /api/mind/jobs?id=
+GET /api/mind/lock
+GET /api/mind/node?id=
+GET /api/mind/quality
+GET /api/mind/stats
+GET /api/mind/surprises
+GET /api/mind/wakeup?budget=600&question=...
+GET /api/mind/watch
+grok
+holderPid
+hooks.Stop
+hybrid:false
+image
+in_repo
+INFERRED
+kind:memory
+kindOfMemory
+kinds
+localhost:11434
+memory
+mentions
+MIND_HOOK_CLI
+MIND_HOOK_INTERVAL
+MIND_HOOK_URL
+MIND_HOOK_VERBOSE=1
+mind-update
+mode: "extract"
+node scripts/build-mind.js
+nomic-embed-text
+note
+orchestratorHint({ minimal: true })
+outcome
+panic
+paper
+plugin
+POST /api/apps/do
+POST /api/apps/installed
+POST /api/apps/launch
+POST /api/apps/panic
+POST /api/apps/recipes
+POST /api/apps/recipes/from-session
+POST /api/apps/recipes/generate
+POST /api/apps/recipes/import
+POST /api/apps/session/answer
+POST /api/apps/session/debug
+POST /api/apps/session/inject
+POST /api/apps/session/start
+POST /api/apps/session/stop
+POST /api/apps/tests
+POST /api/apps/tests/run
+POST /api/apps/windows
+POST /api/jobs
+POST /api/mind/add
+POST /api/mind/artifacts/list   {}
+POST /api/mind/artifacts/search { q, name? }
+POST /api/mind/build
+POST /api/mind/circular {}
+POST /api/mind/embed { provider? }
+POST /api/mind/entrypoints {}
+POST /api/mind/flow     { entrypoint, depth=5 }
+POST /api/mind/impact   { target, depth=3 }
+POST /api/mind/lock/clear
+POST /api/mind/recall
+POST /api/mind/save-result
+POST /api/mind/search-semantic { q, k=10 }
+POST /api/mind/suggest-cli {"question":"..."}
+POST /api/mind/symbol   { name, file? }
+POST /api/mind/symbols  { file?, query?, limit? }
+POST /api/mind/teach
+POST /api/mind/update
+POST /api/mind/visualize { mode: "mermaid" | "interactive", focus?, layout? }
+POST /api/mind/watch {"enabled":true}
+prefer: "stagehand"
+question
+qwen
+recipe
+recipeId
+recipes/generate
+repo
+resolvedPct
+sandboxed: true
+schema
+scope.repo
+session/inject
+session/start
+session/stop
+since
+source.ref
+stagehand
+Stop
+stopped
+SYMPHONEE_EMBED_AUTO=1
+SYMPHONEE_EMBED_PROVIDER=openai|google
+tag
+target
+task_<id>
+test_fail
+test_pass
+tests/run
+title
+ungrounded
+until
+validFrom
+validTo
+waitMs: 0
+will save the conversation as a
+workitem

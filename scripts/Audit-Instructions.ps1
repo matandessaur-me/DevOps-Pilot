@@ -2,35 +2,45 @@
 .SYNOPSIS
     Verify that INSTRUCTIONS.base.md and its API endpoint references are
     coherent: no lost URLs, no hallucinated URLs, recognition triggers
-    still in place, generated files under the 40 KB warning.
+    still in place, every baseline atom reachable, generated files under
+    the 40 KB warning.
 
 .DESCRIPTION
     Run this whenever you edit INSTRUCTIONS.base.md or any of the three
     reference markdown files at dashboard/instructions/*.md or
     dashboard/mind/instructions.md.
 
-    Four checks:
-      1. Hallucinated URLs - URLs mentioned in docs with no addRoute() in
-         dashboard/**/*.js.
-      2. Hidden routes (informational) - addRoute() URLs not mentioned in
-         any AI-reachable doc. Not all routes need to be documented for
-         AIs; informational only.
+    Five checks:
+      1. Hallucinated URLs - URLs mentioned in docs with no '/api/...'
+         string in dashboard/**/*.js.
+      2. Hidden routes (informational) - registered routes not mentioned
+         in any AI-reachable doc. Informational only.
       3. Required inline phrases - recognition-time triggers must live in
          INSTRUCTIONS.base.md (the template), not just the references.
-         An AI that never fetches the references must still recognise
-         "remember:", "from now on", the apps decision tree, etc.
-      4. Generated file sizes - CLAUDE.md and siblings under Claude
+      4. Baseline atoms reachable - every atom in scripts/audit-baseline.txt
+         must be findable in the corpus (whitespace-insensitive). This is
+         the self-healing check: if you trim content and an atom drops
+         out, the audit fails until you restore it OR regenerate the
+         baseline with -UpdateBaseline.
+      5. Generated file sizes - CLAUDE.md and siblings under Claude
          Code's 40 KB warning threshold.
 
     Exits 0 on PASS, 1 on FAIL. Wire into CI if desired.
 
+.PARAMETER UpdateBaseline
+    Regenerate scripts/audit-baseline.txt from the current corpus. Use
+    after intentionally removing content so the audit no longer flags
+    the removal as a loss.
+
 .EXAMPLE
     pwsh ./scripts/Audit-Instructions.ps1
     powershell.exe -ExecutionPolicy Bypass -NoProfile -File ./scripts/Audit-Instructions.ps1
+    pwsh ./scripts/Audit-Instructions.ps1 -UpdateBaseline
 #>
 [CmdletBinding()]
 param(
-    [switch]$VerboseReport
+    [switch]$VerboseReport,
+    [switch]$UpdateBaseline
 )
 
 $ErrorActionPreference = 'Stop'
@@ -142,7 +152,50 @@ foreach ($r in $requiredInline) {
     }
 }
 
-# --- Check 4: generated file sizes -----------------------------------------
+# --- Check 4: baseline atoms reachable (self-healing) ---------------------
+# Baseline = atoms that must always be findable in the corpus. Whitespace-
+# insensitive substring match. If you intentionally remove content,
+# regenerate with -UpdateBaseline.
+$baselinePath = Join-Path $repoRoot 'scripts/audit-baseline.txt'
+$baselineAtoms = @()
+$corpusNorm = ($corpus -replace '\s+', '').ToLower()
+
+if ($UpdateBaseline) {
+    # Regenerate from current corpus + any historical deletion atoms
+    $newAtoms = [regex]::Matches($corpus, '`([^`\n]{2,100})`') |
+        ForEach-Object { $_.Groups[1].Value.Trim() } |
+        Where-Object { $_ -and ($_ -notmatch '^[\s\.,]') } |
+        Sort-Object -Unique
+    $header = @"
+# Audit baseline - atoms that must remain reachable in the corpus
+# (INSTRUCTIONS.base.md + the three /api/instructions reference docs).
+#
+# Regenerated $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss').
+# Audit-Instructions.ps1 verifies every atom below is findable in the corpus
+# (whitespace-insensitive substring match). To regenerate after intentional
+# removals: pwsh ./scripts/Audit-Instructions.ps1 -UpdateBaseline
+#
+# Lines starting with # are comments.
+"@
+    $bodyText = $header + "`n`n" + ($newAtoms -join "`n") + "`n"
+    [System.IO.File]::WriteAllText($baselinePath, $bodyText)
+    Write-Host ('[INFO] Baseline regenerated: {0} atoms written to {1}' -f $newAtoms.Count, $baselinePath) -ForegroundColor Cyan
+}
+
+if (Test-Path $baselinePath) {
+    $baselineAtoms = @(Get-Content $baselinePath | Where-Object { $_ -and ($_ -notmatch '^\s*#') -and ($_.Trim() -ne '') })
+}
+
+$missingAtoms = @()
+foreach ($a in $baselineAtoms) {
+    $aNorm = ($a -replace '\s+', '').ToLower()
+    if (-not $aNorm) { continue }
+    if ($corpusNorm -notmatch [regex]::Escape($aNorm)) {
+        $missingAtoms += $a
+    }
+}
+
+# --- Check 5: generated file sizes -----------------------------------------
 $generated = @(
     'CLAUDE.md','AGENTS.md','GEMINI.md','GROK.md','QWEN.md','.github/copilot-instructions.md'
 )
@@ -196,6 +249,21 @@ if ($missingPhrases.Count -eq 0) {
 Write-Host ''
 
 # Check 4
+if ($baselineAtoms.Count -eq 0) {
+    Write-Host '[WARN] Baseline atoms: scripts/audit-baseline.txt empty or missing. Run with -UpdateBaseline to seed it.' -ForegroundColor Yellow
+} elseif ($missingAtoms.Count -eq 0) {
+    Write-Host ('[PASS] Baseline atoms: all {0} reachable in the corpus (whitespace-insensitive).' -f $baselineAtoms.Count) -ForegroundColor Green
+} else {
+    $fail = $true
+    Write-Host ('[FAIL] Baseline atoms missing from corpus: {0} of {1}' -f $missingAtoms.Count, $baselineAtoms.Count) -ForegroundColor Red
+    Write-Host '        These atoms were in the corpus historically and are now absent.' -ForegroundColor DarkRed
+    Write-Host '        If intentional, regenerate the baseline: pwsh ./scripts/Audit-Instructions.ps1 -UpdateBaseline' -ForegroundColor DarkRed
+    $missingAtoms | Select-Object -First 30 | ForEach-Object { Write-Host "        - $_" -ForegroundColor Red }
+    if ($missingAtoms.Count -gt 30) { Write-Host ('        ... and {0} more' -f ($missingAtoms.Count - 30)) -ForegroundColor Red }
+}
+Write-Host ''
+
+# Check 5
 if ($oversized.Count -eq 0) {
     Write-Host '[PASS] Generated files: all under 40 KB warning.' -ForegroundColor Green
 } else {

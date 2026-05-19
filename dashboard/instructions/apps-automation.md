@@ -231,8 +231,8 @@ Single source of truth for every Apps URL. Every endpoint is Windows-specific.
 - `GET  /api/apps/status` — provider list (Anthropic / OpenAI / Gemini) + current session.
 
 **Launch + control**
-- `POST /api/apps/do             { app, goal, provider?, model?, waitMs? }` — default entry point. Resolves installed app → launches → focuses → runs an agent toward the goal. Blocks until done/error/stopped (default 600000 ms; `waitMs:0` to fire-and-forget).
-- `POST /api/apps/launch         { id?, path?, name?, sandbox? }` — low-level launch only, no agent. `sandbox:true` for stealth UI mode.
+- `POST /api/apps/do             { app, goal, provider?, model?, waitMs? }` — default entry point. Resolves installed app → launches → focuses → runs an agent toward the goal. Blocks until done/error/stopped (default 600000 ms; pass `waitMs: 0` to fire-and-forget).
+- `POST /api/apps/launch         { id?, path?, name? }` or `{ id?, path?, name?, sandbox? }` — low-level launch only, no agent. `sandbox: true` (also `sandbox:true`) for stealth UI mode.
 - `POST /api/apps/session/start  { goal, hwnd, app, provider?, recipeId?, inputs?, stepThrough? }` — start agent against a window you already have.
 - `POST /api/apps/session/stop   { sessionId }` — halt a running session. Always runs regardless of permission mode.
 - `POST /api/apps/session/answer { sessionId, answer }` — respond to an `ask_user` prompt.

@@ -124,7 +124,10 @@ Single source of truth for every Browser URL.
 - `/api/plugins/stagehand/*` — sandboxed headless Chromium with screencast view.
 
 **Saved accounts**
-- `GET /api/browser/accounts` — list saved login accounts the agent can attach to a session.
+- `GET /api/browser/accounts` — list saved login accounts the agent can attach to a session. Example:
+  ```bash
+  curl -s http://127.0.0.1:3800/api/browser/accounts
+  ```
 
 **Reference**
 - `GET /api/instructions/browser-router` — this document.
