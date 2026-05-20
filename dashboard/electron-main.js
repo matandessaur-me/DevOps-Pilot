@@ -1495,9 +1495,18 @@ if (!gotLock) {
           backgroundThrottling: false,
         },
       });
-      win.maximize();
+      // Do NOT call win.maximize() here. maximize() implicitly shows the
+      // window even when it was created with show:false, exposing the
+      // unpainted renderer (white) until the splash actually paints — on
+      // slow renderer startup that's seconds of white, not a flash. Defer
+      // both maximize and show into ready-to-show so the user only sees
+      // the window once Chromium has produced its first frame.
       win.once('ready-to-show', () => {
-        try { win.show(); splashShownAt = Date.now(); } catch (_) {}
+        try {
+          win.maximize();
+          win.show();
+          splashShownAt = Date.now();
+        } catch (_) {}
       });
       win.on('closed', () => { win = null; });
       try { win.loadFile(path.join(__dirname, 'public', 'splash.html')); } catch (_) {}
