@@ -1,7 +1,7 @@
 /**
  * Electron main process — wraps the HTTP+WS server in a desktop window.
  */
-const { app, BrowserWindow, nativeImage, dialog, screen, shell, webContents: webContentsNS, globalShortcut } = require('electron');
+const { app, BrowserWindow, nativeImage, nativeTheme, dialog, screen, shell, webContents: webContentsNS, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -1455,6 +1455,14 @@ if (!gotLock) {
     // Create the main window FIRST and point it at splash.html on disk so
     // the user sees the brand mark immediately. We swap to the dashboard
     // URL once the HTTP server is listening (with a CSS fade in splash.html).
+    //
+    // Force DWM to paint new windows' client area dark BEFORE the renderer's
+    // first frame arrives. Without this, Windows paints the unrendered
+    // BrowserWindow with the system-default light background for 1-2 frames
+    // on slow GPU/driver combos, producing a visible white flash before the
+    // splash (#1a1a1a) takes over. BrowserWindow.backgroundColor only
+    // governs the Chromium compositor, not DWM's pre-paint.
+    try { nativeTheme.themeSource = 'dark'; } catch (_) {}
     {
       const displays = screen.getAllDisplays();
       const pref = loadDisplayPref();
